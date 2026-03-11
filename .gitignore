@@ -1,3 +1,23 @@
+# Build
+build/
+bin/
+
+# Model files (too large)
+*.gguf
+*.bin
+*.safetensors
+*.ckpt
+
+# Test images
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# OS
+.DS_Store
+Thumbs.db
+
 # Prerequisites
 *.d
 
