@@ -1,0 +1,499 @@
+# Claude.md
+
+## 项目概述
+
+本项目是 **stable-diffusion.cpp** 的工具集，基于其静态库开发独立的 C++ 图片处理工具。
+
+**远景**：复刻 ComfyUI 生态理念，但无需麻烦的 Python 依赖。只有**干净的二进制程序**和**命令管道**。
+
+**功能**：
+- AI 超分放大 (ESRGAN 2x/3x/4x + img2img 重绘)
+- 纯 C++ 实现，零外部依赖
+- 每个工具独立，通过 Shell 组合工作流
+
+---
+
+## 资源目录规范
+
+**所有与本项目相关的资源文件都放在 `/opt/image/` 目录**
+
+AI 需要先搜索这个目录来查找：
+- 大模型文件 (`.gguf`, `.bin`, `.safetensors`)
+- 脚本文件 (`.sh`)
+- 图片素材 (`.png`, `.jpg`, `.webp`)
+- 其他资源文件
+
+```bash
+/opt/image/
+├── models/          # 模型文件
+│   ├── sd15/
+│   ├── sdxl/
+│   └── esrgan/
+├── scripts/         # 脚本文件
+├── inputs/          # 输入图片
+└── outputs/         # 输出图片
+```
+
+---
+
+## stable-diffusion.cpp API 详解
+
+### 1. 头文件引入
+
+```cpp
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stable-diffusion.h"
+#include "stb_image.h"
+#include "stb_image_write.h"
+```
+
+### 2. 常用结构体
+
+#### sd_image_t - 图片结构
+```cpp
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t channel;
+    uint8_t* data;
+} sd_image_t;
+```
+
+#### sd_ctx_params_t - 模型加载参数
+```cpp
+typedef struct {
+    const char* model_path;           // 主模型路径 (GGUF)
+    const char* vae_path;             // VAE 模型路径
+    const char* diffusion_model_path; // 扩散模型路径
+    const char* clip_l_path;          // CLIP 模型路径
+    const char* t5xxl_path;           // T5XXL 模型路径
+    const char* llm_path;             // LLM 模型路径
+    int n_threads;                    // CPU 线程数
+    enum sd_type_t wtype;             // 模型量化类型
+    enum rng_type_t rng_type;         // 随机数类型
+    bool flash_attn;                  // Flash Attention
+    bool offload_params_to_cpu;       // 卸载到 CPU
+    bool vae_decode_only;            // 仅 VAE 解码
+} sd_ctx_params_t;
+```
+
+#### sd_img_gen_params_t - 图像生成参数
+```cpp
+typedef struct {
+    const char* prompt;               // 正向提示词
+    const char* negative_prompt;     // 负向提示词
+    sd_image_t init_image;            // 初始化图片 (img2img 用)
+    sd_image_t mask_image;            // 蒙版图片 (inpaint 用)
+    int width;                        // 输出宽度
+    int height;                       // 输出高度
+    float strength;                   // 重绘强度 (0.0-1.0)
+    int64_t seed;                     // 随机种子
+    int sample_steps;                 // 采样步数
+    sd_sample_params_t sample_params; // 采样参数
+    sd_tiling_params_t vae_tiling_params; // VAE tiling
+    sd_lora_t* loras;                 // LoRA 列表
+    uint32_t lora_count;              // LoRA 数量
+} sd_img_gen_params_t;
+```
+
+#### sd_sample_params_t - 采样参数
+```cpp
+typedef struct {
+    enum sample_method_t sample_method; // 采样方法
+    enum scheduler_t scheduler;        // 调度器
+    int sample_steps;                  // 步数
+    float eta;                         // DDIM eta
+    float flow_shift;                  // Flow shift
+} sd_sample_params_t;
+```
+
+#### sd_tiling_params_t - VAE Tiling 参数（防止大图爆显存）
+```cpp
+typedef struct {
+    bool enabled;          // 是否启用
+    int tile_size_x;       // 分块宽度
+    int tile_size_y;      // 分块高度
+    float target_overlap; // 重叠像素
+} sd_tiling_params_t;
+```
+
+### 3. 常用枚举
+
+#### 采样方法 (sample_method_t)
+| 枚举 | 说明 |
+|------|------|
+| `EULER_SAMPLE_METHOD` | Euler |
+| `EULER_A_SAMPLE_METHOD` | Euler a (常用) |
+| `HEUN_SAMPLE_METHOD` | Heun |
+| `DPM2_SAMPLE_METHOD` | DPM2 |
+| `DPMPP2M_SAMPLE_METHOD` | DPM++ 2M |
+| `LCM_SAMPLE_METHOD` | LCM |
+
+#### 调度器 (scheduler_t)
+| 枚举 | 说明 |
+|------|------|
+| `DISCRETE_SCHEDULER` | 默认 |
+| `KARRAS_SCHEDULER` | Karras (推荐，图像更清晰) |
+| `EXPONENTIAL_SCHEDULER` | 指数 |
+| `LCM_SCHEDULER` | LCM 专用 |
+
+#### 模型类型 (sd_type_t) - 量化精度
+| 枚举 | 说明 |
+|------|------|
+| `SD_TYPE_F32` | 全精度 |
+| `SD_TYPE_F16` | 半精度 |
+| `SD_TYPE_Q8_0` | 8位量化 |
+| `SD_TYPE_Q6_K` | 6位量化 |
+| `SD_TYPE_Q4_0` | 4位量化 |
+
+#### 随机数类型 (rng_type_t)
+| 枚举 | 说明 |
+|------|------|
+| `STD_DEFAULT_RNG` | 默认 |
+| `CUDA_RNG` | CUDA GPU |
+| `CPU_RNG` | CPU |
+
+### 4. 核心 API 函数
+
+#### 上下文管理
+```c
+// 初始化上下文参数
+void sd_ctx_params_init(sd_ctx_params_t* params);
+
+// 创建推理上下文
+sd_ctx_t* new_sd_ctx(const sd_ctx_params_t* params);
+
+// 释放上下文
+void free_sd_ctx(sd_ctx_t* ctx);
+```
+
+#### 图像生成
+```c
+// 初始化生成参数
+void sd_img_gen_params_init(sd_img_gen_params_t* params);
+
+// 文生图 / 图生图
+sd_image_t* generate_image(sd_ctx_t* ctx, const sd_img_gen_params_t* params);
+```
+
+#### 采样参数
+```c
+// 初始化采样参数
+void sd_sample_params_init(sd_sample_params_t* params);
+
+// 获取默认采样方法
+enum sample_method_t sd_get_default_sample_method(const sd_ctx_t* ctx);
+
+// 获取默认调度器
+enum scheduler_t sd_get_default_scheduler(sd_ctx_t* ctx, enum sample_method_t method);
+```
+
+#### ESRGAN 超分
+```c
+// 创建超分上下文
+upscaler_ctx_t* new_upscaler_ctx(
+    const char* esrgan_path,    // ESRGAN 模型路径 (.bin)
+    bool offload_params_to_cpu,
+    bool direct,
+    int n_threads,
+    int tile_size
+);
+
+// 释放超分上下文
+void free_upscaler_ctx(upscaler_ctx_t* ctx);
+
+// 执行超分
+sd_image_t upscale(
+    upscaler_ctx_t* ctx,
+    sd_image_t input_image,
+    uint32_t upscale_factor   // 2, 3, 4
+);
+```
+
+#### 图片预处理
+```c
+// Canny 边缘检测
+sd_image_t preprocess_canny(
+    sd_image_t image,
+    float high_threshold,
+    float low_threshold,
+    float weak,
+    float strong,
+    bool inverse
+);
+```
+
+#### 模型转换
+```c
+// 转换模型为 GGUF 格式
+bool convert(
+    const char* input_path,
+    const char* vae_path,
+    const char* output_path,
+    enum sd_type_t output_type,
+    const char* tensor_type_rules,
+    bool convert_name
+);
+```
+
+#### 工具函数
+```c
+// 获取 CPU 核心数
+int32_t sd_get_num_physical_cores();
+
+// 获取系统信息
+const char* sd_get_system_info();
+
+// 版本信息
+const char* sd_version(void);
+const char* sd_commit(void);
+```
+
+### 5. 典型使用模式
+
+#### 模式一：文生图 (txt2img)
+```cpp
+sd_ctx_params_t ctx_params;
+sd_ctx_params_init(&ctx_params);
+ctx_params.model_path = "model.gguf";
+ctx_params.wtype = SD_TYPE_Q8_0;
+ctx_params.n_threads = 4;
+
+sd_ctx_t* sd_ctx = new_sd_ctx(&ctx_params);
+
+sd_img_gen_params_t img_params;
+sd_img_gen_params_init(&img_params);
+img_params.prompt = "a cat";
+img_params.negative_prompt = "blurry";
+img_params.width = 512;
+img_params.height = 512;
+img_params.seed = 42;
+img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+img_params.sample_params.scheduler = KARRAS_SCHEDULER;
+img_params.sample_params.sample_steps = 20;
+
+sd_image_t result = generate_image(sd_ctx, &img_params);
+
+free_sd_ctx(sd_ctx);
+```
+
+#### 模式二：图生图 (img2img)
+```cpp
+// 先加载图片
+int w, h, c;
+uint8_t* data = stbi_load("input.png", &w, &h, &c, 4);
+sd_image_t input_image = { (uint32_t)w, (uint32_t)h, 4, data };
+
+// 设置 img2img 参数
+img_params.init_image = input_image;  // 关键：传入初始图片
+img_params.strength = 0.45;            // 重绘强度
+```
+
+#### 模式三：ESRGAN 超分
+```cpp
+// 创建超分器
+upscaler_ctx_t* upscaler = new_upscaler_ctx(
+    "RealESRGAN_x2plus.bin",
+    false, false, 4, 128
+);
+
+// 执行 2x 超分
+sd_image_t upscaled = upscale(upscaler, input_image, 2);
+
+// 释放
+free_upscaler_ctx(upscaler);
+```
+
+#### 模式四：VAE Tiling（防止大图爆显存）
+```cpp
+img_params.vae_tiling_params.enabled = true;
+img_params.vae_tiling_params.tile_size_x = 512;
+img_params.vae_tiling_params.tile_size_y = 512;
+img_params.vae_tiling_params.target_overlap = 32;
+```
+
+---
+
+## 依赖引入
+
+### CMake 配置
+
+本项目通过 `-DSD_PATH` 指定 stable-diffusion.cpp 路径，自动引入：
+
+```cmake
+cmake_minimum_required(VERSION 3.12)
+project(my-img)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(NOT SD_PATH)
+    message(FATAL_ERROR "SD_PATH not set")
+endif()
+
+# 头文件路径
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${SD_PATH}/thirdparty)
+include_directories(${SD_PATH}/ggml/include)
+include_directories(${SD_PATH}/ggml/src)
+
+# STB 图片库
+add_definitions(-DSTB_IMAGE_IMPLEMENTATION)
+add_definitions(-DSTB_IMAGE_WRITE_IMPLEMENTATION)
+
+# 链接库
+link_directories(${SD_PATH}/build)
+
+# 编译
+file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+foreach(src ${SRC_FILES})
+    get_filename_component(name ${src} NAME_WE)
+    get_filename_component(dir ${src} PATH)
+    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "" dir ${dir})
+    string(REPLACE "/" "-" dir ${dir})
+    set(final_name ${dir})
+    
+    add_executable(${final_name} ${src})
+    target_link_libraries(${final_name}
+        ${SD_PATH}/build/libstable-diffusion.a 
+        ${SD_PATH}/build/ggml/src/libggml-cpu.a
+        ${SD_PATH}/build/ggml/src/libggml-base.a
+        gomp
+        pthread
+        m
+    )
+endforeach()
+```
+
+### 依赖的库
+
+| 库 | 说明 |
+|---|---|
+| `libstable-diffusion.a` | 主库（SD/ESRGAN 推理） |
+| `libggml-cpu.a` | GGML CPU 计算 |
+| `libggml-base.a` | GGML 基础 |
+| `gomp` | OpenMP（多线程） |
+| `pthread` | POSIX 线程 |
+| `m` | 数学库 |
+
+---
+
+## 远景与功能
+
+本项目旨在打造一个轻量级的 AI 图片处理工具生态：
+- 无 Python 环境依赖，开箱即用
+- 每个工具独立二进制，通过命令行管道组合
+- 参考 ComfyUI 的节点式思维，但用 Shell 脚本实现工作流
+
+---
+
+## 代码风格（借鉴 stable-diffusion.cpp）
+
+- 使用 C++17 标准
+- 保持代码简洁，直接调用 API
+- 不添加不必要的注释
+- 使用 `stb_image.h` 处理图片 IO
+
+### 内存管理原则
+
+- 始终配对：`new_sd_ctx` ↔ `free_sd_ctx`
+- 始终配对：`new_upscaler_ctx` ↔ `free_upscaler_ctx`
+- 图片使用 `stbi_image_free()` 释放
+- 始终检查返回值是否为 NULL
+
+---
+
+## 目录结构
+
+```
+my-img/
+├── CMakeLists.txt          # 通用编译模板
+├── README.md               # 项目说明
+├── claude.md               # 本文件（AI 操作指南）
+├── bin/                    # 编译后的二进制程序
+├── src/                    # 源代码（每个工具一个目录）
+│   └── sd-hires/
+│       └── hires_upscaler.cpp
+└── include/                # API 头文件
+    └── stable-diffusion.h
+```
+
+---
+
+## 新建工具项目
+
+本项目的 CMakeLists.txt 是**通用模板**，会自动扫描 `src/` 下所有子目录，生成对应的二进制。
+
+### 原理
+
+```cmake
+file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+
+foreach(src ${SRC_FILES})
+    get_filename_component(dir ${src} PATH)
+    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "" dir ${dir})
+    # 目录名即二进制名
+    add_executable(${dir} ${src})
+endforeach()
+```
+
+### 步骤
+
+1. **创建目录和源文件**
+```bash
+mkdir -p src/sd-newtool
+touch src/sd-newtool/main.cpp
+```
+
+2. **编写代码** - 参考上方 API 文档
+
+3. **编译**（自动检测到新目录并生成二进制）
+```bash
+cd ~/my-img
+rm -rf build && mkdir build && cd build
+cmake .. -DSD_PATH=/home/dministrator/stable-diffusion.cpp
+make  # 自动生成 bin/sd-newtool
+```
+
+4. **安装**
+```bash
+cp sd-newtool ../bin/
+sudo ln -sf ~/my-img/bin/sd-newtool /usr/local/bin/sd-newtool
+```
+
+### 示例：新增一个工具
+
+```bash
+# 1. 创建目录
+mkdir -p src/sd-img2img
+
+# 2. 编写代码（参考 src/sd-hires/）
+vim src/sd-img2img/main.cpp
+
+# 3. 编译（自动生成 sd-img2tool 二进制）
+cd build && make
+
+# 4. 安装
+cp sd-img2img ../bin/
+sudo ln -sf ~/my-img/bin/<工具名> /usr/local/bin/<工具名>
+```
+
+---
+
+## 常用命令
+
+```bash
+# 完整编译流程
+cd ~/my-img
+rm -rf build && mkdir build && cd build
+cmake .. -DSD_PATH=/home/dministrator/stable-diffusion.cpp
+make -j4
+
+# 安装
+cp sd-hires ../bin/
+sudo ln -sf ~/my-img/bin/sd-hires /usr/local/bin/sd-hires
+
+# 验证
+sd-hires --help
+```
