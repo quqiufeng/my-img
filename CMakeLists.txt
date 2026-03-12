@@ -40,9 +40,7 @@ message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 # ============================================================
 # 2. 集成官方项目
 # ============================================================
-# 传递 CUDA 选项给 stable-diffusion.cpp
-set(SD_CUDA ON CACHE BOOL "" FORCE)
-set(CUDA_PATH ${CUDA_PATH} CACHE PATH "" FORCE)
+# 注意: stable-diffusion.cpp 需要先手动用 scripts/build_sd_cpp_4090d.sh 编译
 
 add_subdirectory(${SD_PATH} ${CMAKE_BINARY_DIR}/sd_build)
 
