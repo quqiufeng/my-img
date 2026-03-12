@@ -38,16 +38,31 @@ endif()
 message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 
 # ============================================================
-# 2. 集成官方项目
+# 2. 链接已有的 stable-diffusion.cpp 编译产物
 # ============================================================
-# 注意: stable-diffusion.cpp 需要先手动用 scripts/build_sd_cpp_4090d.sh 编译
-# 默认启用 CUDA GPU 支持
-set(SD_CUDA ON CACHE BOOL "Enable CUDA GPU support" FORCE)
-set(SD_FAST_SOFTMAX ON CACHE BOOL "Enable fast softmax" FORCE)
-set(GGML_LTO ON CACHE BOOL "Enable LTO for smaller binary" FORCE)
-set(SD_BUILD_SHARED_GGML_LIB ON CACHE BOOL "Build ggml as shared library" FORCE)
+# 直接链接 ~/stable-diffusion.cpp/bin 中的库，不重新编译
 
-add_subdirectory(${SD_PATH} ${CMAKE_BINARY_DIR}/sd_build)
+# 设置库路径
+set(SD_LIB_PATH "${SD_PATH}/build")
+set(SD_BIN_PATH "${SD_PATH}/bin")
+
+# 查找 ggml 动态库 (在 bin 目录)
+find_library(GGML_CUDA_LIB NAMES ggml-cuda PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
+find_library(GGML_CPU_LIB NAMES ggml-cpu PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
+find_library(GGML_BASE_LIB NAMES ggml-base PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
+find_library(GGML_LIB NAMES ggml PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
+
+# 查找 stable-diffusion 静态库 (在 build 目录)
+find_library(SD_LIB NAMES stable-diffusion PATHS ${SD_LIB_PATH} NO_DEFAULT_PATH)
+
+message(STATUS "[my-img] GGML_CUDA_LIB: ${GGML_CUDA_LIB}")
+message(STATUS "[my-img] GGML_CPU_LIB: ${GGML_CPU_LIB}")
+message(STATUS "[my-img] GGML_BASE_LIB: ${GGML_BASE_LIB}")
+message(STATUS "[my-img] SD_LIB: ${SD_LIB}")
+
+if(NOT SD_LIB)
+    message(FATAL_ERROR "未找到预编译的库，请先运行 scripts/build_sd_cpp_*.sh 编译 stable-diffusion.cpp")
+endif()
 
 # ============================================================
 # 3. 编译你的程序
@@ -68,7 +83,10 @@ foreach(src ${SRC_FILES})
 
     add_executable(${final_name} ${src})
     
-    target_link_libraries(${final_name} PRIVATE stable-diffusion)
+    # 链接 stable-diffusion 和 ggml（动态库）
+    target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB})
+    
+    # 链接 CUDA 运行时
     if(CUDA_PATH)
         target_link_libraries(${final_name} PRIVATE 
             ${CUDA_PATH}/lib/x86_64-linux-gnu/libcudart.so
