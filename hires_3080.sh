@@ -54,7 +54,7 @@ if [ -z "$OUTPUT_FILE" ]; then
   OUTPUT_FILE="${BASE}_hires.png"
 fi
 
-SD_CLI="$HOME/stable-diffusion.cpp/bin/sd-cli"
+SD_CLI="/opt/stable-diffusion.cpp/bin/sd-cli"
 MODEL_DIR="/opt/image"
 DIFFUSION_MODEL="$MODEL_DIR/z_image_turbo-Q6_K.gguf"
 
