@@ -15,25 +15,32 @@ fi
 echo "检测到 CUDA:"
 nvcc --version | grep "release"
 
-# 设置 CUDA 环境变量（兼容 WSL2）
-export CUDA_HOME=/usr/local/cuda-12.0
+# 设置 CUDA 环境变量
+export CUDA_HOME=/usr
 export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:/usr/lib/wsl/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+
+# 稳定版本目录
+SD_CPP_DIR="$HOME/stable-diffusion.cpp"
 
 # 克隆或更新 stable-diffusion.cpp
-if [ ! -d "$HOME/stable-diffusion.cpp" ]; then
+if [ ! -d "$SD_CPP_DIR" ]; then
     echo ""
     echo "=== 克隆 stable-diffusion.cpp ==="
-    git clone --recursive https://github.com/leejet/stable-diffusion.cpp.git $HOME/stable-diffusion.cpp
+    git clone --recursive https://github.com/leejet/stable-diffusion.cpp.git $SD_CPP_DIR
 fi
 
-cd $HOME/stable-diffusion.cpp
+cd $SD_CPP_DIR
 
 # 清理并配置
 echo ""
 echo "=== 配置 CMake ==="
 mkdir -p build && cd build
 rm -rf *
+
+# CPU 核心数
+CPU_CORES=$(nproc)
+echo "CPU 核心数: $CPU_CORES"
 
 # GPU 检测
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
@@ -68,23 +75,23 @@ cmake .. \
 
 # 编译
 echo ""
-echo "=== 编译中 (使用 4 线程) ==="
-make -j4
+echo "=== 编译中 (使用 $CPU_CORES 线程) ==="
+make -j$CPU_CORES
 
 # 移动 bin 目录
-cd $HOME/stable-diffusion.cpp
+cd $SD_CPP_DIR
 if [ -f "build/bin/sd-cli" ]; then
     echo ""
     echo "=== 整理文件 ==="
-    mv build/bin bin
+    mv build/bin/* ./bin/
     # rm -rf build   # 保留 build 目录供 my-img 链接
     
     echo ""
     echo "=========================================="
     echo "✅ 编译成功！"
     echo "=========================================="
-    echo "可执行文件: $HOME/stable-diffusion.cpp/bin/sd-cli"
-    echo "API 服务:   $HOME/stable-diffusion.cpp/bin/sd-server"
+    echo "可执行文件: $SD_CPP_DIR/bin/sd-cli"
+    echo "API 服务:   $SD_CPP_DIR/bin/sd-server"
 else
     echo ""
     echo "❌ 编译失败"
