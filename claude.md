@@ -687,6 +687,84 @@ sd-hires --help
 
 ---
 
+## 调试 stable-diffusion.cpp 代码流程
+
+当需要实现某个功能但不知道如何调用时，按以下步骤调试：
+
+### 1. 找到官方 CLI 实现
+
+```bash
+# 查看 sd-cli 命令行参数，找到对应的 mode
+~/stable-diffusion.cpp/bin/sd-cli --help | grep -i img2img
+```
+
+### 2. 追踪代码执行流程
+
+找到 CLI 中处理该功能的代码位置：
+
+```bash
+# 例如查找 img2img 相关代码
+grep -rn "img2img\|init_image" ~/stable-diffusion.cpp/examples/cli/main.cpp
+
+# 找到关键的参数设置和函数调用
+grep -n "generate_image\|sd_img_gen_params" ~/stable-diffusion.cpp/examples/cli/main.cpp
+```
+
+### 3. 分析关键函数调用链
+
+**示例：img2img 实现流程**
+
+1. **加载图片**：`load_sd_image_from_file()`
+   ```cpp
+   sd_image_t init_image = load_sd_image_from_file(ctx, cli_params.image_path);
+   ```
+
+2. **设置尺寸**：用图片尺寸设置 width/height（关键！）
+   ```cpp
+   gen_params.set_width_and_height_if_unset(init_image.width, init_image.height);
+   ```
+
+3. **设置生成参数**：
+   ```cpp
+   sd_img_gen_params_t img_gen_params = {
+       ...
+       init_image,                    // 必须是加载的图片
+       gen_params.get_resolved_width(),   // 用图片尺寸
+       gen_params.get_resolved_height(),
+       ...
+   };
+   ```
+
+4. **调用生成函数**：
+   ```cpp
+   results = generate_image(sd_ctx, &img_gen_params);
+   ```
+
+### 4. 关键注意事项
+
+- **顺序很重要**：必须先加载图片，再用图片尺寸设置参数
+- **检查库内部实现**：
+  ```bash
+  # 查看 sd_img_gen_params_init 默认值
+  grep -n "sd_img_gen_params_init" ~/stable-diffusion.cpp/src/stable-diffusion.cpp
+  ```
+- **可用工具**：
+  - `strace` - 跟踪系统调用
+  - `gdb` - 调试崩溃
+  - `valgrind` - 内存检查
+
+### 5. 调试案例
+
+**问题**：img2img 崩溃 `GGML_ASSERT(image.width == tensor->ne[0]) failed`
+
+**调试过程**：
+1. 检查 CLI 代码，找到 IMG_GEN 模式处理
+2. 发现 CLI 使用 `set_width_and_height_if_unset(init_image.width, init_image.height)`
+3. 对比自己代码，发现直接设置了 width/height
+4. **结论**：库内部可能依赖某些初始化顺序或默认值
+
+---
+
 ## 项目状态
 
 ### ✅ 已完成
