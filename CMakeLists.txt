@@ -24,6 +24,7 @@ add_definitions(-DSTB_IMAGE_IMPLEMENTATION)
 add_definitions(-DSTB_IMAGE_WRITE_IMPLEMENTATION)
 
 link_directories(${SD_PATH}/build)
+link_directories(${SD_PATH}/build/ggml/src/ggml-cuda)
 
 # ============================================================
 # 编译前置条件
@@ -51,30 +52,34 @@ foreach(src ${SRC_FILES})
     # ============================================================
     target_link_libraries(${final_name}
         ${SD_PATH}/build/libstable-diffusion.a 
+        ${SD_PATH}/build/ggml/src/ggml-cuda/libggml-cuda.a
+        ${SD_PATH}/build/ggml/src/libggml.a
         ${SD_PATH}/build/ggml/src/libggml-cpu.a
         ${SD_PATH}/build/ggml/src/libggml-base.a
         gomp
         pthread
         m
-        # CUDA 库（GPU 支持必需）- 即使无可用 CUDA 也链接，运行时自动回退 CPU
+        dl
         cuda
         cudart
+        cublas
+        rt
     )
 
     # ============================================================
     # CUDA 编译选项（检测 stable-diffusion.cpp 是否启用了 CUDA）
     # ============================================================
     if(EXISTS ${SD_PATH}/build/CMakeCache.txt)
-        file(STRINGS ${SD_PATH}/build/CMakeCache.txt CUDA_ENABLE PARENT_SCOPE)
-        if(CUDA_ENABLE MATCHES "CUDA_ENABLE:BOOL=ON")
+        file(STRINGS ${SD_PATH}/build/CMakeCache.txt SD_CUDA_CFG)
+        if(SD_CUDA_CFG MATCHES "SD_CUDA:BOOL=ON")
             add_definitions(-DSD_CUDA)
             message(STATUS "[my-img] GPU support: ON")
         else()
             message(STATUS "[my-img] GPU support: OFF (using CPU)")
         endif()
         
-        file(STRINGS ${SD_PATH}/build/CMakeCache.txt FLASH_ATTN_ENABLE PARENT_SCOPE)
-        if(FLASH_ATTN_ENABLE MATCHES "SD_FLASH_ATTN:BOOL=ON")
+        file(STRINGS ${SD_PATH}/build/CMakeCache.txt SD_FLASH_ATTN_CFG)
+        if(SD_FLASH_ATTN_CFG MATCHES "SD_FLASH_ATTN:UNINITIALIZED=ON" OR SD_FLASH_ATTN_CFG MATCHES "SD_FLASH_ATTN:BOOL=ON")
             add_definitions(-DSD_FLASH_ATTENTION)
             message(STATUS "[my-img] Flash Attention: ON")
         else()
