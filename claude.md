@@ -684,3 +684,44 @@ sudo ln -sf ~/my-img/bin/sd-hires /usr/local/bin/sd-hires
 # 验证
 sd-hires --help
 ```
+
+---
+
+## 项目状态
+
+### ✅ 已完成
+
+1. **编译系统**
+   - CMakeLists.txt 配置完成，支持 GPU + Flash Attention
+   - 依赖库链接完整（CUDA, cuBLAS 等）
+
+2. **sd-hires 工具**
+   - ESRGAN 超分功能正常
+   - img2img 细节增强功能（Flow 模型支持）
+   - 支持命令行参数：`--model`, `--vae`, `--llm`, `--upscale-model`, `--prompt`, `--strength`, `--steps`, `--gpu/--cpu`, `--no-flash-attn`, `--debug`
+
+3. **hires.sh 脚本**
+   - 去掉放大逻辑，只保留 img2img 细节增强
+   - 保持原图尺寸，修复细节生成高清图片
+
+4. **文档**
+   - README.md 完整使用说明
+   - claude.md 开发指南
+
+### ❌ 待完成 / 遇到的问题
+
+1. **img2img 推理崩溃**
+   - 症状：`GGML_ASSERT(image.width == tensor->ne[0]) failed`
+   - 原因：img2img 时 init_image 尺寸与 width/height 参数不匹配
+   - 状态：代码已修改，正在测试中
+
+2. **Flow 模型参数**
+   - 需要确认 `diffusion_model_path + vae_path + llm_path` 的正确组合
+   - 参考脚本参数：`--diffusion-model`, `--vae`, `--llm`, `--cfg-scale 2.0`, `--diffusion-fa`, `--scheduler karras`, `--vae-tiling`
+
+### 📋 下一步
+
+1. 测试 img2img 功能，修复尺寸匹配问题
+2. 确认模型参数组合
+3. 测试完整流程：ESRGAN 放大 + img2img 细节增强
+
