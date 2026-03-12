@@ -16,7 +16,9 @@ if(NOT SD_PATH)
 endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${SD_PATH})
 include_directories(${SD_PATH}/thirdparty)
+include_directories(${SD_PATH}/include)
 include_directories(${SD_PATH}/ggml/include)
 include_directories(${SD_PATH}/ggml/src)
 
@@ -24,6 +26,7 @@ add_definitions(-DSTB_IMAGE_IMPLEMENTATION)
 add_definitions(-DSTB_IMAGE_WRITE_IMPLEMENTATION)
 
 link_directories(${SD_PATH}/build)
+link_directories(${SD_PATH}/build/ggml/src)
 link_directories(${SD_PATH}/build/ggml/src/ggml-cuda)
 
 # ============================================================
@@ -48,22 +51,29 @@ foreach(src ${SRC_FILES})
     add_executable(${final_name} ${src})
     
     # ============================================================
-    # 默认启用 GPU + Flash Attention（链接 CUDA 库）
+    # GPU + Flash Attention 完整链接配置
+    # 参考 stable-diffusion.cpp 的链接方式
     # ============================================================
     target_link_libraries(${final_name}
+        # 主库
         ${SD_PATH}/build/libstable-diffusion.a 
-        ${SD_PATH}/build/ggml/src/ggml-cuda/libggml-cuda.a
-        ${SD_PATH}/build/ggml/src/libggml.a
-        ${SD_PATH}/build/ggml/src/libggml-cpu.a
-        ${SD_PATH}/build/ggml/src/libggml-base.a
-        gomp
-        pthread
-        m
-        dl
-        cuda
-        cudart
-        cublas
-        rt
+        
+        # GGML 库（按依赖顺序）
+        ggml-cuda          # CUDA 后端
+        ggml-cpu           # CPU 后端
+        ggml-base          # 基础库
+        
+        # 系统库
+        gomp               # OpenMP
+        pthread            # POSIX 线程
+        m                  # 数学库
+        dl                 # 动态链接
+        rt                 # 实时库
+        
+        # CUDA 库
+        cuda               # CUDA 驱动
+        cudart             # CUDA 运行时
+        cublas             # cuBLAS
     )
 
     # ============================================================
