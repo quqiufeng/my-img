@@ -83,7 +83,7 @@ cd $SD_CPP_DIR
 if [ -f "build/bin/sd-cli" ]; then
     echo ""
     echo "=== 整理文件 ==="
-    mv build/bin bin
+    mv build/bin/* ./bin/
     # rm -rf build   # 保留 build 目录供 my-img 链接
     
     echo ""

@@ -13,15 +13,23 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.env)
         if(line MATCHES "^SD_PATH=(.*)$")
             set(SD_PATH_FROM_ENV ${CMAKE_MATCH_1})
         endif()
+        if(line MATCHES "^CUDA_PATH=(.*)$")
+            set(CUDA_PATH_FROM_ENV ${CMAKE_MATCH_1})
+        endif()
     endforeach()
     if(SD_PATH_FROM_ENV AND NOT SD_PATH)
         set(SD_PATH ${SD_PATH_FROM_ENV})
+    endif()
+    if(CUDA_PATH_FROM_ENV AND NOT CUDA_PATH)
+        set(CUDA_PATH ${CUDA_PATH_FROM_ENV})
     endif()
 endif()
 
 if(SD_PATH)
     string(REPLACE "~" "$ENV{HOME}" SD_PATH ${SD_PATH})
 endif()
+
+message(STATUS "CUDA_PATH: ${CUDA_PATH}")
 
 if(NOT SD_PATH OR NOT EXISTS ${SD_PATH}/CMakeLists.txt)
     message(FATAL_ERROR "SD_PATH 路径无效或未设置。当前路径: ${SD_PATH}")
@@ -32,6 +40,10 @@ message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 # ============================================================
 # 2. 集成官方项目
 # ============================================================
+# 传递 CUDA 选项给 stable-diffusion.cpp
+set(SD_CUDA ON CACHE BOOL "" FORCE)
+set(CUDA_PATH ${CUDA_PATH} CACHE PATH "" FORCE)
+
 add_subdirectory(${SD_PATH} ${CMAKE_BINARY_DIR}/sd_build)
 
 # ============================================================
@@ -54,10 +66,13 @@ foreach(src ${SRC_FILES})
     add_executable(${final_name} ${src})
     
     target_link_libraries(${final_name} PRIVATE stable-diffusion)
-    target_link_libraries(${final_name} PRIVATE ${CUDA_LIBRARIES})
-    find_library(CUDA_RUNTIME_LIBRARY cudart PATHS /opt/cuda/lib64 /usr/local/cuda/lib64)
-    if(CUDA_RUNTIME_LIBRARY)
-        target_link_libraries(${final_name} PRIVATE ${CUDA_RUNTIME_LIBRARY})
+    if(CUDA_PATH)
+        target_link_libraries(${final_name} PRIVATE 
+            ${CUDA_PATH}/lib64/libcudart.so
+            ${CUDA_PATH}/lib64/libcublas.so
+            ${CUDA_PATH}/lib64/libcublasLt.so
+            /usr/lib/x86_64-linux-gnu/libcuda.so
+        )
     endif()
 
     target_include_directories(${final_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
