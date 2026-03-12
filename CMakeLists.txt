@@ -41,6 +41,10 @@ message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 # 2. 集成官方项目
 # ============================================================
 # 注意: stable-diffusion.cpp 需要先手动用 scripts/build_sd_cpp_4090d.sh 编译
+# 默认启用 CUDA GPU 支持
+set(SD_CUDA ON CACHE BOOL "Enable CUDA GPU support" FORCE)
+set(SD_FAST_SOFTMAX ON CACHE BOOL "Enable fast softmax" FORCE)
+set(GGML_LTO ON CACHE BOOL "Enable LTO for smaller binary" FORCE)
 
 add_subdirectory(${SD_PATH} ${CMAKE_BINARY_DIR}/sd_build)
 
