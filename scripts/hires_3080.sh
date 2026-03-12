@@ -22,21 +22,21 @@ IMG2IMG="./bin/sd-img2img"
 UPSCALE="./bin/sd-upscale"
 
 echo "=== Step 1: Generate base image ==="
-/opt/my-img/scripts/img_3080.sh "$PROMPT" "$STEP1" 1280 720
+/home/dministrator/my-img/scripts/img_3080.sh "$PROMPT" "$STEP1" 1280 720
 
 echo ""
 echo "=== Step 2: img2img enhance ==="
 # SDXL 模型可能不支持 img2img，暂时用回 Turbo
-$IMG2IMG \
-  --diffusion-model $MODEL_DIR/z_image_turbo-Q8_0.gguf \
-  --vae $MODEL_DIR/ae.safetensors \
-  --llm $MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
-  --input "$STEP1" \
-  --output "$STEP2" \
-  --prompt "high quality, detailed, photorealistic, perfect skin, sharp features" \
-  --strength 0.45 \
-  --steps 8 \
-  --seed 42
+  $IMG2IMG \
+   --diffusion-model $MODEL_DIR/z_image_turbo-Q6_K.gguf \
+   --vae $MODEL_DIR/ae.safetensors \
+   --llm $MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+   --input "$STEP1" \
+   --output "$STEP2" \
+   --prompt "high quality, detailed, photorealistic, perfect skin, sharp features" \
+   --strength 0.45 \
+   --steps 8 \
+   --seed 42
 
 echo ""
 echo "=== Step 3: Upscale ==="
