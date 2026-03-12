@@ -66,9 +66,9 @@ foreach(src ${SRC_FILES})
     target_link_libraries(${final_name} PRIVATE stable-diffusion)
     if(CUDA_PATH)
         target_link_libraries(${final_name} PRIVATE 
-            ${CUDA_PATH}/lib64/libcudart.so
-            ${CUDA_PATH}/lib64/libcublas.so
-            ${CUDA_PATH}/lib64/libcublasLt.so
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcudart.so
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublas.so
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
             /usr/lib/x86_64-linux-gnu/libcuda.so
         )
     endif()
