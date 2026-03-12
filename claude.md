@@ -763,6 +763,46 @@ grep -n "generate_image\|sd_img_gen_params" ~/stable-diffusion.cpp/examples/cli/
 3. 对比自己代码，发现直接设置了 width/height
 4. **结论**：库内部可能依赖某些初始化顺序或默认值
 
+**实际命令对比**：
+
+#### ✅ CLI 成功运行的命令
+```bash
+~/stable-diffusion.cpp/bin/sd-cli \
+  --diffusion-model /opt/image/z_image_turbo-Q6_K.gguf \
+  --vae /opt/image/ae.safetensors \
+  --llm /opt/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  -p "masterpiece" \
+  --steps 5 \
+  --cfg-scale 2.0 \
+  --diffusion-fa \
+  --scheduler karras \
+  --vae-tiling \
+  -i /mnt/e/app/input.png \
+  --strength 0.35 \
+  -o /mnt/e/app/test_cli.png
+```
+
+#### ❌ sd-hires 失败的命令
+```bash
+~/my-img/bin/sd-hires \
+  --model /opt/image/z_image_turbo-Q6_K.gguf \
+  --vae /opt/image/ae.safetensors \
+  --llm /opt/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  --input /mnt/e/app/input.png \
+  --output /mnt/e/app/output_sd_hires.png \
+  --prompt "masterpiece" \
+  --steps 5 \
+  --strength 0.35
+```
+
+**关键差异排查方向**：
+1. CLI 使用 `load_sd_image_from_file()` 加载图片（强制3通道）
+2. CLI 在加载图片后才设置 width/height（用图片尺寸）
+3. CLI 使用了 `--vae-tiling` 参数
+4. CLI 的 ctx_params 和 img_params 设置顺序和默认值可能不同
+
+**下一步**：对比 CLI 源码中的 `sd_ctx_params_init` 默认值与实际传入值的差异
+
 ---
 
 ## 项目状态
