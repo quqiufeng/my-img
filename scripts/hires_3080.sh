@@ -12,12 +12,13 @@
 set -e
 
 export LD_LIBRARY_PATH=~/stable-diffusion.cpp/bin:$LD_LIBRARY_PATH
+cd /home/dministrator/my-img
 
 PROMPT="${1:-Swiss Alps, majestic mountain peaks, snow-capped mountains, crystal clear lake, green valleys, scenic landscape, dramatic clouds, golden sunlight, travel destination, photorealistic, high detail, 8K quality}"
 OUTPUT="${2:-hires_final}"
-STEP1="~/${OUTPUT}_step1.png"
-STEP2="~/${OUTPUT}_step2.png"
-FINAL="~/${OUTPUT}.png"
+STEP1="/home/dministrator/${OUTPUT}_step1.png"
+STEP2="/home/dministrator/${OUTPUT}_step2.png"
+FINAL="/home/dministrator/${OUTPUT}.png"
 
 MODEL_DIR="/opt/image"
 IMG2IMG="./bin/sd-img2img"
@@ -27,26 +28,26 @@ echo "=== Step 1: Generate base image ==="
 /home/dministrator/my-img/scripts/img_3080.sh "$PROMPT" "$STEP1" 1280 720
 
 echo ""
-echo "=== Step 2: img2img enhance ==="
-# SDXL 模型可能不支持 img2img，暂时用回 Turbo
-  $IMG2IMG \
-   --diffusion-model $MODEL_DIR/z_image_turbo-Q6_K.gguf \
-   --vae $MODEL_DIR/ae.safetensors \
-   --llm $MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
-   --input "$STEP1" \
-   --output "$STEP2" \
-   --prompt "high quality, detailed, photorealistic, perfect skin, sharp features" \
-   --strength 0.45 \
-   --steps 8 \
-   --seed 42
-
-echo ""
-echo "=== Step 3: Upscale ==="
+echo "=== Step 2: Upscale ==="
 $UPSCALE \
   --model $MODEL_DIR/2x_ESRGAN.gguf \
+  --input "$STEP1" \
+  --output "$STEP2" \
+  --scale 2
+
+echo ""
+echo "=== Step 3: img2img ==="
+# Step2 已经是放大后的图片 (2560x1440)，用 img2img 增强细节
+$IMG2IMG \
+  --diffusion-model $MODEL_DIR/z_image_turbo-Q6_K.gguf \
+  --vae $MODEL_DIR/ae.safetensors \
+  --llm $MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
   --input "$STEP2" \
   --output "$FINAL" \
-  --scale 2
+  --prompt "high quality, detailed, photorealistic, perfect skin, sharp features, 8k" \
+  --strength 0.35 \
+  --steps 8 \
+  --seed 42
 
 echo ""
 echo "=== Done ==="
