@@ -13,7 +13,7 @@ static void print_usage(const char* prog) {
     printf("  --model <path>           SD model path (GGUF)\n");
     printf("  --vae <path>             VAE path (optional, for flow models)\n");
     printf("  --llm <path>             LLM path (optional, for flow models)\n");
-    printf("  --upscale-model <path>   ESRGAN model path (.bin)\n");
+    printf("  --upscale-model <path>   ESRGAN model path (.bin) (optional)\n");
     printf("  --upscale-factor <int>  Upscale factor: 2, 3, 4 (default: 2)\n");
     printf("  --input <path>           Input image path\n");
     printf("  --output <path>          Output image path (default: hires_output.png)\n");
@@ -34,7 +34,6 @@ int main(int argc, char* argv[]) {
     const char* model_path = NULL;
     const char* vae_path = NULL;
     const char* llm_path = NULL;
-    const char* t5xxl_path = NULL;
     const char* upscale_model_path = NULL;
     const char* input_path = NULL;
     const char* output_path = "hires_output.png";
@@ -57,8 +56,6 @@ int main(int argc, char* argv[]) {
             vae_path = argv[++i];
         } else if (strcmp(argv[i], "--llm") == 0 && i + 1 < argc) {
             llm_path = argv[++i];
-        } else if (strcmp(argv[i], "--t5xxl") == 0 && i + 1 < argc) {
-            t5xxl_path = argv[++i];
         } else if (strcmp(argv[i], "--upscale-model") == 0 && i + 1 < argc) {
             upscale_model_path = argv[++i];
         } else if (strcmp(argv[i], "--upscale-factor") == 0 && i + 1 < argc) {
@@ -180,7 +177,6 @@ int main(int argc, char* argv[]) {
     ctx_params.diffusion_model_path = model_path;
     ctx_params.vae_path = vae_path;
     ctx_params.llm_path = llm_path;
-    ctx_params.t5xxl_path = t5xxl_path;
     ctx_params.wtype = SD_TYPE_Q8_0;
     ctx_params.n_threads = 4;
     ctx_params.offload_params_to_cpu = !use_gpu;
@@ -202,8 +198,8 @@ int main(int argc, char* argv[]) {
     sd_img_gen_params_init(&img_params);
     img_params.prompt = prompt;
     img_params.negative_prompt = negative_prompt;
-    img_params.width = upscaled_image.width;  // 使用图片实际尺寸
-    img_params.height = upscaled_image.height;
+    img_params.width = out_w;
+    img_params.height = out_h;
     img_params.strength = strength;
     img_params.seed = seed;
     img_params.init_image = upscaled_image;
