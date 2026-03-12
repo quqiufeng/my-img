@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void print_usage(const char* prog) {
     printf("Usage: %s [options]\n", prog);
@@ -126,42 +127,80 @@ int main(int argc, char* argv[]) {
     // 如果提供了 upscale_model_path，使用 ESRGAN 放大
     if (upscale_model_path) {
         printf("[Hires Fix] Step 1: AI Upscale %ux with ESRGAN...\n", upscale_factor);
-        upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(upscale_model_path, !use_gpu, false, 4, 128);
+        upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(upscale_model_path, true, false, 4, 128);
         if (!upscaler_ctx) {
             fprintf(stderr, "Failed to create upscaler context\n");
             stbi_image_free(img_data);
             return 1;
         }
 
-        upscaled_image = upscale(upscaler_ctx, input_sd_image, upscale_factor);
-        free_upscaler_ctx(upscaler_ctx);
-
-        if (!upscaled_image.data) {
+        sd_image_t esrgan_result = upscale(upscaler_ctx, input_sd_image, upscale_factor);
+        
+        if (!esrgan_result.data) {
             fprintf(stderr, "Upscale failed\n");
+            free_upscaler_ctx(upscaler_ctx);
             stbi_image_free(img_data);
             return 1;
         }
-        printf("[Hires Fix] Upscaled: %dx%d (channels: %d)\n", upscaled_image.width, upscaled_image.height, upscaled_image.channel);
+        
+        // 复制 ESRGAN 结果到 upscaled_image（在释放 upscaler_ctx 之前）
+        size_t esrgan_size = esrgan_result.width * esrgan_result.height * esrgan_result.channel;
+        upscaled_image.data = (uint8_t*)malloc(esrgan_size);
+        memcpy(upscaled_image.data, esrgan_result.data, esrgan_size);
+        upscaled_image.width = esrgan_result.width;
+        upscaled_image.height = esrgan_result.height;
+        upscaled_image.channel = esrgan_result.channel;
+        
+        free(esrgan_result.data);  // 释放 ESRGAN 返回的内存
+        free_upscaler_ctx(upscaler_ctx);
 
-        // 确保是 RGB 3通道
-        if (upscaled_image.channel != 3) {
-            printf("[Hires Fix] Converting %d channels to RGB...\n", upscaled_image.channel);
-            uint8_t* rgb_data = (uint8_t*)malloc(upscaled_image.width * upscaled_image.height * 3);
-            for (size_t i = 0; i < upscaled_image.width * upscaled_image.height; i++) {
-                rgb_data[i * 3 + 0] = upscaled_image.data[i * 4 + 0];
-                rgb_data[i * 3 + 1] = upscaled_image.data[i * 4 + 1];
-                rgb_data[i * 3 + 2] = upscaled_image.data[i * 4 + 2];
-            }
-            free(upscaled_image.data);
-            upscaled_image.data = rgb_data;
-            upscaled_image.channel = 3;
+        printf("[Hires Fix] Upscaled: %dx%d (channels: %d)\n", upscaled_image.width, upscaled_image.height, upscaled_image.channel);
+        
+        // 保存到临时文件并重新加载（模拟 CLI 行为）
+        char temp_upscale_path[] = "/tmp/sd_hires_upscale_XXXXXX.png";
+        int fd = mkstemps(temp_upscale_path, 4);
+        close(fd);
+        stbi_write_png(temp_upscale_path, upscaled_image.width, upscaled_image.height, 3, upscaled_image.data, 0);
+        
+        // 释放原来的数据
+        free(upscaled_image.data);
+        
+        // 重新加载图片（CLI 方式）
+        int reload_w, reload_h, reload_c;
+        uint8_t* reload_data = stbi_load(temp_upscale_path, &reload_w, &reload_h, &reload_c, 3);
+        if (!reload_data) {
+            fprintf(stderr, "Failed to reload upscale image\n");
+            free_upscaler_ctx(upscaler_ctx);
+            stbi_image_free(img_data);
+            return 1;
         }
+        upscaled_image.data = reload_data;
+        upscaled_image.width = reload_w;
+        upscaled_image.height = reload_h;
+        upscaled_image.channel = 3;
+        
+        printf("[Hires Fix] Reloaded: %dx%d\n", reload_w, reload_h);
+        
         target_w = upscaled_image.width;
         target_h = upscaled_image.height;
     } else {
         // 没有 ESRGAN，直接用原图
         printf("[Hires Fix] No upscale model, using original image\n");
-        upscaled_image = input_sd_image;
+        
+        // 如果指定了目标尺寸，使用目标尺寸
+        if (width > 0 || height > 0) {
+            // 复制原图数据用于 img2img
+            size_t orig_size = img_w * img_h * 3;
+            uint8_t* orig_copy = (uint8_t*)malloc(orig_size);
+            memcpy(orig_copy, img_data, orig_size);
+            upscaled_image.data = orig_copy;
+            upscaled_image.width = target_w;
+            upscaled_image.height = target_h;
+            upscaled_image.channel = 3;
+            printf("[Hires Fix] Using target size: %dx%d\n", target_w, target_h);
+        } else {
+            upscaled_image = input_sd_image;
+        }
     }
 
     int out_w = width > 0 ? width : (int)upscaled_image.width;
@@ -172,6 +211,9 @@ int main(int argc, char* argv[]) {
     printf("[Hires Fix]   prompt: %s\n", prompt);
     printf("[Hires Fix]   strength: %.2f, steps: %d, seed: %lld\n", strength, steps, (long long)seed);
 
+    // 不使用 mask_image，设为空
+    sd_image_t mask_sd_image = {0, 0, 0, NULL};
+
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
     ctx_params.model_path = model_path;
@@ -179,11 +221,14 @@ int main(int argc, char* argv[]) {
     ctx_params.vae_path = vae_path;
     ctx_params.llm_path = llm_path;
     ctx_params.wtype = SD_TYPE_Q8_0;
-    // ctx_params 使用默认值（vae_decode_only=true, flash_attn=false）
     ctx_params.n_threads = 4;
+    ctx_params.vae_decode_only = false;
+    ctx_params.free_params_immediately = false;
     ctx_params.offload_params_to_cpu = !use_gpu;
     ctx_params.keep_vae_on_cpu = !use_gpu;
     ctx_params.keep_clip_on_cpu = !use_gpu;
+    ctx_params.flash_attn = use_gpu && use_flash_attn;
+    ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn;
 
     sd_ctx_t* sd_ctx = new_sd_ctx(&ctx_params);
     if (!sd_ctx) {
@@ -193,45 +238,47 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // img2img 参数 - 使用 upscaled_image 的实际尺寸
+    // 完全按照 CLI 的方式初始化 img_params
     sd_img_gen_params_t img_params;
-    sd_img_gen_params_init(&img_params);
+    memset(&img_params, 0, sizeof(img_params));
+    
     img_params.loras = NULL;
     img_params.lora_count = 0;
     img_params.prompt = prompt;
     img_params.negative_prompt = negative_prompt;
-    img_params.clip_skip = 0;
+    img_params.clip_skip = -1;
     img_params.init_image = upscaled_image;
     img_params.ref_images = NULL;
     img_params.ref_images_count = 0;
     img_params.auto_resize_ref_image = true;
     img_params.increase_ref_index = false;
-    img_params.mask_image.data = NULL;
+    img_params.mask_image = mask_sd_image;  // 使用单独的 mask
     img_params.width = upscaled_image.width;
     img_params.height = upscaled_image.height;
     img_params.strength = strength;
     img_params.seed = seed;
     img_params.batch_count = 1;
     img_params.control_image.data = NULL;
+    img_params.control_image.width = 0;
+    img_params.control_image.height = 0;
+    img_params.control_image.channel = 0;
     img_params.control_strength = 0.8f;
     img_params.sample_params.guidance.txt_cfg = 2.0f;
     img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
     img_params.sample_params.sample_steps = steps;
     img_params.sample_params.scheduler = KARRAS_SCHEDULER;
-
+    
+    // 完全按照 CLI 的方式初始化 img_params
+    // 不使用 VAE tiling，用更大的 tile_size 或不用
     img_params.vae_tiling_params.enabled = false;
-
-    printf("[Hires Fix]   init_image: %dx%d, channels: %d\n", 
-           upscaled_image.width, upscaled_image.height, upscaled_image.channel);
-    printf("[Hires Fix]   img_params: width=%d, height=%d\n", 
-           img_params.width, img_params.height);
 
     sd_image_t* result = generate_image(sd_ctx, &img_params);
 
     if (result && result->data) {
         printf("[Hires Fix] Writing output: %s\n", output_path);
-        stbi_write_png(output_path, result->width, result->height, 4, result->data, 0);
-        printf("[Hires Fix] Done! Output: %dx%d\n", result->width, result->height);
+        // result->channel 可能是 3 或 4
+        stbi_write_png(output_path, result->width, result->height, result->channel, result->data, 0);
+        printf("[Hires Fix] Done! Output: %dx%d, channels: %d\n", result->width, result->height, result->channel);
         free(result->data);
         free(result);
     } else {
@@ -239,7 +286,12 @@ int main(int argc, char* argv[]) {
     }
 
     free_sd_ctx(sd_ctx);
-    stbi_image_free(upscaled_image.data);
+    // 不再需要释放 mask（因为是空）
+    
+    // 只有当 upscaled_image.data 是从 stbi_load 来的才用 stbi_image_free
+    if (upscaled_image.data != img_data && upscaled_image.data != NULL) {
+        free(upscaled_image.data);
+    }
     stbi_image_free(img_data);
 
     return result ? 0 : 1;

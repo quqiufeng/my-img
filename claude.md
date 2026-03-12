@@ -591,6 +591,113 @@ watch -n 0.5 nvidia-smi
 
 ---
 
+## ⚠️ 避免踩坑的最佳实践（stable-diffusion.cpp）
+
+**以下是通过调试 sd-hires 总结出的核心坑点，新建项目时必须注意：**
+
+### 核心问题一：mask_image 必须创建全白图片
+
+**问题**：stable-diffusion.cpp 的 `sd_image_to_ggml_tensor` 函数不检查 data 是否为 NULL，直接处理 mask_image。
+
+**症状**：
+```
+GGML_ASSERT(image.width == tensor->ne[0]) failed
+```
+
+**解决方案**：创建全白 mask（255）
+```cpp
+// ❌ 错误：设置为 NULL 会崩溃
+img_params.mask_image.data = NULL;
+
+// ✅ 正确：创建全白 mask
+size_t mask_size = width * height;
+uint8_t* mask_data = (uint8_t*)malloc(mask_size);
+memset(mask_data, 255, mask_size);  // 全白
+img_params.mask_image.data = mask_data;
+img_params.mask_image.width = width;
+img_params.mask_image.height = height;
+img_params.mask_image.channel = 1;
+```
+
+---
+
+### 核心问题二：ESRGAN 内存管理
+
+**问题**：`upscale()` 返回的图片数据在 `free_upscaler_ctx()` 后变为悬空指针。
+
+**症状**：ESRGAN 放大后，在 img2img 阶段崩溃。
+
+**解决方案**：在释放 upscaler_ctx 前复制数据
+```cpp
+// ❌ 错误：直接使用返回的指针，free_upscaler_ctx 后变为悬空
+sd_image_t esrgan_result = upscale(upscaler_ctx, input_image, 2);
+free_upscaler_ctx(upscaler_ctx);
+// esrgan_result.data 现在是悬空指针！
+
+// ✅ 正确：先复制数据再释放
+sd_image_t esrgan_result = upscale(upscaler_ctx, input_image, 2);
+size_t copy_size = esrgan_result.width * esrgan_result.height * esrgan_result.channel;
+upscaled_image.data = (uint8_t*)malloc(copy_size);
+memcpy(upscaled_image.data, esrgan_result.data, copy_size);
+upscaled_image.width = esrgan_result.width;
+upscaled_image.height = esrgan_result.height;
+upscaled_image.channel = esrgan_result.channel;
+free(esrgan_result.data);           // 先释放原始数据
+free_upscaler_ctx(upscaler_ctx);   // 再释放 ctx
+```
+
+---
+
+### 核心问题三：img2img 必须设置的关键参数
+
+| 参数 | 必须设置的值 | 说明 |
+|------|-------------|------|
+| `ctx_params.vae_decode_only` | `false` | img2img 必需，否则只解码不编码 |
+| `ctx_params.free_params_immediately` | `false` | 保持模型在内存中 |
+| `ctx_params.flash_attn` | `true` | GPU 模式下启用 |
+| `img_params.init_image.data` | 有效指针 | 不能是 NULL |
+| `img_params.mask_image.data` | 全白数据 | 不能是 NULL |
+| `img_params.width` | 图片宽度 | 必须与 init_image 匹配 |
+| `img_params.height` | 图片高度 | 必须与 init_image 匹配 |
+
+---
+
+### 核心问题四：大图必须启用 VAE Tiling
+
+**场景**：ESRGAN 放大后图片变大（如 2560x1440），VAE 解码大图会爆显存。
+
+**解决方案**：
+```cpp
+// ctx_params 和 img_params 都需要启用
+ctx_params.vae_tiling_params.enabled = true;
+ctx_params.vae_tiling_params.tile_size_x = 512;
+ctx_params.vae_tiling_params.tile_size_y = 512;
+ctx_params.vae_tiling_params.target_overlap = 32;
+
+img_params.vae_tiling_params.enabled = true;
+img_params.vae_tiling_params.tile_size_x = 512;
+img_params.vae_tiling_params.tile_size_y = 512;
+img_params.vae_tiling_params.target_overlap = 32;
+```
+
+---
+
+### 新建项目的正确姿势
+
+1. **直接参考官方 CLI 源码** - 不要自己从头写参数，从 `examples/cli/main.cpp` 复制改
+2. **对比命令** - 先用 CLI 跑通，再用代码实现
+3. **添加调试输出** - 打印关键参数值确认正确
+
+```cpp
+// 调试输出示例
+printf("[DEBUG] init_image: %dx%d, channels: %d\n", 
+       img_params.init_image.width, img_params.init_image.height, img_params.init_image.channel);
+printf("[DEBUG] img_params: width=%d, height=%d\n", 
+       img_params.width, img_params.height);
+```
+
+---
+
 ## 目录结构
 
 ```
