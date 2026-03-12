@@ -174,16 +174,16 @@ int main(int argc, char* argv[]) {
 
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
+    ctx_params.model_path = model_path;
     ctx_params.diffusion_model_path = model_path;
     ctx_params.vae_path = vae_path;
     ctx_params.llm_path = llm_path;
     ctx_params.wtype = SD_TYPE_Q8_0;
+    // ctx_params 使用默认值（vae_decode_only=true, flash_attn=false）
     ctx_params.n_threads = 4;
     ctx_params.offload_params_to_cpu = !use_gpu;
     ctx_params.keep_vae_on_cpu = !use_gpu;
     ctx_params.keep_clip_on_cpu = !use_gpu;
-    ctx_params.flash_attn = use_gpu && use_flash_attn;
-    ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn;
 
     sd_ctx_t* sd_ctx = new_sd_ctx(&ctx_params);
     if (!sd_ctx) {
@@ -196,21 +196,35 @@ int main(int argc, char* argv[]) {
     // img2img 参数 - 使用 upscaled_image 的实际尺寸
     sd_img_gen_params_t img_params;
     sd_img_gen_params_init(&img_params);
+    img_params.loras = NULL;
+    img_params.lora_count = 0;
     img_params.prompt = prompt;
     img_params.negative_prompt = negative_prompt;
-    img_params.width = upscaled_image.width;   // 使用图片实际尺寸
+    img_params.clip_skip = 0;
+    img_params.init_image = upscaled_image;
+    img_params.ref_images = NULL;
+    img_params.ref_images_count = 0;
+    img_params.auto_resize_ref_image = true;
+    img_params.increase_ref_index = false;
+    img_params.mask_image.data = NULL;
+    img_params.width = upscaled_image.width;
     img_params.height = upscaled_image.height;
     img_params.strength = strength;
     img_params.seed = seed;
-    img_params.init_image = upscaled_image;
+    img_params.batch_count = 1;
+    img_params.control_image.data = NULL;
+    img_params.control_strength = 0.8f;
     img_params.sample_params.guidance.txt_cfg = 2.0f;
     img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
     img_params.sample_params.sample_steps = steps;
     img_params.sample_params.scheduler = KARRAS_SCHEDULER;
-    img_params.vae_tiling_params.enabled = true;
-    img_params.vae_tiling_params.tile_size_x = 512;
-    img_params.vae_tiling_params.tile_size_y = 512;
-    img_params.vae_tiling_params.target_overlap = 32;
+
+    img_params.vae_tiling_params.enabled = false;
+
+    printf("[Hires Fix]   init_image: %dx%d, channels: %d\n", 
+           upscaled_image.width, upscaled_image.height, upscaled_image.channel);
+    printf("[Hires Fix]   img_params: width=%d, height=%d\n", 
+           img_params.width, img_params.height);
 
     sd_image_t* result = generate_image(sd_ctx, &img_params);
 
