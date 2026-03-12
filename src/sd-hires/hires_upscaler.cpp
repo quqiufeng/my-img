@@ -193,13 +193,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // img2img 参数
+    // img2img 参数 - 使用 upscaled_image 的实际尺寸
     sd_img_gen_params_t img_params;
     sd_img_gen_params_init(&img_params);
     img_params.prompt = prompt;
     img_params.negative_prompt = negative_prompt;
-    img_params.width = out_w;
-    img_params.height = out_h;
+    img_params.width = upscaled_image.width;   // 使用图片实际尺寸
+    img_params.height = upscaled_image.height;
     img_params.strength = strength;
     img_params.seed = seed;
     img_params.init_image = upscaled_image;
