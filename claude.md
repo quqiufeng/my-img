@@ -55,9 +55,30 @@ ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn;
 ### 编译要求
 
 编译 `stable-diffusion.cpp` 时必须启用：
+
+**注意**：编译时间较长（10-30分钟），建议使用 `nohup` 后台编译：
+
 ```bash
-cmake . -DSD_CUDA=ON -DSD_FLASH_ATTN=ON -DCMAKE_BUILD_TYPE=Release
-make -j4
+# 使用 nohup 后台编译（推荐）
+cd ~/stable-diffusion.cpp
+rm -rf build && mkdir build && cd build
+cmake .. -DSD_CUDA=ON -DSD_FLASH_ATTN=ON -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_CUDA_COMPILER=/usr/bin/nvcc
+
+nohup make -j2 > ~/nohup_sd_compile.log 2>&1 &
+
+# 查看编译进度
+tail -f ~/nohup_sd_compile.log
+
+# 等待编译完成（约83%后需要较长时间）
+# 检查是否成功
+ls ~/stable-diffusion.cpp/build/*.a
+```
+
+**编译脚本方式**：
+```bash
+# 直接使用项目提供的编译脚本
+~/my-img/build_sd_cpp.sh
 ```
 
 ---
@@ -619,7 +640,7 @@ touch src/sd-newtool/main.cpp
 cd ~/my-img
 rm -rf build && mkdir build && cd build
 cmake .. -DSD_PATH=/home/dministrator/stable-diffusion.cpp
-make  # 自动生成 bin/sd-newtool
+make -j2  # 使用 -j2 避免内存不足
 ```
 
 4. **安装**

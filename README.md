@@ -56,11 +56,18 @@ cd ~/my-img
 # 创建编译目录
 mkdir -p build && cd build
 
-# 配置（指定 stable-diffusion.cpp 路径）
-cmake .. -DSD_PATH=/path/to/stable-diffusion.cpp
+# 配置（指定 stable-diffusion.cpp 路径，使用绝对路径）
+cmake .. -DSD_PATH=/home/dministrator/stable-diffusion.cpp
 
 # 编译（自动扫描 src/ 下所有工具）
-make
+# 注意：编译时间较长，建议使用 nohup 后台编译
+nohup make -j2 > ~/nohup_my-img_compile.log 2>&1 &
+
+# 或前台编译（不推荐，容易超时）
+# make -j2
+
+# 查看编译进度
+tail -f ~/nohup_my-img_compile.log
 
 # 复制二进制到 bin 目录
 cp sd-hires ../bin/
