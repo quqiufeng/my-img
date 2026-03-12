@@ -11,6 +11,8 @@ static void print_usage(const char* prog) {
     printf("Usage: %s [options]\n", prog);
     printf("Options:\n");
     printf("  --model <path>           SD model path (GGUF)\n");
+    printf("  --vae <path>             VAE path (optional, for flow models)\n");
+    printf("  --llm <path>             LLM path (optional, for flow models)\n");
     printf("  --upscale-model <path>   ESRGAN model path (.bin)\n");
     printf("  --upscale-factor <int>  Upscale factor: 2, 3, 4 (default: 2)\n");
     printf("  --input <path>           Input image path\n");
@@ -30,6 +32,9 @@ static void print_usage(const char* prog) {
 
 int main(int argc, char* argv[]) {
     const char* model_path = NULL;
+    const char* vae_path = NULL;
+    const char* llm_path = NULL;
+    const char* t5xxl_path = NULL;
     const char* upscale_model_path = NULL;
     const char* input_path = NULL;
     const char* output_path = "hires_output.png";
@@ -48,6 +53,12 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
             model_path = argv[++i];
+        } else if (strcmp(argv[i], "--vae") == 0 && i + 1 < argc) {
+            vae_path = argv[++i];
+        } else if (strcmp(argv[i], "--llm") == 0 && i + 1 < argc) {
+            llm_path = argv[++i];
+        } else if (strcmp(argv[i], "--t5xxl") == 0 && i + 1 < argc) {
+            t5xxl_path = argv[++i];
         } else if (strcmp(argv[i], "--upscale-model") == 0 && i + 1 < argc) {
             upscale_model_path = argv[++i];
         } else if (strcmp(argv[i], "--upscale-factor") == 0 && i + 1 < argc) {
@@ -92,7 +103,8 @@ int main(int argc, char* argv[]) {
         printf("[DEBUG] Input: %s\n", input_path ? input_path : "(null)");
     }
 
-    if (!model_path || !upscale_model_path || !input_path) {
+    if (!model_path || !input_path) {
+        fprintf(stderr, "model_path: %s, input_path: %s\n", model_path ? model_path : "NULL", input_path ? input_path : "NULL");
         print_usage(argv[0]);
         return 1;
     }
@@ -108,23 +120,52 @@ int main(int argc, char* argv[]) {
 
     sd_image_t input_sd_image = {(uint32_t)img_w, (uint32_t)img_h, 3, img_data};
 
-    printf("[Hires Fix] Step 1: AI Upscale %ux with ESRGAN...\n", upscale_factor);
-    upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(upscale_model_path, !use_gpu, false, 4, 128);
-    if (!upscaler_ctx) {
-        fprintf(stderr, "Failed to create upscaler context\n");
-        stbi_image_free(img_data);
-        return 1;
-    }
+    int target_w = width > 0 ? width : img_w;
+    int target_h = height > 0 ? height : img_h;
 
-    sd_image_t upscaled_image = upscale(upscaler_ctx, input_sd_image, upscale_factor);
-    free_upscaler_ctx(upscaler_ctx);
+    sd_image_t upscaled_image;
+    upscaled_image.data = NULL;
 
-    if (!upscaled_image.data) {
-        fprintf(stderr, "Upscale failed\n");
-        stbi_image_free(img_data);
-        return 1;
+    // 如果提供了 upscale_model_path，使用 ESRGAN 放大
+    if (upscale_model_path) {
+        printf("[Hires Fix] Step 1: AI Upscale %ux with ESRGAN...\n", upscale_factor);
+        upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(upscale_model_path, !use_gpu, false, 4, 128);
+        if (!upscaler_ctx) {
+            fprintf(stderr, "Failed to create upscaler context\n");
+            stbi_image_free(img_data);
+            return 1;
+        }
+
+        upscaled_image = upscale(upscaler_ctx, input_sd_image, upscale_factor);
+        free_upscaler_ctx(upscaler_ctx);
+
+        if (!upscaled_image.data) {
+            fprintf(stderr, "Upscale failed\n");
+            stbi_image_free(img_data);
+            return 1;
+        }
+        printf("[Hires Fix] Upscaled: %dx%d (channels: %d)\n", upscaled_image.width, upscaled_image.height, upscaled_image.channel);
+
+        // 确保是 RGB 3通道
+        if (upscaled_image.channel != 3) {
+            printf("[Hires Fix] Converting %d channels to RGB...\n", upscaled_image.channel);
+            uint8_t* rgb_data = (uint8_t*)malloc(upscaled_image.width * upscaled_image.height * 3);
+            for (size_t i = 0; i < upscaled_image.width * upscaled_image.height; i++) {
+                rgb_data[i * 3 + 0] = upscaled_image.data[i * 4 + 0];
+                rgb_data[i * 3 + 1] = upscaled_image.data[i * 4 + 1];
+                rgb_data[i * 3 + 2] = upscaled_image.data[i * 4 + 2];
+            }
+            free(upscaled_image.data);
+            upscaled_image.data = rgb_data;
+            upscaled_image.channel = 3;
+        }
+        target_w = upscaled_image.width;
+        target_h = upscaled_image.height;
+    } else {
+        // 没有 ESRGAN，直接用原图
+        printf("[Hires Fix] No upscale model, using original image\n");
+        upscaled_image = input_sd_image;
     }
-    printf("[Hires Fix] Upscaled: %dx%d\n", upscaled_image.width, upscaled_image.height);
 
     int out_w = width > 0 ? width : (int)upscaled_image.width;
     int out_h = height > 0 ? height : (int)upscaled_image.height;
@@ -133,11 +174,13 @@ int main(int argc, char* argv[]) {
     printf("[Hires Fix]   Mode: %s\n", use_gpu ? "GPU" : "CPU");
     printf("[Hires Fix]   prompt: %s\n", prompt);
     printf("[Hires Fix]   strength: %.2f, steps: %d, seed: %lld\n", strength, steps, (long long)seed);
-    printf("[Hires Fix]   output size: %dx%d\n", out_w, out_h);
 
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
-    ctx_params.model_path = model_path;
+    ctx_params.diffusion_model_path = model_path;
+    ctx_params.vae_path = vae_path;
+    ctx_params.llm_path = llm_path;
+    ctx_params.t5xxl_path = t5xxl_path;
     ctx_params.wtype = SD_TYPE_Q8_0;
     ctx_params.n_threads = 4;
     ctx_params.offload_params_to_cpu = !use_gpu;
@@ -154,15 +197,17 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // img2img 参数
     sd_img_gen_params_t img_params;
     sd_img_gen_params_init(&img_params);
     img_params.prompt = prompt;
     img_params.negative_prompt = negative_prompt;
-    img_params.width = out_w;
-    img_params.height = out_h;
+    img_params.width = upscaled_image.width;  // 使用图片实际尺寸
+    img_params.height = upscaled_image.height;
     img_params.strength = strength;
     img_params.seed = seed;
     img_params.init_image = upscaled_image;
+    img_params.sample_params.guidance.txt_cfg = 2.0f;
     img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
     img_params.sample_params.sample_steps = steps;
     img_params.sample_params.scheduler = KARRAS_SCHEDULER;
