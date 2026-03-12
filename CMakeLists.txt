@@ -11,9 +11,30 @@ project(my-img)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(NOT SD_PATH)
-    message(FATAL_ERROR "SD_PATH not set. Usage: cmake .. -DSD_PATH=/path/to/stable-diffusion.cpp")
+# 读取 .env 配置文件
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.env)
+    file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/.env ENV_FILE)
+    foreach(line ${ENV_FILE})
+        if(line MATCHES "^SD_PATH=(.*)$")
+            set(SD_PATH_FROM_ENV ${CMAKE_MATCH_1})
+        endif()
+    endforeach()
+    if(SD_PATH_FROM_ENV AND NOT SD_PATH)
+        set(SD_PATH ${SD_PATH_FROM_ENV})
+        message(STATUS "[my-img] Loaded SD_PATH from .env: ${SD_PATH}")
+    endif()
 endif()
+
+# 展开 ~ 为实际路径
+if(SD_PATH)
+    string(REPLACE "~" "$ENV{HOME}" SD_PATH ${SD_PATH})
+endif()
+
+if(NOT SD_PATH)
+    message(FATAL_ERROR "SD_PATH not set. Usage: cmake .. -DSD_PATH=/path/to/stable-diffusion.cpp\nOr create .env file with SD_PATH=/path/to/stable-diffusion.cpp")
+endif()
+
+message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 include_directories(${SD_PATH})
