@@ -45,6 +45,7 @@ message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 set(SD_CUDA ON CACHE BOOL "Enable CUDA GPU support" FORCE)
 set(SD_FAST_SOFTMAX ON CACHE BOOL "Enable fast softmax" FORCE)
 set(GGML_LTO ON CACHE BOOL "Enable LTO for smaller binary" FORCE)
+set(SD_BUILD_SHARED_GGML_LIB ON CACHE BOOL "Build ggml as shared library" FORCE)
 
 add_subdirectory(${SD_PATH} ${CMAKE_BINARY_DIR}/sd_build)
 
