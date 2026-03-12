@@ -76,6 +76,87 @@ sudo ln -sf ~/my-img/bin/sd-hires /usr/local/bin/sd-hires
 sd-hires --help
 ```
 
+## 依赖库编译
+
+my-img 项目依赖 `stable-diffusion.cpp` 的静态库，需要先编译。
+
+### build_sd_cpp.sh
+
+**作用**：编译 my-img 项目需要的依赖库（GPU + Flash Attention 支持）
+
+**位置**：`~/my-shell/build_sd_cpp.sh`
+
+**功能**：
+- 克隆/更新 stable-diffusion.cpp 源码
+- 编译静态库（libstable-diffusion.a, libggml-cpu.a, libggml-base.a）
+- 启用 CUDA GPU 加速
+- 启用 Flash Attention 加速
+- **保留 build 目录**（之前会删掉，导致 my-img 无法链接）
+
+**编译产物**：
+```
+stable-diffusion.cpp/build/
+├── libstable-diffusion.a   # SD 主库
+├── ggml/src/
+│   ├── libggml-cpu.a
+│   └── libggml-base.a
+└── CMakeCache.txt          # 包含 CUDA/Flash Attention 配置
+```
+
+**使用方法**：
+```bash
+~/my-shell/build_sd_cpp.sh
+# 或指定路径
+~/my-shell/build_sd_cpp.sh /custom/path
+```
+
+### img.sh
+
+**作用**：生成图片，作为 my-img 其他工具的**入口文件**
+
+**位置**：`~/my-img/img.sh`
+
+**功能**：
+- 使用 Stable Diffusion 生成图片
+- 输出 PNG 格式，可直接作为 sd-hires 等工具的输入
+
+**使用方法**：
+```bash
+# 生成默认图片 (1920x1080)
+./img.sh
+
+# 自定义提示词
+./img.sh "A cat on the table"
+
+# 指定输出路径和尺寸
+./img.sh "A sunset" /opt/sunset.png 2560 1440
+```
+
+**典型工作流**：
+```bash
+# 1. 用 img.sh 生成入口图片
+./img.sh "A beautiful landscape" /opt/input.png 1280 720
+
+# 2. 用 sd-hires 超分放大
+sd-hires --model models/sd15.gguf --upscale-model models/RealESRGAN_x2plus.bin \
+  --input /opt/input.png --output /opt/output.png --prompt "high quality"
+```
+
+```bash
+# 1. 先编译依赖库（只需一次）
+~/my-shell/build_sd_cpp.sh
+
+# 2. 编译 my-img 项目
+cd ~/my-img
+rm -rf build && mkdir build && cd build
+cmake .. -DSD_PATH=~/stable-diffusion.cpp
+make
+cp sd-hires ../bin/
+
+# 3. 运行
+sd-hires --model xxx.gguf --upscale-model xxx.bin --input a.jpg
+```
+
 ### 3. 使用
 
 ```bash

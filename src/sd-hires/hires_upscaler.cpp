@@ -22,6 +22,10 @@ static void print_usage(const char* prog) {
     printf("  --seed <int>             Random seed (default: random)\n");
     printf("  --width <int>            Output width (default: auto)\n");
     printf("  --height <int>           Output height (default: auto)\n");
+    printf("  --gpu                    Use GPU (default)\n");
+    printf("  --cpu                    Use CPU only\n");
+    printf("  --no-flash-attn          Disable Flash Attention (default: enabled on GPU)\n");
+    printf("  --debug                  Enable debug output\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -37,6 +41,9 @@ int main(int argc, char* argv[]) {
     int width = 0;
     int height = 0;
     uint32_t upscale_factor = 2;
+    bool use_gpu = true;
+    bool use_flash_attn = true;
+    bool debug = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
@@ -63,10 +70,26 @@ int main(int argc, char* argv[]) {
             width = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--height") == 0 && i + 1 < argc) {
             height = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--gpu") == 0) {
+            use_gpu = true;
+        } else if (strcmp(argv[i], "--cpu") == 0) {
+            use_gpu = false;
+        } else if (strcmp(argv[i], "--no-flash-attn") == 0) {
+            use_flash_attn = false;
+        } else if (strcmp(argv[i], "--debug") == 0) {
+            debug = true;
         } else {
             print_usage(argv[0]);
             return 1;
         }
+    }
+
+    if (debug) {
+        printf("[DEBUG] GPU mode: %s\n", use_gpu ? "ON" : "OFF");
+        printf("[DEBUG] Flash Attention: %s\n", use_flash_attn ? "ON" : "OFF");
+        printf("[DEBUG] Model: %s\n", model_path ? model_path : "(null)");
+        printf("[DEBUG] Upscale model: %s\n", upscale_model_path ? upscale_model_path : "(null)");
+        printf("[DEBUG] Input: %s\n", input_path ? input_path : "(null)");
     }
 
     if (!model_path || !upscale_model_path || !input_path) {
@@ -76,17 +99,17 @@ int main(int argc, char* argv[]) {
 
     printf("[Hires Fix] Loading input image: %s\n", input_path);
     int img_w, img_h, img_c;
-    uint8_t* img_data = stbi_load(input_path, &img_w, &img_h, &img_c, 4);
+    uint8_t* img_data = stbi_load(input_path, &img_w, &img_h, &img_c, 3);
     if (!img_data) {
         fprintf(stderr, "Failed to load image: %s\n", input_path);
         return 1;
     }
     printf("[Hires Fix] Input: %dx%d\n", img_w, img_h);
 
-    sd_image_t input_sd_image = {(uint32_t)img_w, (uint32_t)img_h, 4, img_data};
+    sd_image_t input_sd_image = {(uint32_t)img_w, (uint32_t)img_h, 3, img_data};
 
     printf("[Hires Fix] Step 1: AI Upscale %ux with ESRGAN...\n", upscale_factor);
-    upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(upscale_model_path, false, false, 4, 128);
+    upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(upscale_model_path, !use_gpu, false, 4, 128);
     if (!upscaler_ctx) {
         fprintf(stderr, "Failed to create upscaler context\n");
         stbi_image_free(img_data);
@@ -107,6 +130,7 @@ int main(int argc, char* argv[]) {
     int out_h = height > 0 ? height : (int)upscaled_image.height;
 
     printf("[Hires Fix] Step 2: Latent Refinement (img2img)...\n");
+    printf("[Hires Fix]   Mode: %s\n", use_gpu ? "GPU" : "CPU");
     printf("[Hires Fix]   prompt: %s\n", prompt);
     printf("[Hires Fix]   strength: %.2f, steps: %d, seed: %lld\n", strength, steps, (long long)seed);
     printf("[Hires Fix]   output size: %dx%d\n", out_w, out_h);
@@ -116,6 +140,11 @@ int main(int argc, char* argv[]) {
     ctx_params.model_path = model_path;
     ctx_params.wtype = SD_TYPE_Q8_0;
     ctx_params.n_threads = 4;
+    ctx_params.offload_params_to_cpu = !use_gpu;
+    ctx_params.keep_vae_on_cpu = !use_gpu;
+    ctx_params.keep_clip_on_cpu = !use_gpu;
+    ctx_params.flash_attn = use_gpu && use_flash_attn;
+    ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn;
 
     sd_ctx_t* sd_ctx = new_sd_ctx(&ctx_params);
     if (!sd_ctx) {
