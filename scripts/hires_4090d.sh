@@ -11,6 +11,8 @@
 
 set -e
 
+export LD_LIBRARY_PATH=/opt/stable-diffusion.cpp/bin:$LD_LIBRARY_PATH
+
 PROMPT="${1:-Swiss Alps, majestic mountain peaks, snow-capped mountains, crystal clear lake, green valleys, scenic landscape, dramatic clouds, golden sunlight, travel destination, photorealistic, high detail, 8K quality}"
 OUTPUT="${2:-hires_final}"
 STEP1="/opt/image/${OUTPUT}_step1.png"
