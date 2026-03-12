@@ -54,6 +54,11 @@ foreach(src ${SRC_FILES})
     add_executable(${final_name} ${src})
     
     target_link_libraries(${final_name} PRIVATE stable-diffusion)
+    target_link_libraries(${final_name} PRIVATE ${CUDA_LIBRARIES})
+    find_library(CUDA_RUNTIME_LIBRARY cudart PATHS /opt/cuda/lib64 /usr/local/cuda/lib64)
+    if(CUDA_RUNTIME_LIBRARY)
+        target_link_libraries(${final_name} PRIVATE ${CUDA_RUNTIME_LIBRARY})
+    endif()
 
     target_include_directories(${final_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     

@@ -65,7 +65,6 @@ echo "使用 CUDA_ARCH: $CUDA_ARCH"
 # CMake 配置
 cmake .. \
     -DSD_CUDA=ON \
-    -DSD_FLASH_ATTN=ON \
     -DSD_FAST_SOFTMAX=ON \
     -DGGML_NATIVE=ON \
     -DGGML_LTO=ON \
