@@ -13,6 +13,55 @@
 
 ---
 
+## ⚡ 重要原则：默认启用 GPU + Flash Attention
+
+**所有新项目必须默认启用 GPU 加速和 Flash Attention，除非硬件/环境确实不支持。**
+
+### 原因
+
+1. **性能提升巨大**：GPU + Flash Attention 可带来 2-10x 加速
+2. **用户体验**：开箱即用高性能，无需用户手动配置
+3. **未来趋势**：AI 推理必须用 GPU
+
+### 实现要求
+
+| 功能 | 默认值 | 备选 | 说明 |
+|------|--------|------|------|
+| GPU | **启用** | `--cpu` 关闭 | 优先使用 GPU |
+| Flash Attention | **启用** | `--no-flash-attn` 关闭 | GPU 模式下默认开启 |
+
+### 代码模板
+
+```cpp
+// 参数定义（默认启用）
+bool use_gpu = true;           // 默认 GPU
+bool use_flash_attn = true;   // 默认启用 Flash Attention
+
+// 命令行解析
+if (strcmp(argv[i], "--cpu") == 0) {
+    use_gpu = false;
+} else if (strcmp(argv[i], "--no-flash-attn") == 0) {
+    use_flash_attn = false;
+}
+
+// SD 上下文参数
+ctx_params.offload_params_to_cpu = !use_gpu;
+ctx_params.keep_vae_on_cpu = !use_gpu;
+ctx_params.keep_clip_on_cpu = !use_gpu;
+ctx_params.flash_attn = use_gpu && use_flash_attn;
+ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn;
+```
+
+### 编译要求
+
+编译 `stable-diffusion.cpp` 时必须启用：
+```bash
+cmake . -DSD_CUDA=ON -DSD_FLASH_ATTN=ON -DCMAKE_BUILD_TYPE=Release
+make -j4
+```
+
+---
+
 ## 资源目录规范
 
 **所有与本项目相关的资源文件都放在 `/opt/image/` 目录**
@@ -355,6 +404,10 @@ foreach(src ${SRC_FILES})
     set(final_name ${dir})
     
     add_executable(${final_name} ${src})
+    
+    # ============================================================
+    # 默认启用 GPU + Flash Attention（除非确实无法集成）
+    # ============================================================
     target_link_libraries(${final_name}
         ${SD_PATH}/build/libstable-diffusion.a 
         ${SD_PATH}/build/ggml/src/libggml-cpu.a
@@ -362,7 +415,18 @@ foreach(src ${SRC_FILES})
         gomp
         pthread
         m
+        # CUDA 库（GPU 支持必需）
+        cuda
+        cudart
     )
+    
+    # CUDA 编译选项
+    if(EXISTS ${SD_PATH}/build/CMakeCache.txt)
+        file(STRINGS ${SD_PATH}/build/CMakeCache.txt CUDA_ENABLE PARENT_SCOPE)
+        if(CUDA_ENABLE MATCHES "CUDA_ENABLE:BOOL=ON")
+            add_definitions(-DSD_CUDA)
+        endif()
+    endif()
 endforeach()
 ```
 
@@ -376,6 +440,108 @@ endforeach()
 | `gomp` | OpenMP（多线程） |
 | `pthread` | POSIX 线程 |
 | `m` | 数学库 |
+| `cuda` | CUDA 驱动 |
+| `cudart` | CUDA 运行时 |
+
+---
+
+## GPU + Flash Attention 加速（默认启用）
+
+### 重要：所有新项目必须默认启用
+
+**除非硬件/环境确实不支持，否则必须默认启用 GPU + Flash Attention。**
+
+### 1. 编译 stable-diffusion.cpp（前置条件）
+
+```bash
+cd stable-diffusion.cpp
+cmake . -DSD_CUDA=ON -DSD_FLASH_ATTN=ON -DCMAKE_BUILD_TYPE=Release
+make -j4
+```
+
+### 2. 代码中启用 GPU + Flash Attention
+
+```cpp
+// ============================================================
+// 默认配置（GPU + Flash Attention 启用）
+// ============================================================
+bool use_gpu = true;           // 默认: GPU
+bool use_flash_attn = true;    // 默认: 启用 Flash Attention
+
+// ============================================================
+// 命令行参数（允许用户覆盖默认值）
+// ============================================================
+for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--cpu") == 0) {
+        use_gpu = false;
+    } else if (strcmp(argv[i], "--no-flash-attn") == 0) {
+        use_flash_attn = false;
+    }
+}
+
+// ============================================================
+// ESRGAN 超分 - 使用 GPU
+// ============================================================
+upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(
+    upscale_model_path,
+    !use_gpu,    // offload_to_cpu: false=GPU, true=CPU
+    false,       // use_vulkan
+    4,           // n_threads
+    128          // tile_size
+);
+
+// ============================================================
+// SD 模型 - 完整 GPU + Flash Attention 配置
+// ============================================================
+sd_ctx_params_t ctx_params;
+sd_ctx_params_init(&ctx_params);
+ctx_params.model_path = model_path;
+ctx_params.wtype = SD_TYPE_Q8_0;
+ctx_params.n_threads = 4;
+
+// GPU 配置（重要！）
+ctx_params.offload_params_to_cpu = !use_gpu;      // 不卸载到 CPU = 使用 GPU
+ctx_params.keep_vae_on_cpu = !use_gpu;            // VAE 在 GPU 上
+ctx_params.keep_clip_on_cpu = !use_gpu;           // CLIP 在 GPU 上
+
+// Flash Attention（重要！）
+ctx_params.flash_attn = use_gpu && use_flash_attn;           // CLIP/VAE Flash Attn
+ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn; // 扩散模型 Flash Attn
+```
+
+### 3. 运行时指定
+
+```bash
+# 默认: GPU + Flash Attention（高性能）
+sd-hires --model xxx.gguf --upscale-model xxx.bin --input a.jpg
+
+# 关闭 Flash Attention（兼容性问题时使用）
+sd-hires --model xxx.gguf --upscale-model xxx.bin --input a.jpg --no-flash-attn
+
+# 强制 CPU 模式（无 GPU 时自动回退，但建议显式指定）
+sd-hires --model xxx.gguf --upscale-model xxx.bin --input a.jpg --cpu
+
+# 调试模式（查看实际使用哪种后端）
+sd-hires --model xxx.gguf --upscale-model xxx.bin --input a.jpg --debug
+```
+
+### 4. 验证 GPU 使用
+
+```bash
+# 查看 GPU 状态
+nvidia-smi
+
+# 监控 GPU 使用
+watch -n 0.5 nvidia-smi
+```
+
+### 5. 常见问题
+
+| 问题 | 解决方案 |
+|------|----------|
+| 编译报错找不到 `cuda` | 确保 CUDA 已安装，或使用 CPU 模式 |
+| 运行时无 GPU 输出 | 检查 `--debug` 确认实际使用模式 |
+| Flash Attention 报错 | 使用 `--no-flash-attn` 关闭 |
 
 ---
 
