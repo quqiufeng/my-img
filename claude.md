@@ -687,7 +687,7 @@ sd-hires --help
 
 ---
 
-## 调试 stable-diffusion.cpp 代码流程
+## 最佳开发实践：调试 stable-diffusion.cpp 代码流程
 
 当需要实现某个功能但不知道如何调用时，按以下步骤调试：
 
