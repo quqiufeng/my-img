@@ -2,6 +2,9 @@
 build/
 bin/
 
+# Log files
+*.log
+
 # Model files (too large)
 *.gguf
 *.bin
