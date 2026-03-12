@@ -830,12 +830,9 @@ grep -n "generate_image\|sd_img_gen_params" ~/stable-diffusion.cpp/examples/cli/
 
 1. **img2img 推理崩溃**
    - 症状：`GGML_ASSERT(image.width == tensor->ne[0]) failed`
-   - 原因：img2img 时 init_image 尺寸与 width/height 参数不匹配
-   - 状态：代码已修改，正在测试中
-
-2. **Flow 模型参数**
-   - 需要确认 `diffusion_model_path + vae_path + llm_path` 的正确组合
-   - 参考脚本参数：`--diffusion-model`, `--vae`, `--llm`, `--cfg-scale 2.0`, `--diffusion-fa`, `--scheduler karras`, `--vae-tiling`
+   - CLI 可以正常运行，sd-hires 崩溃
+   - 已添加命令对比到上方文档
+   - 状态：正在调试中
 
 ### 📋 下一步
 
