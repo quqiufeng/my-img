@@ -25,26 +25,26 @@ IMG2IMG="./bin/sd-img2img"
 UPSCALE="./bin/sd-upscale"
 
 echo "=== Step 1: Generate base image ==="
-/home/dministrator/my-img/scripts/img_3080.sh "$PROMPT" "$STEP1" 1280 720
+/home/dministrator/my-img/scripts/sdxl.sh "$PROMPT" "$STEP1" 1280 720
 
-echo ""
-echo "=== Step 2: Upscale ==="
-$UPSCALE \
-  --model $MODEL_DIR/2x_ESRGAN.gguf \
-  --input "$STEP1" \
-  --output "$STEP2" \
-  --scale 2
+# echo ""
+# echo "=== Step 2: Upscale ==="
+# $UPSCALE \
+#   --model $MODEL_DIR/2x_ESRGAN.gguf \
+#   --input "$STEP1" \
+#   --output "$STEP2" \
+#   --scale 2
 
 echo ""
 echo "=== Step 3: img2img ==="
-# Step2 已经是放大后的图片 (2560x1440)，用 img2img 增强细节
+# 直接处理 STEP1 原图 (1280x720)
 $IMG2IMG \
   --diffusion-model $MODEL_DIR/z_image_turbo-Q6_K.gguf \
   --vae $MODEL_DIR/ae.safetensors \
   --llm $MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
-  --input "$STEP2" \
+  --input "$STEP1" \
   --output "$FINAL" \
-  --prompt "high quality, detailed, photorealistic, perfect skin, sharp features, 8k" \
+  --prompt "high quality, detailed, photorealistic" \
   --strength 0.35 \
   --steps 8 \
   --seed 42
