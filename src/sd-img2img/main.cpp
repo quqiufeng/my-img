@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
     std::string full_prompt = "masterpiece, ultra-detailed, sharp focus, 8k wallpaper, highly intricate, ";
     full_prompt += prompt;
 
-    // 10GB VRAM: 总是分块处理
+    // 10GB VRAM: 手动分块处理 (2x2网格)
     bool use_tiling = true;
     
     if (!use_tiling) {
@@ -200,73 +200,77 @@ int main(int argc, char** argv) {
         img_params.sample_params.sample_steps = steps;
         img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
         img_params.sample_params.scheduler = KARRAS_SCHEDULER;
-        img_params.vae_tiling_params.enabled = true;
-        img_params.vae_tiling_params.tile_size_x = 128;
-        img_params.vae_tiling_params.tile_size_y = 128;
+        // 禁用VAE tiling，使用手动分块
+        img_params.vae_tiling_params.enabled = false;
 
         sd_image_t* result = generate_image(ctx, &img_params);
         if (result && result->data) {
+            apply_final_enhancement(result->data, result->width, result->height);
             stbi_write_png(output_path, result->width, result->height, 3, result->data, 0);
             printf("[SUCCESS] Saved to %s\n", output_path);
             free(result->data);
             free(result);
         }
     } else {
-        // 大图：分块处理 (2x2网格)
+        // 手动分块处理: 2x2网格
         int tiles_x = 2;
         int tiles_y = 2;
-        int tile_size_w = w / tiles_x;
-        int tile_size_h = h / tiles_y;
+        int tile_w = w / tiles_x;
+        int tile_h = h / tiles_y;
+        int overlap = 64;
 
-        printf("[START] Tiled Processing: 2x2 grid, tile=%dx%d...\n", tile_size_w, tile_size_h);
+        printf("[START] Tiled Processing: 2x2 grid (%dx%d tiles, overlap=%d)...\n", 
+               tile_w, tile_h, overlap);
 
-    for (int ty = 0; ty < tiles_y; ty++) {
-        for (int tx = 0; tx < tiles_x; tx++) {
-            int x = tx * tile_size_w;
-            int y = ty * tile_size_h;
-            int cur_w = tile_size_w;
-            int cur_h = tile_size_h;
+        for (int ty = 0; ty < tiles_y; ty++) {
+            for (int tx = 0; tx < tiles_x; tx++) {
+                int x = tx * tile_w;
+                int y = ty * tile_h;
+                
+                // Crop tile
+                int cur_w = tile_w;
+                int cur_h = tile_h;
+                
+                uint8_t* tile_raw = (uint8_t*)calloc(cur_w * cur_h * 3, 1);
+                for (int i = 0; i < cur_h; i++) {
+                    memcpy(tile_raw + i * cur_w * 3, raw + ((y + i) * w + x) * 3, cur_w * 3);
+                }
+                sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
 
-            // 直接用实际尺寸，不要对齐
-            uint8_t* tile_raw = (uint8_t*)calloc(cur_w * cur_h * 3, 1);
-            for (int i = 0; i < cur_h; i++) {
-                memcpy(tile_raw + i * cur_w * 3, raw + ((y + i) * w + x) * 3, cur_w * 3);
+                sd_img_gen_params_t img_params;
+                sd_img_gen_params_init(&img_params);
+                img_params.prompt = full_prompt.c_str();
+                img_params.init_image = tile_img;
+                img_params.width = cur_w;
+                img_params.height = cur_h;
+                img_params.strength = strength;
+                img_params.seed = seed;
+                img_params.sample_params.sample_steps = steps;
+                img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+                img_params.sample_params.scheduler = KARRAS_SCHEDULER;
+                img_params.vae_tiling_params.enabled = false;
+
+                printf("[TILE] Processing tile (%d,%d) at (%d,%d)...\n", tx, ty, x, y);
+                sd_image_t* out_tile = generate_image(ctx, &img_params);
+
+                if (out_tile && out_tile->data) {
+                    blend_tile_to_canvas(canvas, w, h, out_tile->data, out_tile->width, out_tile->height, x, y, overlap);
+                    free(out_tile->data);
+                    free(out_tile);
+                    printf("[TILE] Done tile (%d,%d)\n", tx, ty);
+                } else {
+                    printf("[ERROR] Failed to generate tile (%d,%d)\n", tx, ty);
+                }
+                free(tile_raw);
             }
-            sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
-
-            sd_img_gen_params_t img_params;
-            sd_img_gen_params_init(&img_params);
-            img_params.prompt = full_prompt.c_str();
-            img_params.init_image = tile_img;
-            img_params.width = cur_w;
-            img_params.height = cur_h;
-            img_params.strength = strength;
-            img_params.seed = seed;
-            img_params.sample_params.sample_steps = steps;
-            img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
-            img_params.sample_params.scheduler = KARRAS_SCHEDULER;
-            img_params.vae_tiling_params.enabled = true;
-            img_params.vae_tiling_params.tile_size_x = 128;
-            img_params.vae_tiling_params.tile_size_y = 128;
-
-            sd_image_t* out_tile = generate_image(ctx, &img_params);
-
-            if (out_tile && out_tile->data) {
-                blend_tile_to_canvas(canvas, w, h, out_tile->data, out_tile->width, out_tile->height, x, y, overlap);
-                free(out_tile->data);
-                free(out_tile);
-            }
-            free(tile_raw);
-            printf("\n[DONE] Tile at (%d,%d)\n", x, y);
         }
-    }
 
-    // PNG增强
-    printf("[INFO] Applying contrast and sharpening enhancement...\n");
-    apply_final_enhancement(canvas, w, h);
+        // 后期增强
+        printf("[INFO] Applying contrast and sharpening...\n");
+        apply_final_enhancement(canvas, w, h);
 
-    stbi_write_png(output_path, w, h, 3, canvas, 0);
-    printf("[SUCCESS] Saved to %s\n", output_path);
+        stbi_write_png(output_path, w, h, 3, canvas, 0);
+        printf("[SUCCESS] Saved to %s\n", output_path);
     }
 
     stbi_image_free(raw);
