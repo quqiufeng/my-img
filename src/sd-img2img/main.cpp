@@ -64,15 +64,13 @@ static void blend_tile_to_canvas(uint8_t* canvas, int canvas_w, int canvas_h,
 }
 
 // =============================================================================
-// 3. 图像后期像素增强
-// =============================================================================
-// 2. 图像后期像素增强 (解决 VAE 发灰、模糊问题)
+// 2. 图像后期像素增强
 // =============================================================================
 static void apply_final_enhancement(uint8_t* data, int w, int h) {
-    const float contrast = 1.15f;
-    const float brightness = -8.0f;
-    const float saturation = 1.12f;
-    const float sharpen_strength = 0.3f;
+    const float contrast = 1.05f;    // 降低对比度
+    const float brightness = 0.0f;   // 移除亮度调整
+    const float saturation = 1.05f;   // 降低饱和度
+    const float sharpen_strength = 0.15f; // 降低锐化
 
     // A. 对比度与饱和度处理
     for (int i = 0; i < w * h; i++) {
@@ -271,9 +269,9 @@ int main(int argc, char** argv) {
         }
     }
 
-        // 后期增强
-        printf("[INFO] Applying contrast and sharpening...\n");
-        apply_final_enhancement(canvas, w, h);
+        // 后期增强 - 注释掉测试原始拼接效果
+        // printf("[INFO] Applying contrast and sharpening...\n");
+        // apply_final_enhancement(canvas, w, h);
 
         stbi_write_png(output_path, w, h, 3, canvas, 0);
         printf("[SUCCESS] Saved to %s\n", output_path);
