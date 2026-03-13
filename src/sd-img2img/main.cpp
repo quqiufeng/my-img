@@ -13,6 +13,7 @@ void print_help() {
     printf("  --model <path>          SD model path (.gguf) - main model\n");
     printf("  --diffusion-model <path> Diffusion model path (for some SD variants)\n");
     printf("  --vae <path>            VAE model path\n");
+    printf("  --taesd <path>          TAESD (tiny VAE) path\n");
     printf("  --llm <path>            LLM model path (for Flux/Janus)\n");
     printf("  --input <path>          Input image path\n");
     printf("  --output <path>        Output image path\n");
@@ -28,6 +29,9 @@ void print_help() {
     printf("  --gpu                   Use GPU (default)\n");
     printf("  --cpu                   Use CPU only\n");
     printf("  --no-flash-attn         Disable Flash Attention\n");
+    printf("  --tile-size <num>       VAE tiling size (default: 256)\n");
+    printf("  --no-tiling             Disable VAE tiling\n");
+    printf("  --no-vae-conv-direct    Disable VAE direct convolution\n");
     printf("  --debug                 Print debug info\n");
     printf("  --help                  Show this help\n");
 }
@@ -71,6 +75,7 @@ int main(int argc, char** argv) {
     const char* model_path = nullptr;
     const char* diffusion_model_path = nullptr;
     const char* vae_path = nullptr;
+    const char* taesd_path = nullptr;
     const char* llm_path = nullptr;
     const char* input_path = nullptr;
     const char* output_path = "output.png";
@@ -84,6 +89,9 @@ int main(int argc, char** argv) {
     bool use_gpu = true;
     bool use_flash_attn = true;
     bool debug = false;
+    bool vae_tiling = true;
+    bool vae_conv_direct = true;
+    int tile_size = 256;
     enum scheduler_t scheduler = KARRAS_SCHEDULER;
     enum sample_method_t sample_method = EULER_A_SAMPLE_METHOD;
 
@@ -94,6 +102,8 @@ int main(int argc, char** argv) {
             diffusion_model_path = argv[++i];
         } else if (strcmp(argv[i], "--vae") == 0 && i + 1 < argc) {
             vae_path = argv[++i];
+        } else if (strcmp(argv[i], "--taesd") == 0 && i + 1 < argc) {
+            taesd_path = argv[++i];
         } else if (strcmp(argv[i], "--llm") == 0 && i + 1 < argc) {
             llm_path = argv[++i];
         } else if (strcmp(argv[i], "--input") == 0 && i + 1 < argc) {
@@ -120,6 +130,12 @@ int main(int argc, char** argv) {
             use_gpu = true;
         } else if (strcmp(argv[i], "--no-flash-attn") == 0) {
             use_flash_attn = false;
+        } else if (strcmp(argv[i], "--tile-size") == 0 && i + 1 < argc) {
+            tile_size = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--no-tiling") == 0) {
+            vae_tiling = false;
+        } else if (strcmp(argv[i], "--no-vae-conv-direct") == 0) {
+            vae_conv_direct = false;
         } else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
         } else if (strcmp(argv[i], "--scheduler") == 0 && i + 1 < argc) {
@@ -167,6 +183,7 @@ int main(int argc, char** argv) {
         printf("[DEBUG] Model: %s\n", model_path);
         if (diffusion_model_path) printf("[DEBUG] Diffusion Model: %s\n", diffusion_model_path);
         if (vae_path) printf("[DEBUG] VAE: %s\n", vae_path);
+        if (taesd_path) printf("[DEBUG] TAESD: %s\n", taesd_path);
         if (llm_path) printf("[DEBUG] LLM: %s\n", llm_path);
         printf("[DEBUG] Input: %s\n", input_path);
         printf("[DEBUG] Output: %s\n", output_path);
@@ -175,6 +192,8 @@ int main(int argc, char** argv) {
         printf("[DEBUG] Steps: %d\n", steps);
         printf("[DEBUG] GPU: %s\n", use_gpu ? "yes" : "no");
         printf("[DEBUG] Flash Attn: %s\n", use_flash_attn ? "yes" : "no");
+        printf("[DEBUG] VAE Tiling: %s (tile_size=%d)\n", vae_tiling ? "yes" : "no", tile_size);
+        printf("[DEBUG] VAE Conv Direct: %s\n", vae_conv_direct ? "yes" : "no");
     }
 
     sd_set_log_callback(log_callback, nullptr);
@@ -206,6 +225,7 @@ int main(int argc, char** argv) {
     ctx_params.model_path = model_path;
     if (diffusion_model_path) ctx_params.diffusion_model_path = diffusion_model_path;
     if (vae_path) ctx_params.vae_path = vae_path;
+    if (taesd_path) ctx_params.taesd_path = taesd_path;
     if (llm_path) ctx_params.llm_path = llm_path;
     ctx_params.wtype = SD_TYPE_COUNT;  // Auto-detect
     ctx_params.n_threads = 4;
@@ -215,6 +235,7 @@ int main(int argc, char** argv) {
     ctx_params.flash_attn = use_gpu && use_flash_attn;
     ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn;
     ctx_params.vae_decode_only = false;
+    ctx_params.vae_conv_direct = vae_conv_direct;
 
     if (debug) {
         printf("[DEBUG] Creating SD context...\n");
@@ -244,6 +265,13 @@ int main(int argc, char** argv) {
     img_params.strength = strength;
     img_params.seed = seed;
     img_params.sample_params = sample_params;
+
+    if (vae_tiling) {
+        img_params.vae_tiling_params.enabled = true;
+        img_params.vae_tiling_params.tile_size_x = tile_size;
+        img_params.vae_tiling_params.tile_size_y = tile_size;
+        img_params.vae_tiling_params.target_overlap = 32.0f;
+    }
 
     if (debug) {
         printf("[DEBUG] Generating image...\n");
