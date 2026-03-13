@@ -238,32 +238,25 @@ int main(int argc, char** argv) {
             for (int i = 0; i < cur_h; i++) {
                 memcpy(tile_raw + i * cur_w * 3, raw + ((y + i) * w + x) * 3, cur_w * 3);
             }
-            sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
+            // 直接复制tile到canvas，不调用generate_image
+            // sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
+            // sd_img_gen_params_t img_params;
+            // sd_img_gen_params_init(&img_params);
+            // img_params.prompt = full_prompt.c_str();
+            // img_params.init_image = tile_img;
+            // img_params.width = cur_w;
+            // img_params.height = cur_h;
+            // img_params.strength = strength;
+            // img_params.seed = seed;
+            // img_params.sample_params.sample_steps = steps;
+            // img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+            // img_params.sample_params.scheduler = KARRAS_SCHEDULER;
+            // img_params.vae_tiling_params.enabled = false;
 
-            sd_img_gen_params_t img_params;
-            sd_img_gen_params_init(&img_params);
-            img_params.prompt = full_prompt.c_str();
-            img_params.init_image = tile_img;
-            img_params.width = cur_w;
-            img_params.height = cur_h;
-            img_params.strength = strength;
-            img_params.seed = seed;
-            img_params.sample_params.sample_steps = steps;
-            img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
-            img_params.sample_params.scheduler = KARRAS_SCHEDULER;
-            img_params.vae_tiling_params.enabled = false;
-
-            printf("[TILE] Processing tile (%d,%d) at (%d,%d)...\n", tx, ty, x, y);
-            sd_image_t* out_tile = generate_image(tile_ctx, &img_params);
-
-            if (out_tile && out_tile->data) {
-                blend_tile_to_canvas(canvas, w, h, out_tile->data, out_tile->width, out_tile->height, x, y, overlap);
-                free(out_tile->data);
-                free(out_tile);
-                printf("[TILE] Done tile (%d,%d)\n", tx, ty);
-            } else {
-                printf("[ERROR] Failed to generate tile (%d,%d)\n", tx, ty);
+            for (int i = 0; i < cur_h && (y + i) < h; i++) {
+                memcpy(canvas + ((y + i) * w + x) * 3, tile_raw + i * cur_w * 3, cur_w * 3);
             }
+            printf("[TILE] Done tile (%d,%d) - copied only\n", tx, ty);
             free(tile_raw);
             free_sd_ctx(tile_ctx);
         }
