@@ -260,6 +260,28 @@ sudo ln -sf ~/my-img/bin/sd-newtool /usr/local/bin/sd-newtool
 - `RealESRGAN_x2plus.bin` - 2x 放大
 - `RealESRGAN_x4plus.bin` - 4x 放大
 
+### TAESD 轻量级 VAE（可选，高显存优化）
+
+TAESD (Tiny AutoEncoder for Stable Diffusion) 是一种极轻量化的 VAE，解码速度快、显存占用极低，适合高分辨率图片处理（2560x1440+）或 10GB 以下显存显卡。
+
+**下载**：
+```bash
+wget https://huggingface.co/leejet/taesd/resolve/main/taesd_encoder.static.gguf -P /opt/image/
+wget https://huggingface.co/leejet/taesd/resolve/main/taesd_decoder.static.gguf -P /opt/image/
+```
+
+**使用**：
+```bash
+./bin/sd-img2img \
+  --diffusion-model /opt/image/z_image_turbo-Q6_K.gguf \
+  --taesd /opt/image/taesd_encoder.static.gguf \
+  --input input.png --output output.png \
+  --prompt "high quality" \
+  --strength 0.35 --steps 2
+```
+
+**说明**：不使用 `--taesd` 时，程序使用模型内置默认 VAE。TAESD 牺牲一些质量换取显存降低。
+
 ## 工作流示例
 
 ### 生成高清壁纸
