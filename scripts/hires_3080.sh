@@ -16,15 +16,17 @@ cd /home/dministrator/my-img
 
 PROMPT="${1:-Swiss Alps, majestic mountain peaks, snow-capped mountains, crystal clear lake, green valleys, scenic landscape, dramatic clouds, golden sunlight, travel destination, photorealistic, high detail, 8K quality}"
 OUTPUT="${2:-hires_final}"
-STEP1="/home/dministrator/${OUTPUT}_step1.png"
-STEP2="/home/dministrator/${OUTPUT}_step2.png"
-FINAL="/home/dministrator/${OUTPUT}.png"
+
+STEP1="$HOME/${OUTPUT}_step1.png"
+STEP2="$HOME/${OUTPUT}_step2.png"
+FINAL="$HOME/${OUTPUT}.png"
 
 MODEL_DIR="/opt/image"
 IMG2IMG="./bin/sd-img2img"
 UPSCALE="./bin/sd-upscale"
 
 echo "=== Step 1: Generate base image ==="
+# 用 img.sh 生成第一步
 /home/dministrator/my-img/scripts/sdxl.sh "$PROMPT" "$STEP1" 1280 720
 
 # echo ""
@@ -35,21 +37,22 @@ echo "=== Step 1: Generate base image ==="
 #   --output "$STEP2" \
 #   --scale 2
 
+
 echo ""
 echo "=== Step 3: img2img ==="
-# 直接处理 STEP1 原图 (1280x720)
+# 使用 $1 获取脚本启动时传入的那个长 Prompt
+# 增加 steps 到 25，确保细节能“长出来”
+# 增加细节引导词
 $IMG2IMG \
   --diffusion-model $MODEL_DIR/z_image_turbo-Q6_K.gguf \
   --vae $MODEL_DIR/ae.safetensors \
   --llm $MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
   --input "$STEP1" \
   --output "$FINAL" \
-  --prompt "high quality, detailed, photorealistic" \
-  --strength 0.35 \
-  --steps 8 \
+  --prompt "$1, masterpiece, ultra-detailed, sharp focus, 8k" \
+  --strength 0.4 \
+  --steps 25 \
   --seed 42
 
 echo ""
 echo "=== Done ==="
-echo "Final image: $FINAL"
-ls -lh "$FINAL"

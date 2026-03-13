@@ -6,69 +6,42 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
+#include <vector>
+#include <cmath>
+#include <string>
 
-void print_help() {
-    printf("Usage: sd-img2img [options]\n");
-    printf("\nOptions:\n");
-    printf("  --model <path>          SD model path (.gguf) - main model\n");
-    printf("  --diffusion-model <path> Diffusion model path (for some SD variants)\n");
-    printf("  --vae <path>            VAE model path\n");
-    printf("  --taesd <path>          TAESD (tiny VAE) path\n");
-    printf("  --llm <path>            LLM model path (for Flux/Janus)\n");
-    printf("  --input <path>          Input image path\n");
-    printf("  --output <path>        Output image path\n");
-    printf("  --prompt <text>         Positive prompt\n");
-    printf("  --negative-prompt <text> Negative prompt\n");
-    printf("  --strength <0.0-1.0>    Denoising strength (default: 0.45)\n");
-    printf("  --steps <num>           Sampling steps (default: 20)\n");
-    printf("  --seed <num>            Random seed\n");
-    printf("  --width <num>           Output width\n");
-    printf("  --height <num>          Output height\n");
-    printf("  --scheduler <name>     Scheduler (default/karras/exponential/ays/gits/sgm_uniform/simple/smoothstep/kl_optimal/lcm/bong_tangent)\n");
-    printf("  --sample-method <name>  Sample method (euler/euler_a/heun/dpm2/dpmpp_2s_a/dpmpp_2m/dpmpp_2m_v2/ipndm/ipndm_v/lcm/ddim_trailing/tcd/res_multistep/res_2s)\n");
-    printf("  --gpu                   Use GPU (default)\n");
-    printf("  --cpu                   Use CPU only\n");
-    printf("  --no-flash-attn         Disable Flash Attention\n");
-    printf("  --tile-size <num>       VAE tiling size (default: 256)\n");
-    printf("  --no-tiling             Disable VAE tiling\n");
-    printf("  --no-vae-conv-direct    Disable VAE direct convolution\n");
-    printf("  --debug                 Print debug info\n");
-    printf("  --help                  Show this help\n");
-}
-
-sd_image_t load_image(const char* path) {
-    int w, h, c;
-    uint8_t* data = stbi_load(path, &w, &h, &c, 3);  // Force 3 channels
-    if (!data) {
-        fprintf(stderr, "Failed to load image: %s\n", path);
-        return {0, 0, 0, nullptr};
-    }
-    return {(uint32_t)w, (uint32_t)h, 3, data};
-}
-
-void save_image(const sd_image_t& image, const char* path) {
-    if (!stbi_write_png(path, image.width, image.height, image.channel, image.data, 0)) {
-        fprintf(stderr, "Failed to save image: %s\n", path);
+static void blend_tile_to_canvas(uint8_t* canvas, int canvas_w, int canvas_h, 
+                               uint8_t* tile, int tile_w, int tile_h,
+                               int x, int y, int overlap) {
+    for (int i = 0; i < tile_h && (y + i) < canvas_h; i++) {
+        for (int j = 0; j < tile_w && (x + j) < canvas_w; j++) {
+            float weight = 1.0f;
+            float w_x = 1.0f, w_y = 1.0f;
+            
+            if (j < overlap && x > 0) w_x = (float)j / overlap;
+            if (i < overlap && y > 0) w_y = (float)i / overlap;
+            weight = w_x * w_y;
+            
+            int canvas_idx = ((y + i) * canvas_w + (x + j)) * 3;
+            int tile_idx = (i * tile_w + j) * 3;
+            
+            for (int c = 0; c < 3; c++) {
+                canvas[canvas_idx + c] = (uint8_t)(canvas[canvas_idx + c] * (1.0f - weight) + tile[tile_idx + c] * weight);
+            }
+        }
     }
 }
 
-void log_callback(enum sd_log_level_t level, const char* text, void* data) {
-    const char* prefix = "";
-    switch (level) {
-        case SD_LOG_DEBUG: prefix = "[DEBUG]"; break;
-        case SD_LOG_INFO: prefix = "[INFO]"; break;
-        case SD_LOG_WARN: prefix = "[WARN]"; break;
-        case SD_LOG_ERROR: prefix = "[ERROR]"; break;
-    }
-    printf("%s %s\n", prefix, text);
+static int align64(int v) { return (v + 63) & ~63; }
+
+void log_cb(enum sd_log_level_t level, const char* text, void* data) {
+    if (level >= SD_LOG_INFO) printf("%s\n", text);
 }
 
-void progress_callback(int step, int steps, float time, void* data) {
-    printf("\r[PROGRESS] Step %d/%d (%.2fs)", step, steps, time);
+void progress_cb(int step, int steps, float time, void* data) {
+    printf("\r[TILE] Step %d/%d", step, steps);
     fflush(stdout);
-    if (step == steps) {
-        printf("\n");
-    }
 }
 
 int main(int argc, char** argv) {
@@ -80,145 +53,30 @@ int main(int argc, char** argv) {
     const char* input_path = nullptr;
     const char* output_path = "output.png";
     const char* prompt = "";
-    const char* negative_prompt = "";
-    float strength = 0.45f;
-    int steps = 20;
-    int64_t seed = -1;
-    int width = 0;
-    int height = 0;
-    bool use_gpu = true;
-    bool use_flash_attn = true;
-    bool debug = false;
-    bool vae_tiling = true;
-    bool vae_conv_direct = true;
-    int tile_size = 256;
-    enum scheduler_t scheduler = KARRAS_SCHEDULER;
-    enum sample_method_t sample_method = EULER_A_SAMPLE_METHOD;
+    float strength = 0.4f;
+    int steps = 30;
+    int tile_size = 1024;
+    int overlap = 64;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
-            model_path = argv[++i];
-        } else if (strcmp(argv[i], "--diffusion-model") == 0 && i + 1 < argc) {
-            diffusion_model_path = argv[++i];
-        } else if (strcmp(argv[i], "--vae") == 0 && i + 1 < argc) {
-            vae_path = argv[++i];
-        } else if (strcmp(argv[i], "--taesd") == 0 && i + 1 < argc) {
-            taesd_path = argv[++i];
-        } else if (strcmp(argv[i], "--llm") == 0 && i + 1 < argc) {
-            llm_path = argv[++i];
-        } else if (strcmp(argv[i], "--input") == 0 && i + 1 < argc) {
-            input_path = argv[++i];
-        } else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
-            output_path = argv[++i];
-        } else if (strcmp(argv[i], "--prompt") == 0 && i + 1 < argc) {
-            prompt = argv[++i];
-        } else if (strcmp(argv[i], "--negative-prompt") == 0 && i + 1 < argc) {
-            negative_prompt = argv[++i];
-        } else if (strcmp(argv[i], "--strength") == 0 && i + 1 < argc) {
-            strength = atof(argv[++i]);
-        } else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) {
-            steps = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
-            seed = atoll(argv[++i]);
-        } else if (strcmp(argv[i], "--width") == 0 && i + 1 < argc) {
-            width = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--height") == 0 && i + 1 < argc) {
-            height = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--cpu") == 0) {
-            use_gpu = false;
-        } else if (strcmp(argv[i], "--gpu") == 0) {
-            use_gpu = true;
-        } else if (strcmp(argv[i], "--no-flash-attn") == 0) {
-            use_flash_attn = false;
-        } else if (strcmp(argv[i], "--tile-size") == 0 && i + 1 < argc) {
-            tile_size = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--no-tiling") == 0) {
-            vae_tiling = false;
-        } else if (strcmp(argv[i], "--no-vae-conv-direct") == 0) {
-            vae_conv_direct = false;
-        } else if (strcmp(argv[i], "--debug") == 0) {
-            debug = true;
-        } else if (strcmp(argv[i], "--scheduler") == 0 && i + 1 < argc) {
-            const char* s = argv[++i];
-            if (strcmp(s, "default") == 0) scheduler = DISCRETE_SCHEDULER;
-            else if (strcmp(s, "karras") == 0) scheduler = KARRAS_SCHEDULER;
-            else if (strcmp(s, "exponential") == 0) scheduler = EXPONENTIAL_SCHEDULER;
-            else if (strcmp(s, "ays") == 0) scheduler = AYS_SCHEDULER;
-            else if (strcmp(s, "gits") == 0) scheduler = GITS_SCHEDULER;
-            else if (strcmp(s, "sgm_uniform") == 0) scheduler = SGM_UNIFORM_SCHEDULER;
-            else if (strcmp(s, "simple") == 0) scheduler = SIMPLE_SCHEDULER;
-            else if (strcmp(s, "smoothstep") == 0) scheduler = SMOOTHSTEP_SCHEDULER;
-            else if (strcmp(s, "kl_optimal") == 0) scheduler = KL_OPTIMAL_SCHEDULER;
-            else if (strcmp(s, "lcm") == 0) scheduler = LCM_SCHEDULER;
-            else if (strcmp(s, "bong_tangent") == 0) scheduler = BONG_TANGENT_SCHEDULER;
-        } else if (strcmp(argv[i], "--sample-method") == 0 && i + 1 < argc) {
-            const char* s = argv[++i];
-            if (strcmp(s, "euler") == 0) sample_method = EULER_SAMPLE_METHOD;
-            else if (strcmp(s, "euler_a") == 0) sample_method = EULER_A_SAMPLE_METHOD;
-            else if (strcmp(s, "heun") == 0) sample_method = HEUN_SAMPLE_METHOD;
-            else if (strcmp(s, "dpm2") == 0) sample_method = DPM2_SAMPLE_METHOD;
-            else if (strcmp(s, "dpmpp_2s_a") == 0) sample_method = DPMPP2S_A_SAMPLE_METHOD;
-            else if (strcmp(s, "dpmpp_2m") == 0) sample_method = DPMPP2M_SAMPLE_METHOD;
-            else if (strcmp(s, "dpmpp_2m_v2") == 0) sample_method = DPMPP2Mv2_SAMPLE_METHOD;
-            else if (strcmp(s, "ipndm") == 0) sample_method = IPNDM_SAMPLE_METHOD;
-            else if (strcmp(s, "ipndm_v") == 0) sample_method = IPNDM_V_SAMPLE_METHOD;
-            else if (strcmp(s, "lcm") == 0) sample_method = LCM_SAMPLE_METHOD;
-            else if (strcmp(s, "ddim_trailing") == 0) sample_method = DDIM_TRAILING_SAMPLE_METHOD;
-            else if (strcmp(s, "tcd") == 0) sample_method = TCD_SAMPLE_METHOD;
-            else if (strcmp(s, "res_multistep") == 0) sample_method = RES_MULTISTEP_SAMPLE_METHOD;
-            else if (strcmp(s, "res_2s") == 0) sample_method = RES_2S_SAMPLE_METHOD;
-        } else if (strcmp(argv[i], "--help") == 0) {
-            print_help();
-            return 0;
-        }
+        if (strcmp(argv[i], "--model") == 0) model_path = argv[++i];
+        else if (strcmp(argv[i], "--diffusion-model") == 0) diffusion_model_path = argv[++i];
+        else if (strcmp(argv[i], "--vae") == 0) vae_path = argv[++i];
+        else if (strcmp(argv[i], "--taesd") == 0) taesd_path = argv[++i];
+        else if (strcmp(argv[i], "--llm") == 0) llm_path = argv[++i];
+        else if (strcmp(argv[i], "--input") == 0) input_path = argv[++i];
+        else if (strcmp(argv[i], "--output") == 0) output_path = argv[++i];
+        else if (strcmp(argv[i], "--prompt") == 0) prompt = argv[++i];
+        else if (strcmp(argv[i], "--strength") == 0) strength = atof(argv[++i]);
+        else if (strcmp(argv[i], "--steps") == 0) steps = atoi(argv[++i]);
     }
 
-    if (!diffusion_model_path || !input_path) {
-        fprintf(stderr, "Error: --diffusion-model and --input are required\n\n");
-        print_help();
+    if (!model_path || !input_path) {
+        printf("Usage: --model <path> --input <path> --prompt <text>\n");
         return 1;
     }
 
-    if (debug) {
-        printf("[DEBUG] Model: %s\n", model_path);
-        if (diffusion_model_path) printf("[DEBUG] Diffusion Model: %s\n", diffusion_model_path);
-        if (vae_path) printf("[DEBUG] VAE: %s\n", vae_path);
-        if (taesd_path) printf("[DEBUG] TAESD: %s\n", taesd_path);
-        if (llm_path) printf("[DEBUG] LLM: %s\n", llm_path);
-        printf("[DEBUG] Input: %s\n", input_path);
-        printf("[DEBUG] Output: %s\n", output_path);
-        printf("[DEBUG] Prompt: %s\n", prompt);
-        printf("[DEBUG] Strength: %.2f\n", strength);
-        printf("[DEBUG] Steps: %d\n", steps);
-        printf("[DEBUG] GPU: %s\n", use_gpu ? "yes" : "no");
-        printf("[DEBUG] Flash Attn: %s\n", use_flash_attn ? "yes" : "no");
-        printf("[DEBUG] VAE Tiling: %s (tile_size=%d)\n", vae_tiling ? "yes" : "no", tile_size);
-        printf("[DEBUG] VAE Conv Direct: %s\n", vae_conv_direct ? "yes" : "no");
-    }
-
-    sd_set_log_callback(log_callback, nullptr);
-    sd_set_progress_callback(progress_callback, nullptr);
-
-    sd_image_t input_image = load_image(input_path);
-    if (!input_image.data) {
-        return 1;
-    }
-
-    if (width == 0) width = input_image.width;
-    if (height == 0) height = input_image.height;
-
-    sd_image_t mask_image = {0, 0, 1, nullptr};
-    mask_image.width = width;
-    mask_image.height = height;
-    mask_image.data = (uint8_t*)malloc(width * height);
-    if (mask_image.data) {
-        memset(mask_image.data, 255, width * height);
-    }
-
-    if (debug) {
-        printf("[DEBUG] Image size: %dx%d\n", input_image.width, input_image.height);
-        printf("[DEBUG] Output size: %dx%d\n", width, height);
-    }
+    sd_set_log_callback(log_cb, NULL);
 
     sd_ctx_params_t ctx_params;
     sd_ctx_params_init(&ctx_params);
@@ -227,69 +85,86 @@ int main(int argc, char** argv) {
     if (vae_path) ctx_params.vae_path = vae_path;
     if (taesd_path) ctx_params.taesd_path = taesd_path;
     if (llm_path) ctx_params.llm_path = llm_path;
-    ctx_params.wtype = SD_TYPE_COUNT;  // Auto-detect
+    ctx_params.wtype = SD_TYPE_F16;
     ctx_params.n_threads = 4;
-    ctx_params.offload_params_to_cpu = !use_gpu;
-    ctx_params.keep_vae_on_cpu = !use_gpu;
-    ctx_params.keep_clip_on_cpu = !use_gpu;
-    ctx_params.flash_attn = use_gpu && use_flash_attn;
-    ctx_params.diffusion_flash_attn = use_gpu && use_flash_attn;
-    ctx_params.vae_decode_only = false;
-    ctx_params.vae_conv_direct = vae_conv_direct;
+    ctx_params.flash_attn = true;
+    ctx_params.diffusion_flash_attn = true;
 
-    if (debug) {
-        printf("[DEBUG] Creating SD context...\n");
-    }
-
-    sd_ctx_t* sd_ctx = new_sd_ctx(&ctx_params);
-    if (!sd_ctx) {
+    sd_ctx_t* ctx = new_sd_ctx(&ctx_params);
+    if (!ctx) {
         fprintf(stderr, "Failed to create SD context\n");
-        free(input_image.data);
         return 1;
     }
 
-    sd_sample_params_t sample_params;
-    sd_sample_params_init(&sample_params);
-    sample_params.sample_method = sample_method;
-    sample_params.scheduler = scheduler;
-    sample_params.sample_steps = steps;
+    int w, h, c;
+    uint8_t* raw_img = stbi_load(input_path, &w, &h, &c, 3);
+    if (!raw_img) return 1;
+    uint8_t* final_canvas = (uint8_t*)calloc(w * h * 3, 1);
 
-    sd_img_gen_params_t img_params;
-    sd_img_gen_params_init(&img_params);
-    img_params.prompt = prompt;
-    img_params.negative_prompt = negative_prompt;
-    img_params.init_image = input_image;
-    img_params.mask_image = mask_image;
-    img_params.width = width;
-    img_params.height = height;
-    img_params.strength = strength;
-    img_params.seed = seed;
-    img_params.sample_params = sample_params;
+    std::string final_p = "masterpiece, ultra-detailed, sharp focus, 8k, " + std::string(prompt);
 
-    if (vae_tiling) {
-        img_params.vae_tiling_params.enabled = true;
-        img_params.vae_tiling_params.tile_size_x = tile_size;
-        img_params.vae_tiling_params.tile_size_y = tile_size;
-        img_params.vae_tiling_params.target_overlap = 32.0f;
+    printf("[START] Tiled Processing for %dx%d image...\n", w, h);
+
+    for (int y = 0; y < h; y += (tile_size - overlap)) {
+        for (int x = 0; x < w; x += (tile_size - overlap)) {
+            
+            int cur_w = std::min(tile_size, w - x);
+            int cur_h = std::min(tile_size, h - y);
+            int rw = align64(cur_w); 
+            int rh = align64(cur_h);
+
+            uint8_t* tile_raw = (uint8_t*)calloc(rw * rh * 3, 1);
+            for (int i = 0; i < cur_h; i++) {
+                memcpy(tile_raw + i * rw * 3, raw_img + ((y + i) * w + x) * 3, cur_w * 3);
+            }
+            sd_image_t tile_img = {(uint32_t)rw, (uint32_t)rh, 3, tile_raw};
+
+            sd_set_progress_callback(progress_cb, NULL);
+
+            sd_sample_params_t sample_params;
+            sd_sample_params_init(&sample_params);
+            sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+            sample_params.scheduler = KARRAS_SCHEDULER;
+            sample_params.sample_steps = steps;
+
+            sd_img_gen_params_t img_params;
+            sd_img_gen_params_init(&img_params);
+            img_params.prompt = final_p.c_str();
+            img_params.negative_prompt = "";
+            img_params.init_image = tile_img;
+            img_params.width = rw;
+            img_params.height = rh;
+            img_params.strength = strength;
+            img_params.seed = 42;
+            img_params.sample_params = sample_params;
+            img_params.vae_tiling_params.enabled = true;
+            img_params.vae_tiling_params.tile_size_x = 128;
+            img_params.vae_tiling_params.tile_size_y = 128;
+            img_params.init_image = tile_img;
+            img_params.width = rw;
+            img_params.height = rh;
+            img_params.strength = strength;
+            img_params.seed = 42;
+            img_params.sample_params = sample_params;
+
+            sd_image_t* out_tile = generate_image(ctx, &img_params);
+
+            if (out_tile && out_tile->data) {
+                blend_tile_to_canvas(final_canvas, w, h, out_tile->data, rw, rh, x, y, overlap);
+                free(out_tile->data);
+                free(out_tile);
+            }
+            free(tile_raw);
+            printf("\n[DONE] Tile at (%d,%d)\n", x, y);
+        }
     }
 
-    if (debug) {
-        printf("[DEBUG] Generating image...\n");
-    }
+    stbi_write_png(output_path, w, h, 3, final_canvas, 0);
+    printf("[SUCCESS] Saved to %s\n", output_path);
 
-    sd_image_t* result = generate_image(sd_ctx, &img_params);
-    if (result) {
-        save_image(*result, output_path);
-        printf("Image saved to: %s\n", output_path);
-        free(result->data);
-        free(result);
-    } else {
-        fprintf(stderr, "Image generation failed\n");
-    }
+    stbi_image_free(raw_img);
+    free(final_canvas);
+    free_sd_ctx(ctx);
 
-    free_sd_ctx(sd_ctx);
-    free(input_image.data);
-    if (mask_image.data) free(mask_image.data);
-
-    return result ? 0 : 1;
+    return 0;
 }

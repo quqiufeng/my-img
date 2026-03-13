@@ -4,6 +4,117 @@
 
 复刻 ComfyUI 生态理念，但无需麻烦的 Python 依赖。只有**干净的二进制程序**和**命令管道**。
 
+## 3080 (10GB) 高清修复方案：分块重绘与接缝融合
+
+### 核心原理
+
+显存隔离策略：不要直接把 2K 大图传给 SD。在 C++ 业务层手动将大图切成 1024x1024 的小块（Tile），分批次送入 GPU。
+
+### 关键技术点
+
+1. **分块处理 (Tiled Processing)**
+   - 将大图切成 1024x1024 小块
+   - 分批次送入 GPU 处理
+   - 显存占用约 5GB
+
+2. **线性羽化融合 (Linear Feathering)** - 核心接缝消除算法
+   - 相邻分块必须有 64 像素重叠区
+   - 拼接时使用 Alpha 混合消除接缝
+   
+   **原理**：在两个分块重叠的 64 像素区域内，根据距离计算权重：
+   ```cpp
+   // 权重计算：距离边缘越近，新像素权重越低
+   float w_x = (j < overlap) ? (float)j / overlap : 1.0f;
+   float w_y = (i < overlap) ? (float)i / overlap : 1.0f;
+   float weight = w_x * w_y;  // 综合权重
+   
+   // 线性插值混合
+   canvas[idx] = old_pixel * (1 - weight) + new_pixel * weight;
+   ```
+   
+   **效果**：重叠区域像素平滑过渡，消除"十字架"切割线
+
+3. **尺寸对齐 (64-bit Alignment)**
+   - Stable Diffusion 要求宽高必须是 64 的倍数
+   - 使用 `(w + 63) & ~63` 强制对齐
+
+4. **VAE 卸载**
+   - 开启 `keep_vae_on_cpu = true` 减少显存压力
+   - VAE 在 CPU 跑，显存全力供给 U-Net
+
+### 实现代码
+
+```cpp
+// 羽化融合函数
+static void blend_tile_to_canvas(uint8_t* canvas, int canvas_w, int canvas_h, 
+                               uint8_t* tile, int tile_w, int tile_h,
+                               int x, int y, int overlap) {
+    for (int i = 0; i < tile_h && (y + i) < canvas_h; i++) {
+        for (int j = 0; j < tile_w && (x + j) < canvas_w; j++) {
+            // 计算权重
+            float w_x = (j < overlap && x > 0) ? (float)j / overlap : 1.0f;
+            float w_y = (i < overlap && y > 0) ? (float)i / overlap : 1.0f;
+            float weight = w_x * w_y;
+            
+            // 线性插值混合
+            int canvas_idx = ((y + i) * canvas_w + (x + j)) * 3;
+            int tile_idx = (i * tile_w + j) * 3;
+            for (int c = 0; c < 3; c++) {
+                canvas[canvas_idx + c] = (uint8_t)(canvas[canvas_idx + c] * (1.0f - weight) + tile[tile_idx + c] * weight);
+            }
+        }
+    }
+}
+
+// 分块处理主循环
+for (int y = 0; y < h; y += (tile_size - overlap)) {
+    for (int x = 0; x < w; x += (tile_size - overlap)) {
+        // 1. 裁剪 Tile
+        // 2. 推理 generate_image()
+        // 3. 羽化拼接 blend_tile_to_canvas()
+    }
+}
+```
+
+### 参数建议
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| TILE_SIZE | 1024 | 10GB 显存最稳尺寸 |
+| OVERLAP | 64 | 重叠区域，必须≥64 |
+| strength | 0.4 | 保持结构，修复细节 |
+| steps | 30 | 足够步数压实细节 |
+| cfg_scale | 4.5 | Z-Image/Flux 最优值 |
+| tile_size (VAE) | 128 | 防爆显存 |
+
+### 提示词处理逻辑
+
+在分块修复（Tiled Refine）时，提示词处理很关键：
+
+**核心原则**：
+- 保留原始主题关键词，否则分块可能产生风格不符的内容
+- 增加细节增强词，引导 AI 在每块细化纹理
+
+**推荐的提示词结构**：
+```
+正向: (Masterpiece:1.2), (Best quality:1.2), (Highres:1.2), [原始提示词], extremely detailed, sharp focus, intricate textures.
+负向: (low quality, worst quality:1.4), blurry, noise, grain, distorted.
+```
+
+**代码自动增强**：
+- 启用 hires_fix 时，自动添加 `masterpiece, ultra-detailed, sharp focus, 8k wallpaper, highly intricate,`
+
+### 为什么 0.4 强度没效果？
+
+1. **显存不足**：VAE 占用 3GB，模型 8GB，10GB 不够
+   - 解决：`keep_vae_on_cpu = true`
+
+2. **步数不够**：8 步太少，细节出不来
+   - 解决：设为 30 步
+
+3. **Prompt 太短**：AI 不知道要修什么
+   - 解决：自动拼接质量词
+
 ## 愿景
 
 ComfyUI 以节点式工作流著称，灵活强大，但依赖 Python 生态，安装繁琐。
@@ -47,7 +158,88 @@ stable-diffusion.cpp (源码)  ──编译──>  libstable-diffusion.a
 my-img (工具集)  ──编译──>  sd-hires  <─────┘
 ```
 
-## 快速开始
+## 3080 (10GB) 高清修复方案：分块重绘与接缝融合
+
+### 核心原理
+
+显存隔离策略：不要直接把 2K 大图传给 SD。在 C++ 业务层手动将大图切成 1024x1024 的小块（Tile），分批次送入 GPU。
+
+### 关键技术点
+
+1. **分块处理 (Tiled Processing)**
+   - 将大图切成 1024x1024 小块
+   - 分批次送入 GPU 处理
+   - 显存占用约 5GB
+
+2. **线性羽化融合 (Linear Feathering)**
+   - 相邻分块必须有 64 像素重叠区
+   - 拼接时使用 Alpha 混合消除接缝
+
+3. **尺寸对齐 (64-bit Alignment)**
+   - Stable Diffusion 要求宽高必须是 64 的倍数
+   - 使用 `(w + 63) & ~63` 强制对齐
+
+4. **VAE 卸载**
+   - 开启 `vae_decode_on_cpu` 减少显存压力
+
+### 实现逻辑
+
+```cpp
+// 1. 切块循环：按步长(Tile - Overlap)滑动
+for (int y = 0; y < H; y += (TILE_SIZE - OVERLAP)) {
+    for (int x = 0; x < W; x += (TILE_SIZE - OVERLAP)) {
+        
+        // 2. 计算当前块尺寸
+        int cur_w = std::min(TILE_SIZE, W - x);
+        int cur_h = std::min(TILE_SIZE, H - y);
+        
+        // 3. 尺寸对齐 64
+        int render_w = (cur_w + 63) & ~63;
+        int render_h = (cur_h + 63) & ~63;
+        
+        // 4. 抠图 (Crop)
+        sd_image_t tile = crop_image(input, x, y, cur_w, cur_h);
+        
+        // 5. 推理 (Inference)
+        sd_image_t* processed = generate_image(ctx, &img_params);
+        
+        // 6. 羽化拼接回画布
+        blend_tile_to_canvas(canvas, processed->data, x, y, ...);
+    }
+}
+```
+
+### 参数建议
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| TILE_SIZE | 1024 | 10GB 显存最稳尺寸 |
+| OVERLAP | 64 | 重叠区域 |
+| strength | 0.35 | 保持结构，修复细节 |
+
+### 提示词处理逻辑
+
+在分块修复（Tiled Refine）时，提示词处理很关键：
+
+**核心原则**：
+- 保留原始主题关键词（如 1girl, forest），否则分块可能产生风格不符的内容
+- 增加细节增强词，引导 AI 在每块细化纹理
+
+**推荐的提示词结构**：
+```
+正向: (Masterpiece:1.2), (Best quality:1.2), (Highres:1.2), [原始提示词], extremely detailed, sharp focus, intricate textures.
+负向: (low quality, worst quality:1.4), blurry, noise, grain, distorted.
+```
+
+**为什么不需要针对"局部"改提示词**？
+- img2img 配合 0.35 的 strength 时，AI 会参考原图像素
+- 看到是手就细化手，看到是树叶就细化树叶
+- 风险：如果只写 face，AI 可能在背景墙上画出人脸
+
+**代码自动增强**：
+- 启用 hires_fix 时，自动添加 `masterpiece, extremely detailed, 8k, high quality,`
+- 负向提示词保持简洁，10GB 显存友好
+| tile_size (VAE) | 128 | 防爆显存 |
 
 ### 1. 编译
 
