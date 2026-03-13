@@ -106,3 +106,16 @@ foreach(src ${SRC_FILES})
 
     message(STATUS "[my-img] Created target: ${final_name}")
 endforeach()
+
+# 自动复制二进制到 SD_PATH/bin
+if(SD_PATH)
+    set(OUTPUT_DIR "${SD_PATH}/bin")
+    message(STATUS "[my-img] Copying binaries to ${OUTPUT_DIR}")
+    foreach(target ${ALL_TARGETS})
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+                $<TARGET_FILE:${target}>
+                ${OUTPUT_DIR}/
+        )
+    endforeach()
+endif()
