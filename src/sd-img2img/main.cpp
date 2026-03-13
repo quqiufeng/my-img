@@ -181,8 +181,8 @@ int main(int argc, char** argv) {
     std::string full_prompt = "masterpiece, ultra-detailed, sharp focus, 8k wallpaper, highly intricate, ";
     full_prompt += prompt;
 
-    // 10GB VRAM: 总是分块，除非图片太小
-    bool use_tiling = !(w <= 256 && h <= 256);
+    // 10GB VRAM: 总是分块处理
+    bool use_tiling = true;
     
     if (!use_tiling) {
         // 小图：直接处理
