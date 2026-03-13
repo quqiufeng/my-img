@@ -42,22 +42,16 @@
 // =============================================================================
 // 1. 线性羽化拼接 (消除 Tile 物理接缝)
 // =============================================================================
-// 原理：相邻分块有64像素重叠区域，根据距离计算权重进行Alpha混合
-// 权重计算：距离边缘越近，新像素权重越低，实现平滑过渡
+// 原理：直接覆盖，无复杂blend
 static void blend_tile_to_canvas(uint8_t* canvas, int canvas_w, int canvas_h,
                                 uint8_t* tile, int tile_w, int tile_h,
                                 int x, int y, int overlap) {
     for (int i = 0; i < tile_h && (y + i) < canvas_h; i++) {
         for (int j = 0; j < tile_w && (x + j) < canvas_w; j++) {
-            float w_x = 1.0f, w_y = 1.0f;
-            if (j < overlap && x > 0) w_x = (float)j / overlap;
-            if (i < overlap && y > 0) w_y = (float)i / overlap;
-            float weight = w_x * w_y;
-            
             int c_idx = ((y + i) * canvas_w + (x + j)) * 3;
             int t_idx = (i * tile_w + j) * 3;
             for (int c = 0; c < 3; c++) {
-                canvas[c_idx + c] = (uint8_t)(canvas[c_idx + c] * (1.0f - weight) + tile[t_idx + c] * weight);
+                canvas[c_idx + c] = tile[t_idx + c];
             }
         }
     }
@@ -210,12 +204,12 @@ int main(int argc, char** argv) {
             free(result);
         }
     } else {
-    // 手动分块处理: 2x2网格 - 每个tile新建ctx
+    // 手动分块处理: 2x2网格 - 使用大overlap
     int tiles_x = 2;
     int tiles_y = 2;
     int tile_w = w / tiles_x;
     int tile_h = h / tiles_y;
-    int overlap = 64;
+    int overlap = 128;  // 增大重叠区域
 
     printf("[START] Tiled Processing: 2x2 grid (%dx%d tiles, overlap=%d)...\n", 
            tile_w, tile_h, overlap);
@@ -241,21 +235,25 @@ int main(int argc, char** argv) {
             // 提取tile并处理
             sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
 
+            // 每个tile用不同seed
+            uint64_t tile_seed = seed + ty * 100 + tx;
+            
             sd_img_gen_params_t img_params;
             sd_img_gen_params_init(&img_params);
-            //img_params.prompt = full_prompt.c_str();
-            img_params.prompt = "do not change anything";  // 测试：不改变图片
+            img_params.prompt = full_prompt.c_str();
+            img_params.prompt = "do not change anything";  // 测试
             img_params.init_image = tile_img;
             img_params.width = cur_w;
             img_params.height = cur_h;
             img_params.strength = strength;
-            img_params.seed = seed;
+            img_params.seed = tile_seed;
             img_params.sample_params.sample_steps = steps;
             img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
             img_params.sample_params.scheduler = KARRAS_SCHEDULER;
             img_params.vae_tiling_params.enabled = false;
+            img_params.strength = 0;  // 测试：完全保留原图
 
-            printf("[TILE] Processing tile (%d,%d) at (%d,%d)...\n", tx, ty, x, y);
+            printf("[TILE] Processing tile (%d,%d) at (%d,%d), strength=0...\n", tx, ty, x, y);
             sd_image_t* out_tile = generate_image(tile_ctx, &img_params);
 
             if (out_tile && out_tile->data) {
