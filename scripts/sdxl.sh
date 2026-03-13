@@ -2,6 +2,11 @@
 
 MODEL_DIR="/opt/image"
 
+#Create a portrait of a lovely lady in her early thirties, full body, long hair, looking at the viewer, with an ethereal and delicate brushstroke style. Her porcelain-like skin glows with a soft, gentle light, 
+#flawless porcelain skin, smooth clear complexion, raven-black hair cascades down her back like a waterfall, framing her heart-shaped face. Her eyes are large and expressive, 
+#with a subtle sparkle that hints at her quick wit. The curve of her nose is prominent, giving her an elegant and refined appearance. A faint, beguiling smile plays on her lips, 
+#as if she’s sharing a secret only with the viewer. Every detail of her features is rendered in exquisite precision, cinematic lighting, 8k
+
 PROMPT="${1:-A beautiful landscape}"
 OUTPUT_FILE="$2"
 #1216  832 官方推荐
@@ -9,6 +14,7 @@ OUTPUT_FILE="$2"
 
 #WIDTH="${3:-1216 }"
 #HEIGHT="${4:-832}"
+
 
 WIDTH="${3:-1280 }"
 HEIGHT="${4:-720}"
@@ -30,8 +36,8 @@ echo "Generating image with RealVisXL_V4..."
 $HOME/stable-diffusion.cpp/bin/sd-cli \
   -m "$MODEL_DIR/RealVisXL_V4.0.safetensors" \
   -p "RAW photo, (realistic skin texture:1.2), (visible pores:1.1), $PROMPT, 8k, cinematic lighting, masterpiece" \
-  -n "(plastic:1.4), (shiny skin:1.4), (oily skin:1.4), (makeup:1.2), (airbrushed:1.2), cartoon, anime, blurry, distorted" \
-  --cfg-scale 4.0 \
+  -n "(plastic:1.4), (shiny skin:1.4), (oily skin:1.4), (makeup:1.2), (airbrushed:1.2), cartoon, anime, blurry, distorted,freckles, skin spots, moles, skin blemishes, acne, facial spots, (dirty skin:1.2)" \
+  --cfg-scale 5.5 \
   --sampling-method "dpm++2m" \
   -H $HEIGHT -W $WIDTH \
   --steps 35 \
