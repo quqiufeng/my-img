@@ -3525,6 +3525,11 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_g
     int width                     = sd_img_gen_params->width;
     int height                    = sd_img_gen_params->height;
 
+    // Fix: img2img needs VAE encoder, force decode_only=false
+    if (sd_img_gen_params->init_image.data) {
+        sd_ctx->sd->vae_decode_only = false;
+    }
+
     int vae_scale_factor            = sd_ctx->sd->get_vae_scale_factor();
     int diffusion_model_down_factor = sd_ctx->sd->get_diffusion_model_down_factor();
     int spatial_multiple            = vae_scale_factor * diffusion_model_down_factor;
@@ -3616,16 +3621,13 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_g
             sd_image_to_ggml_tensor(sd_img_gen_params->mask_image, mask_img);
         }
         
-        // Fix: resize init_image if dimensions don't match
-        if (sd_img_gen_params->init_image.width != (uint32_t)width || 
-            sd_img_gen_params->init_image.height != (uint32_t)height) {
+        // Fix: ALWAYS resize init_image to match tensor dimensions
+        {
             sd_image_f32_t image = sd_image_t_to_sd_image_f32_t(sd_img_gen_params->init_image);
             sd_image_f32_t resized = resize_sd_image_f32_t(image, width, height);
             free(image.data);
             sd_image_f32_to_ggml_tensor(resized, init_img, false);
             free(resized.data);
-        } else {
-            sd_image_to_ggml_tensor(sd_img_gen_params->init_image, init_img);
         }
 
         if (sd_version_is_inpaint(sd_ctx->sd->version)) {
