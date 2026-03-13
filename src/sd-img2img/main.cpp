@@ -157,10 +157,10 @@ int main(int argc, char** argv) {
     if (diffusion_model_path) ctx_params.diffusion_model_path = diffusion_model_path;
     if (vae_path) ctx_params.vae_path = vae_path;
     if (llm_path) ctx_params.llm_path = llm_path;
-    ctx_params.flash_attn = true;
-    ctx_params.diffusion_flash_attn = true;
+    ctx_params.flash_attn = false;  // 禁用可能影响多tile的选项
+    ctx_params.diffusion_flash_attn = false;
     ctx_params.vae_decode_only = false;
-    ctx_params.keep_vae_on_cpu = true;  // 10GB VRAM必须
+    ctx_params.keep_vae_on_cpu = true;
     ctx_params.n_threads = 4;
 
     printf("[INFO] Creating context...\n");
@@ -212,58 +212,64 @@ int main(int argc, char** argv) {
             free(result);
         }
     } else {
-        // 手动分块处理: 2x2网格
-        int tiles_x = 2;
-        int tiles_y = 2;
-        int tile_w = w / tiles_x;
-        int tile_h = h / tiles_y;
-        int overlap = 64;
+    // 手动分块处理: 2x2网格 - 每个tile新建ctx
+    int tiles_x = 2;
+    int tiles_y = 2;
+    int tile_w = w / tiles_x;
+    int tile_h = h / tiles_y;
+    int overlap = 64;
 
-        printf("[START] Tiled Processing: 2x2 grid (%dx%d tiles, overlap=%d)...\n", 
-               tile_w, tile_h, overlap);
+    printf("[START] Tiled Processing: 2x2 grid (%dx%d tiles, overlap=%d)...\n", 
+           tile_w, tile_h, overlap);
 
-        for (int ty = 0; ty < tiles_y; ty++) {
-            for (int tx = 0; tx < tiles_x; tx++) {
-                int x = tx * tile_w;
-                int y = ty * tile_h;
-                
-                // Crop tile
-                int cur_w = tile_w;
-                int cur_h = tile_h;
-                
-                uint8_t* tile_raw = (uint8_t*)calloc(cur_w * cur_h * 3, 1);
-                for (int i = 0; i < cur_h; i++) {
-                    memcpy(tile_raw + i * cur_w * 3, raw + ((y + i) * w + x) * 3, cur_w * 3);
-                }
-                sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
-
-                sd_img_gen_params_t img_params;
-                sd_img_gen_params_init(&img_params);
-                img_params.prompt = full_prompt.c_str();
-                img_params.init_image = tile_img;
-                img_params.width = cur_w;
-                img_params.height = cur_h;
-                img_params.strength = strength;
-                img_params.seed = seed;
-                img_params.sample_params.sample_steps = steps;
-                img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
-                img_params.sample_params.scheduler = KARRAS_SCHEDULER;
-                img_params.vae_tiling_params.enabled = false;
-
-                printf("[TILE] Processing tile (%d,%d) at (%d,%d)...\n", tx, ty, x, y);
-                sd_image_t* out_tile = generate_image(ctx, &img_params);
-
-                if (out_tile && out_tile->data) {
-                    blend_tile_to_canvas(canvas, w, h, out_tile->data, out_tile->width, out_tile->height, x, y, overlap);
-                    free(out_tile->data);
-                    free(out_tile);
-                    printf("[TILE] Done tile (%d,%d)\n", tx, ty);
-                } else {
-                    printf("[ERROR] Failed to generate tile (%d,%d)\n", tx, ty);
-                }
-                free(tile_raw);
+    for (int ty = 0; ty < tiles_y; ty++) {
+        for (int tx = 0; tx < tiles_x; tx++) {
+            // 每个tile新建ctx避免状态问题
+            sd_ctx_t* tile_ctx = new_sd_ctx(&ctx_params);
+            if (!tile_ctx) {
+                printf("[ERROR] Failed to create tile ctx\n");
+                continue;
             }
+            
+            int x = tx * tile_w;
+            int y = ty * tile_h;
+            int cur_w = tile_w;
+            int cur_h = tile_h;
+            
+            uint8_t* tile_raw = (uint8_t*)calloc(cur_w * cur_h * 3, 1);
+            for (int i = 0; i < cur_h; i++) {
+                memcpy(tile_raw + i * cur_w * 3, raw + ((y + i) * w + x) * 3, cur_w * 3);
+            }
+            sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
+
+            sd_img_gen_params_t img_params;
+            sd_img_gen_params_init(&img_params);
+            img_params.prompt = full_prompt.c_str();
+            img_params.init_image = tile_img;
+            img_params.width = cur_w;
+            img_params.height = cur_h;
+            img_params.strength = strength;
+            img_params.seed = seed;
+            img_params.sample_params.sample_steps = steps;
+            img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+            img_params.sample_params.scheduler = KARRAS_SCHEDULER;
+            img_params.vae_tiling_params.enabled = false;
+
+            printf("[TILE] Processing tile (%d,%d) at (%d,%d)...\n", tx, ty, x, y);
+            sd_image_t* out_tile = generate_image(tile_ctx, &img_params);
+
+            if (out_tile && out_tile->data) {
+                blend_tile_to_canvas(canvas, w, h, out_tile->data, out_tile->width, out_tile->height, x, y, overlap);
+                free(out_tile->data);
+                free(out_tile);
+                printf("[TILE] Done tile (%d,%d)\n", tx, ty);
+            } else {
+                printf("[ERROR] Failed to generate tile (%d,%d)\n", tx, ty);
+            }
+            free(tile_raw);
+            free_sd_ctx(tile_ctx);
         }
+    }
 
         // 后期增强
         printf("[INFO] Applying contrast and sharpening...\n");
