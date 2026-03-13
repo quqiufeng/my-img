@@ -1,5 +1,7 @@
 # my-img
 
+**GGUF 模型下载**: https://huggingface.co/leejet
+
 复刻 ComfyUI 生态理念，但无需麻烦的 Python 依赖。只有**干净的二进制程序**和**命令管道**。
 
 ## 愿景
