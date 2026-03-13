@@ -49,14 +49,56 @@ static void blend_tile_to_canvas(uint8_t* canvas, int canvas_w, int canvas_h,
                                 int x, int y, int overlap) {
     for (int i = 0; i < tile_h && (y + i) < canvas_h; i++) {
         for (int j = 0; j < tile_w && (x + j) < canvas_w; j++) {
-            float w_x = (j < overlap && x > 0) ? (float)j / overlap : 1.0f;
-            float w_y = (i < overlap && y > 0) ? (float)i / overlap : 1.0f;
+            float w_x = 1.0f, w_y = 1.0f;
+            if (j < overlap && x > 0) w_x = (float)j / overlap;
+            if (i < overlap && y > 0) w_y = (float)i / overlap;
             float weight = w_x * w_y;
-
-            int canvas_idx = ((y + i) * canvas_w + (x + j)) * 3;
-            int tile_idx = (i * tile_w + j) * 3;
+            
+            int c_idx = ((y + i) * canvas_w + (x + j)) * 3;
+            int t_idx = (i * tile_w + j) * 3;
             for (int c = 0; c < 3; c++) {
-                canvas[canvas_idx + c] = (uint8_t)(canvas[canvas_idx + c] * (1.0f - weight) + tile[tile_idx + c] * weight);
+                canvas[c_idx + c] = (uint8_t)(canvas[c_idx + c] * (1.0f - weight) + tile[t_idx + c] * weight);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// 3. 图像后期像素增强
+// =============================================================================
+// 2. 图像后期像素增强 (解决 VAE 发灰、模糊问题)
+// =============================================================================
+static void apply_final_enhancement(uint8_t* data, int w, int h) {
+    const float contrast = 1.15f;
+    const float brightness = -8.0f;
+    const float saturation = 1.12f;
+    const float sharpen_strength = 0.3f;
+
+    // A. 对比度与饱和度处理
+    for (int i = 0; i < w * h; i++) {
+        for (int c = 0; c < 3; c++) {
+            float p = data[i * 3 + c];
+            p = (p - 128.0f) * contrast + 128.0f + brightness;
+            data[i * 3 + c] = (uint8_t)std::clamp(p, 0.0f, 255.0f);
+        }
+        float r = data[i * 3 + 0], g = data[i * 3 + 1], b = data[i * 3 + 2];
+        float gray = 0.299f * r + 0.587f * g + 0.114f * b;
+        data[i * 3 + 0] = (uint8_t)std::clamp(gray + (r - gray) * saturation, 0.0f, 255.0f);
+        data[i * 3 + 1] = (uint8_t)std::clamp(gray + (g - gray) * saturation, 0.0f, 255.0f);
+        data[i * 3 + 2] = (uint8_t)std::clamp(gray + (b - gray) * saturation, 0.0f, 255.0f);
+    }
+
+    // B. 细节锐化 (Laplacian算子)
+    std::vector<uint8_t> backup(data, data + w * h * 3);
+    for (int y = 1; y < h - 1; y++) {
+        for (int x = 1; x < w - 1; x++) {
+            for (int c = 0; c < 3; c++) {
+                int idx = (y * w + x) * 3 + c;
+                float center = backup[idx];
+                float surround = (backup[((y-1)*w + x)*3 + c] + backup[((y+1)*w + x)*3 + c] +
+                                  backup[(y*w + (x-1))*3 + c] + backup[(y*w + (x+1))*3 + c]) / 4.0f;
+                float val = center + sharpen_strength * (center - surround);
+                data[idx] = (uint8_t)std::clamp(val, 0.0f, 255.0f);
             }
         }
     }
@@ -117,8 +159,8 @@ int main(int argc, char** argv) {
     if (llm_path) ctx_params.llm_path = llm_path;
     ctx_params.flash_attn = true;
     ctx_params.diffusion_flash_attn = true;
-    ctx_params.keep_vae_on_cpu = true;
-    ctx_params.vae_decode_only = false;  // img2img needs encoder
+    ctx_params.vae_decode_only = false;
+    ctx_params.keep_vae_on_cpu = true;  // 10GB VRAM必须
     ctx_params.n_threads = 4;
 
     printf("[INFO] Creating context...\n");
@@ -139,58 +181,65 @@ int main(int argc, char** argv) {
     std::string full_prompt = "masterpiece, ultra-detailed, sharp focus, 8k wallpaper, highly intricate, ";
     full_prompt += prompt;
 
-    printf("[START] Simple img2img for %dx%d image...\n", w, h);
+    // 10GB VRAM: 总是分块，除非图片太小
+    bool use_tiling = !(w <= 256 && h <= 256);
+    
+    if (!use_tiling) {
+        // 小图：直接处理
+        printf("[START] Small image (%dx%d), direct processing...\n", w, h);
+        sd_image_t input_image = {(uint32_t)w, (uint32_t)h, 3, raw};
+        
+        sd_img_gen_params_t img_params;
+        sd_img_gen_params_init(&img_params);
+        img_params.prompt = full_prompt.c_str();
+        img_params.init_image = input_image;
+        img_params.width = w;
+        img_params.height = h;
+        img_params.strength = strength;
+        img_params.seed = seed;
+        img_params.sample_params.sample_steps = steps;
+        img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+        img_params.sample_params.scheduler = KARRAS_SCHEDULER;
+        img_params.vae_tiling_params.enabled = true;
+        img_params.vae_tiling_params.tile_size_x = 128;
+        img_params.vae_tiling_params.tile_size_y = 128;
 
-    // Simple img2img without tiling
-    sd_image_t input_image = {(uint32_t)w, (uint32_t)h, 3, raw};
-
-    sd_img_gen_params_t img_params;
-    sd_img_gen_params_init(&img_params);
-    img_params.prompt = full_prompt.c_str();
-    img_params.init_image = input_image;
-    img_params.width = w;
-    img_params.height = h;
-    img_params.strength = strength;
-    img_params.seed = seed;
-    img_params.sample_params.sample_steps = steps;
-    img_params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
-    img_params.sample_params.scheduler = KARRAS_SCHEDULER;
-    img_params.vae_tiling_params.enabled = true;
-    img_params.vae_tiling_params.tile_size_x = 128;
-    img_params.vae_tiling_params.tile_size_y = 128;
-
-    sd_image_t* result = generate_image(ctx, &img_params);
-
-    if (result && result->data) {
-        stbi_write_png(output_path, result->width, result->height, 3, result->data, 0);
-        printf("[SUCCESS] Saved to %s\n", output_path);
-        free(result->data);
-        free(result);
+        sd_image_t* result = generate_image(ctx, &img_params);
+        if (result && result->data) {
+            stbi_write_png(output_path, result->width, result->height, 3, result->data, 0);
+            printf("[SUCCESS] Saved to %s\n", output_path);
+            free(result->data);
+            free(result);
+        }
     } else {
-        printf("[ERROR] Failed to generate image\n");
-    }
+        // 大图：分块处理 (2x2网格)
+        int tiles_x = 2;
+        int tiles_y = 2;
+        int tile_size_w = w / tiles_x;
+        int tile_size_h = h / tiles_y;
 
-    /*
-    // Tiled processing (commented out for testing)
-    for (int y = 0; y < h; y += (tile_size - overlap)) {
-        for (int x = 0; x < w; x += (tile_size - overlap)) {
-            int cur_w = std::min(tile_size, w - x);
-            int cur_h = std::min(tile_size, h - y);
-            int rw = align64(cur_w);
-            int rh = align64(cur_h);
+        printf("[START] Tiled Processing: 2x2 grid, tile=%dx%d...\n", tile_size_w, tile_size_h);
 
-            uint8_t* tile_raw = (uint8_t*)calloc(rw * rh * 3, 1);
+    for (int ty = 0; ty < tiles_y; ty++) {
+        for (int tx = 0; tx < tiles_x; tx++) {
+            int x = tx * tile_size_w;
+            int y = ty * tile_size_h;
+            int cur_w = tile_size_w;
+            int cur_h = tile_size_h;
+
+            // 直接用实际尺寸，不要对齐
+            uint8_t* tile_raw = (uint8_t*)calloc(cur_w * cur_h * 3, 1);
             for (int i = 0; i < cur_h; i++) {
-                memcpy(tile_raw + i * rw * 3, raw + ((y + i) * w + x) * 3, cur_w * 3);
+                memcpy(tile_raw + i * cur_w * 3, raw + ((y + i) * w + x) * 3, cur_w * 3);
             }
-            sd_image_t tile_img = {(uint32_t)rw, (uint32_t)rh, 3, tile_raw};
+            sd_image_t tile_img = {(uint32_t)cur_w, (uint32_t)cur_h, 3, tile_raw};
 
             sd_img_gen_params_t img_params;
             sd_img_gen_params_init(&img_params);
             img_params.prompt = full_prompt.c_str();
             img_params.init_image = tile_img;
-            img_params.width = rw;
-            img_params.height = rh;
+            img_params.width = cur_w;
+            img_params.height = cur_h;
             img_params.strength = strength;
             img_params.seed = seed;
             img_params.sample_params.sample_steps = steps;
@@ -203,7 +252,7 @@ int main(int argc, char** argv) {
             sd_image_t* out_tile = generate_image(ctx, &img_params);
 
             if (out_tile && out_tile->data) {
-                blend_tile_to_canvas(canvas, w, h, out_tile->data, rw, rh, x, y, overlap);
+                blend_tile_to_canvas(canvas, w, h, out_tile->data, out_tile->width, out_tile->height, x, y, overlap);
                 free(out_tile->data);
                 free(out_tile);
             }
@@ -212,9 +261,13 @@ int main(int argc, char** argv) {
         }
     }
 
+    // PNG增强
+    printf("[INFO] Applying contrast and sharpening enhancement...\n");
+    apply_final_enhancement(canvas, w, h);
+
     stbi_write_png(output_path, w, h, 3, canvas, 0);
     printf("[SUCCESS] Saved to %s\n", output_path);
-    */
+    }
 
     stbi_image_free(raw);
     free(canvas);
