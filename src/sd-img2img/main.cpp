@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
     ctx_params.n_threads = 4;
     ctx_params.flash_attn = true;
     ctx_params.diffusion_flash_attn = true;
+    ctx_params.keep_vae_on_cpu = true;  // Critical: move VAE to CPU for 10GB VRAM
 
     sd_ctx_t* ctx = new_sd_ctx(&ctx_params);
     if (!ctx) {
@@ -138,14 +139,8 @@ int main(int argc, char** argv) {
             img_params.seed = 42;
             img_params.sample_params = sample_params;
             img_params.vae_tiling_params.enabled = true;
-            img_params.vae_tiling_params.tile_size_x = 128;
-            img_params.vae_tiling_params.tile_size_y = 128;
-            img_params.init_image = tile_img;
-            img_params.width = rw;
-            img_params.height = rh;
-            img_params.strength = strength;
-            img_params.seed = 42;
-            img_params.sample_params = sample_params;
+            img_params.vae_tiling_params.tile_size_x = 256;
+            img_params.vae_tiling_params.tile_size_y = 256;
 
             sd_image_t* out_tile = generate_image(ctx, &img_params);
 
