@@ -12,50 +12,31 @@ Code Search Tool - 代码索引查询工具
   --find <name>, -f        精确查找符号名称
   --search <keyword>       模糊搜索关键字
   --file <filename>        获取指定文件中的所有函数
+  --regex <pattern>        正则表达式搜索
+  --fuzzy <keyword>        模糊匹配搜索
+  --batch <symbols>        批量查找符号（逗号分隔）
+  --json                   输出 JSON 格式
+  --indent <n>             JSON 缩进（默认 2）
   --no-code                不显示代码片段（只显示元数据）
+  --full-code              显示完整代码（不裁剪）
+  --limit <n>              限制返回结果数量（默认 20）
 
 【使用示例】
 
 1. 查看索引统计信息:
    $ python3 code_search.py stable-diffusion-cpp.bin --stats
 
-   输出:
-   【索引统计】
-     总符号数: 88,750
-     版本: 3
-     字符串表: 2,000,863 bytes
-     代码表: 14,435,037 bytes
-     上下文表: 85,693,877 bytes
+2. 精确查找函数（JSON 输出）:
+   $ python3 code_search.py stable-diffusion-cpp.bin --find generate_image --json
 
-2. 精确查找函数:
-   $ python3 code_search.py stable-diffusion-cpp.bin --find generate_image
+3. 正则搜索:
+   $ python3 code_search.py stable-diffusion-cpp.bin --regex "^ggml_.*" --json
 
-   输出:
-   【函数】generate_image
-   文件: /path/to/stable-diffusion.cpp:3585
-   签名: sd_image_t* generate_image(...)
-   头文件: ggml_extend.hpp, model.h, ...
-   [代码片段...]
+4. 模糊搜索（拼写容错）:
+   $ python3 code_search.py stable-diffusion-cpp.bin --fuzzy "gen_img" --json
 
-3. 模糊搜索关键字:
-   $ python3 code_search.py stable-diffusion-cpp.bin --search upscale
-
-   输出:
-   找到 20 个结果:
-     1. [变量] upscale_factor @ ...
-     2. [函数] ggml_compute_forward_upscale_f32 @ ...
-
-4. 获取文件中的所有函数:
-   $ python3 code_search.py stable-diffusion-cpp.bin --file stable-diffusion.cpp
-
-   输出:
-   找到 156 个函数:
-     1. generate_image (line 3585)
-     2. img2img (line 3680)
-     ...
-
-5. 只显示元数据（不显示代码）:
-   $ python3 code_search.py stable-diffusion-cpp.bin --find main --no-code
+5. 批量查找:
+   $ python3 code_search.py stable-diffusion-cpp.bin --batch "func1,func2,func3" --json
 
 【索引格式】
 - 支持 V3 格式索引文件（由 code_index.py 生成）
@@ -69,19 +50,18 @@ Code Search Tool - 代码索引查询工具
 【依赖】
 - Python 3.8+
 - 需要 code_index 项目生成的 .bin 索引文件
-
-【作者】
-基于 codemine 项目的 SymbolIndexReader 实现
 """
 
 import os
 import sys
 import json
 import struct
+import re
 from pathlib import Path
-from typing import List, Dict, Optional
-from dataclasses import dataclass
+from typing import List, Dict, Optional, Any
+from dataclasses import dataclass, asdict
 from enum import Enum
+from datetime import datetime
 
 
 class SymbolKind(Enum):
@@ -128,6 +108,7 @@ class IndexReader:
         self.code_table = b""
         self.context_table = b""
         self.num_symbols = 0
+        self._symbol_cache = {}  # 名称 -> 偏移缓存
 
     def open(self) -> bool:
         """打开索引文件"""
@@ -151,11 +132,9 @@ class IndexReader:
             }
 
             if self.header["magic"] != self.MAGIC:
-                print(f"错误: 无效的 magic number: {self.header['magic']:#x}")
                 return False
 
             if self.header["version"] < 3:
-                print(f"错误: 只支持 V3+ 索引，当前版本: {self.header['version']}")
                 return False
 
             self.num_symbols = self.header["num_symbols"]
@@ -173,10 +152,22 @@ class IndexReader:
                 self.file.seek(self.header["context_table_offset"])
                 self.context_table = self.file.read(self.header["context_table_size"])
 
+            # 构建符号缓存
+            self._build_symbol_cache()
+
             return True
         except Exception as e:
-            print(f"错误: 无法打开索引文件: {e}")
             return False
+
+    def _build_symbol_cache(self):
+        """构建符号名称到文件偏移的缓存"""
+        self.file.seek(self.header["symbols_offset"])
+        for i in range(self.num_symbols):
+            offset = self.file.tell()
+            data = struct.unpack("=20I", self.file.read(self.SYMBOL_SIZE))
+            name = self._get_string(data[0])
+            if name:
+                self._symbol_cache[name] = offset
 
     def close(self):
         """关闭索引文件"""
@@ -218,124 +209,132 @@ class IndexReader:
         except json.JSONDecodeError:
             return {}
 
-    def find_symbol(self, name: str) -> Optional[Symbol]:
-        """精确查找符号"""
-        self.file.seek(self.header["symbols_offset"])
-
-        for _ in range(self.num_symbols):
+    def _read_symbol_at_offset(self, offset: int) -> Optional[Symbol]:
+        """从指定偏移读取符号"""
+        try:
+            self.file.seek(offset)
             data = struct.unpack("=20I", self.file.read(self.SYMBOL_SIZE))
 
             name_offset = data[0]
-            symbol_name = self._get_string(name_offset)
+            signature_offset = data[3]
+            file_path_offset = data[5]
+            line = data[8]
+            code_offset = data[11]
+            code_length = data[12]
+            context_offset = data[13]
+            context_length = data[14]
+            kind = data[19]
 
-            if symbol_name == name:
-                # 找到匹配
-                signature_offset = data[3]
-                file_path_offset = data[5]
-                line = data[8]
-                code_offset = data[11]
-                code_length = data[12]
-                context_offset = data[13]
-                context_length = data[14]
-                kind = data[19]
+            context = self._get_context(context_offset, context_length)
 
-                context = self._get_context(context_offset, context_length)
+            return Symbol(
+                name=self._get_string(name_offset),
+                signature=self._get_string(signature_offset),
+                file_path=self._get_string(file_path_offset),
+                line=line,
+                kind=kind,
+                code=self._get_code(code_offset, code_length),
+                includes=context.get("includes", []),
+                macros=context.get("macros", {}),
+                typedefs=context.get("typedefs", {}),
+            )
+        except Exception:
+            return None
 
-                return Symbol(
-                    name=symbol_name,
-                    signature=self._get_string(signature_offset),
-                    file_path=self._get_string(file_path_offset),
-                    line=line,
-                    kind=kind,
-                    code=self._get_code(code_offset, code_length),
-                    includes=context.get("includes", []),
-                    macros=context.get("macros", {}),
-                    typedefs=context.get("typedefs", {}),
-                )
-
+    def find_symbol(self, name: str) -> Optional[Symbol]:
+        """精确查找符号（O(1)）"""
+        if name in self._symbol_cache:
+            return self._read_symbol_at_offset(self._symbol_cache[name])
         return None
+
+    def find_symbols(self, names: List[str]) -> Dict[str, Optional[Symbol]]:
+        """批量查找符号"""
+        return {name: self.find_symbol(name) for name in names}
 
     def search_symbols(self, keyword: str, max_results: int = 20) -> List[Symbol]:
         """搜索包含关键字的符号"""
         results = []
-        self.file.seek(self.header["symbols_offset"])
+        keyword_lower = keyword.lower()
 
-        for _ in range(self.num_symbols):
-            data = struct.unpack("=20I", self.file.read(self.SYMBOL_SIZE))
-
-            name_offset = data[0]
-            symbol_name = self._get_string(name_offset)
-
-            if keyword.lower() in symbol_name.lower():
-                signature_offset = data[3]
-                file_path_offset = data[5]
-                line = data[8]
-                code_offset = data[11]
-                code_length = data[12]
-                context_offset = data[13]
-                context_length = data[14]
-                kind = data[19]
-
-                context = self._get_context(context_offset, context_length)
-
-                results.append(
-                    Symbol(
-                        name=symbol_name,
-                        signature=self._get_string(signature_offset),
-                        file_path=self._get_string(file_path_offset),
-                        line=line,
-                        kind=kind,
-                        code=self._get_code(code_offset, code_length),
-                        includes=context.get("includes", []),
-                        macros=context.get("macros", {}),
-                        typedefs=context.get("typedefs", {}),
-                    )
-                )
-
-                if len(results) >= max_results:
-                    break
+        for name, offset in self._symbol_cache.items():
+            if keyword_lower in name.lower():
+                symbol = self._read_symbol_at_offset(offset)
+                if symbol:
+                    results.append(symbol)
+                    if len(results) >= max_results:
+                        break
 
         return results
+
+    def search_regex(self, pattern: str, max_results: int = 20) -> List[Symbol]:
+        """正则表达式搜索"""
+        results = []
+        try:
+            regex = re.compile(pattern, re.IGNORECASE)
+            for name, offset in self._symbol_cache.items():
+                if regex.search(name):
+                    symbol = self._read_symbol_at_offset(offset)
+                    if symbol:
+                        results.append(symbol)
+                        if len(results) >= max_results:
+                            break
+        except re.error:
+            pass
+        return results
+
+    def search_fuzzy(
+        self, keyword: str, threshold: int = 3, max_results: int = 20
+    ) -> List[tuple]:
+        """模糊匹配搜索（Levenshtein 距离）"""
+        results = []
+        keyword_lower = keyword.lower()
+
+        for name, offset in self._symbol_cache.items():
+            name_lower = name.lower()
+            # 前缀匹配
+            if name_lower.startswith(keyword_lower):
+                score = 0
+            else:
+                # 计算 Levenshtein 距离
+                score = self._levenshtein_distance(keyword_lower, name_lower)
+
+            if score <= threshold:
+                symbol = self._read_symbol_at_offset(offset)
+                if symbol:
+                    results.append((score, symbol))
+
+        # 按分数排序
+        results.sort(key=lambda x: x[0])
+        return [(score, sym) for score, sym in results[:max_results]]
+
+    def _levenshtein_distance(self, s1: str, s2: str) -> int:
+        """计算 Levenshtein 距离"""
+        if len(s1) < len(s2):
+            return self._levenshtein_distance(s2, s1)
+
+        if len(s2) == 0:
+            return len(s1)
+
+        previous_row = range(len(s2) + 1)
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+
+        return previous_row[-1]
 
     def get_functions_in_file(self, file_name: str) -> List[Symbol]:
         """获取指定文件中的所有函数"""
         results = []
-        self.file.seek(self.header["symbols_offset"])
 
-        for _ in range(self.num_symbols):
-            data = struct.unpack("=20I", self.file.read(self.SYMBOL_SIZE))
-
-            kind = data[19]
-            if kind != 0:  # 只取函数
-                continue
-
-            file_path_offset = data[5]
-            file_path = self._get_string(file_path_offset)
-
-            if file_name in file_path:
-                name_offset = data[0]
-                signature_offset = data[3]
-                line = data[8]
-                code_offset = data[11]
-                code_length = data[12]
-                context_offset = data[13]
-                context_length = data[14]
-
-                context = self._get_context(context_offset, context_length)
-
-                results.append(
-                    Symbol(
-                        name=self._get_string(name_offset),
-                        signature=self._get_string(signature_offset),
-                        file_path=file_path,
-                        line=line,
-                        kind=kind,
-                        code=self._get_code(code_offset, code_length),
-                        includes=context.get("includes", []),
-                        macros=context.get("macros", {}),
-                        typedefs=context.get("typedefs", {}),
-                    )
-                )
+        for name, offset in self._symbol_cache.items():
+            symbol = self._read_symbol_at_offset(offset)
+            if symbol and symbol.kind == 0 and file_name in symbol.file_path:
+                results.append(symbol)
 
         return results
 
@@ -350,8 +349,76 @@ class IndexReader:
         }
 
 
+def symbol_to_dict(symbol: Symbol, full_code: bool = False) -> Dict[str, Any]:
+    """将 Symbol 转换为字典（用于 JSON 序列化）"""
+    kind_names = {
+        0: "function",
+        1: "class",
+        2: "struct",
+        3: "enum",
+        4: "namespace",
+        5: "typedef",
+        6: "variable",
+        7: "macro",
+    }
+
+    # 智能裁剪代码片段
+    code_snippet = symbol.code
+    if not full_code and code_snippet:
+        code_snippet = smart_truncate_code(code_snippet)
+
+    return {
+        "name": symbol.name,
+        "kind": kind_names.get(symbol.kind, "unknown"),
+        "signature": symbol.signature,
+        "location": {"file": symbol.file_path, "line": symbol.line, "column": 0},
+        "code_snippet": code_snippet,
+        "context": {
+            "includes": symbol.includes[:10] if symbol.includes else [],  # 限制数量
+            "macros": symbol.macros,
+            "typedefs": symbol.typedefs,
+        },
+    }
+
+
+def smart_truncate_code(code: str, max_lines: int = 50) -> str:
+    """智能裁剪代码片段
+
+    策略：
+    1. 如果代码 <= max_lines，返回完整代码
+    2. 如果代码 > max_lines，提取：
+       - 函数签名和前 20 行
+       - 省略中间部分
+       - 最后 10 行（通常是返回语句和结束括号）
+    """
+    lines = code.split("\n")
+    total_lines = len(lines)
+
+    if total_lines <= max_lines:
+        return code
+
+    # 提取关键部分
+    header_lines = lines[:20]
+    footer_lines = lines[-10:]
+
+    truncated = (
+        header_lines
+        + ["    ...", f"    // ... ({total_lines - 30} lines omitted) ...", "    ..."]
+        + footer_lines
+    )
+    return "\n".join(truncated)
+
+
+def format_output(data: Any, json_output: bool = False, indent: int = 2) -> str:
+    """格式化输出"""
+    if json_output:
+        return json.dumps(data, ensure_ascii=False, indent=indent)
+    else:
+        return str(data)
+
+
 def print_symbol(symbol: Symbol, show_code: bool = True):
-    """打印符号信息"""
+    """打印符号信息（人类可读格式）"""
     kind_names = {
         0: "函数",
         1: "类",
@@ -378,7 +445,6 @@ def print_symbol(symbol: Symbol, show_code: bool = True):
     if show_code and symbol.code:
         print(f"\n代码:")
         print("-" * 60)
-        # 只显示前30行
         lines = symbol.code.split("\n")[:30]
         for i, line in enumerate(lines, 1):
             print(f"{i:3d}: {line}")
@@ -397,44 +463,113 @@ def main():
     parser.add_argument("index", help="索引文件路径 (.bin)")
     parser.add_argument("--find", "-f", help="精确查找符号")
     parser.add_argument("--search", "-s", help="搜索关键字")
+    parser.add_argument("--regex", "-r", help="正则表达式搜索")
+    parser.add_argument("--fuzzy", help="模糊匹配搜索")
+    parser.add_argument("--batch", "-b", help="批量查找符号（逗号分隔）")
     parser.add_argument("--file", help="获取指定文件中的所有函数")
     parser.add_argument("--stats", action="store_true", help="显示统计信息")
+    parser.add_argument("--json", "-j", action="store_true", help="输出 JSON 格式")
+    parser.add_argument("--indent", type=int, default=2, help="JSON 缩进（默认 2）")
     parser.add_argument("--no-code", action="store_true", help="不显示代码")
+    parser.add_argument(
+        "--full-code", action="store_true", help="显示完整代码（不裁剪）"
+    )
+    parser.add_argument(
+        "--limit", "-l", type=int, default=20, help="限制返回结果数量（默认 20）"
+    )
 
     args = parser.parse_args()
 
     if not os.path.exists(args.index):
-        print(f"错误: 索引文件不存在: {args.index}")
+        error_response = {
+            "error": True,
+            "message": f"索引文件不存在: {args.index}",
+            "timestamp": datetime.now().isoformat(),
+        }
+        print(format_output(error_response, args.json))
         sys.exit(1)
 
     with IndexReader(args.index) as reader:
         if not reader.file:
+            error_response = {
+                "error": True,
+                "message": "无法打开索引文件",
+                "timestamp": datetime.now().isoformat(),
+            }
+            print(format_output(error_response, args.json))
             sys.exit(1)
 
-        print(f"\n已加载索引: {args.index}")
+        # 构建响应
+        response = {
+            "query": {
+                "index_file": args.index,
+                "timestamp": datetime.now().isoformat(),
+            },
+            "result": {},
+        }
 
         if args.stats:
+            response["query"]["type"] = "stats"
             stats = reader.get_stats()
-            print(f"\n【索引统计】")
-            print(f"  总符号数: {stats['total_symbols']:,}")
-            print(f"  版本: {stats['version']}")
-            print(f"  字符串表: {stats['string_table_size']:,} bytes")
-            print(f"  代码表: {stats['code_table_size']:,} bytes")
-            print(f"  上下文表: {stats['context_table_size']:,} bytes")
+            response["result"] = {"stats": stats}
+
+            if not args.json:
+                print(f"\n已加载索引: {args.index}")
+                print(f"\n【索引统计】")
+                print(f"  总符号数: {stats['total_symbols']:,}")
+                print(f"  版本: {stats['version']}")
+                print(f"  字符串表: {stats['string_table_size']:,} bytes")
+                print(f"  代码表: {stats['code_table_size']:,} bytes")
+                print(f"  上下文表: {stats['context_table_size']:,} bytes")
 
         if args.find:
-            print(f"\n查找: {args.find}")
+            response["query"]["type"] = "find"
+            response["query"]["keyword"] = args.find
+
             symbol = reader.find_symbol(args.find)
             if symbol:
-                print_symbol(symbol, not args.no_code)
+                response["result"]["found"] = True
+                response["result"]["symbol"] = symbol_to_dict(symbol, args.full_code)
+                if not args.json:
+                    print_symbol(symbol, not args.no_code)
             else:
-                print(f"未找到: {args.find}")
+                response["result"]["found"] = False
+                response["result"]["message"] = f"未找到: {args.find}"
+                if not args.json:
+                    print(f"\n查找: {args.find}")
+                    print(f"未找到: {args.find}")
+
+        if args.batch:
+            response["query"]["type"] = "batch"
+            response["query"]["keywords"] = args.batch.split(",")
+
+            symbols = reader.find_symbols(args.batch.split(","))
+            response["result"]["symbols"] = {
+                name: symbol_to_dict(sym, args.full_code) if sym else None
+                for name, sym in symbols.items()
+            }
+
+            if not args.json:
+                print(f"\n批量查找: {args.batch}")
+                for name, sym in symbols.items():
+                    if sym:
+                        print(f"  ✓ {name}")
+                    else:
+                        print(f"  ✗ {name} (未找到)")
 
         if args.search:
-            print(f"\n搜索: {args.search}")
-            results = reader.search_symbols(args.search)
-            print(f"找到 {len(results)} 个结果:")
-            for i, sym in enumerate(results[:10], 1):
+            response["query"]["type"] = "search"
+            response["query"]["keyword"] = args.search
+
+            results = reader.search_symbols(args.search, args.limit)
+            response["result"]["count"] = len(results)
+            response["result"]["symbols"] = [
+                symbol_to_dict(sym, args.full_code) for sym in results
+            ]
+
+            if not args.json:
+                print(f"\n搜索: {args.search}")
+                print(f"找到 {len(results)} 个结果:")
                 kind_names = {
                     0: "函数",
                     1: "类",
@@ -445,22 +580,60 @@ def main():
                     6: "变量",
                     7: "宏",
                 }
-                kind_name = kind_names.get(sym.kind, "未知")
-                print(f"  {i}. [{kind_name}] {sym.name} @ {sym.file_path}:{sym.line}")
+                for i, sym in enumerate(results[:10], 1):
+                    kind_name = kind_names.get(sym.kind, "未知")
+                    print(
+                        f"  {i}. [{kind_name}] {sym.name} @ {sym.file_path}:{sym.line}"
+                    )
 
-            if len(results) > 0 and not args.no_code:
-                print_symbol(results[0], True)
+        if args.regex:
+            response["query"]["type"] = "regex"
+            response["query"]["pattern"] = args.regex
+
+            results = reader.search_regex(args.regex, args.limit)
+            response["result"]["count"] = len(results)
+            response["result"]["symbols"] = [
+                symbol_to_dict(sym, args.full_code) for sym in results
+            ]
+
+            if not args.json:
+                print(f"\n正则搜索: {args.regex}")
+                print(f"找到 {len(results)} 个结果")
+
+        if args.fuzzy:
+            response["query"]["type"] = "fuzzy"
+            response["query"]["keyword"] = args.fuzzy
+
+            results = reader.search_fuzzy(args.fuzzy, max_results=args.limit)
+            response["result"]["count"] = len(results)
+            response["result"]["symbols"] = [
+                {"distance": score, **symbol_to_dict(sym, args.full_code)}
+                for score, sym in results
+            ]
+
+            if not args.json:
+                print(f"\n模糊搜索: {args.fuzzy}")
+                print(f"找到 {len(results)} 个结果")
 
         if args.file:
-            print(f"\n获取文件: {args.file}")
-            results = reader.get_functions_in_file(args.file)
-            print(f"找到 {len(results)} 个函数:")
-            for i, sym in enumerate(results[:20], 1):
-                print(f"  {i}. {sym.name} (line {sym.line})")
+            response["query"]["type"] = "file"
+            response["query"]["filename"] = args.file
 
-            if len(results) > 0 and not args.no_code:
-                print(f"\n显示第一个函数的代码:")
-                print_symbol(results[0], True)
+            results = reader.get_functions_in_file(args.file)
+            response["result"]["count"] = len(results)
+            response["result"]["symbols"] = [
+                symbol_to_dict(sym, args.full_code) for sym in results[: args.limit]
+            ]
+
+            if not args.json:
+                print(f"\n获取文件: {args.file}")
+                print(f"找到 {len(results)} 个函数:")
+                for i, sym in enumerate(results[:20], 1):
+                    print(f"  {i}. {sym.name} (line {sym.line})")
+
+        # 输出 JSON（如果指定了 --json）
+        if args.json:
+            print(format_output(response, True, args.indent))
 
 
 if __name__ == "__main__":
