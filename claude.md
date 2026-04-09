@@ -13,6 +13,181 @@
 
 ---
 
+## 🔍 重要原则：使用 Code Index 研究第三方项目
+
+**所有第三方依赖项目，必须先建立代码索引，然后通过 code_search.py 搜索功能探索项目。禁止 AI 自主独立研究项目，避免占用宝贵的上下文。**
+
+### 原因
+
+1. **上下文限制**：AI 上下文有限（通常 128K-200K tokens），大型项目代码会占满上下文，导致推理能力下降
+2. **效率问题**：让 AI 自己遍历文件，速度慢且容易遗漏关键信息
+3. **精准查询**：Code Index 提供毫秒级精准查询，只加载需要的代码片段
+4. **可追溯性**：通过索引查询，可以精确定位代码位置，方便后续引用
+
+### 工作流程
+
+#### 1. 为第三方项目建立索引
+
+```bash
+# 使用 code_index.py 构建索引
+python3 ~/my-img/code_index.py <project_path> <output.bin>
+
+# 示例：为 stable-diffusion.cpp 建立索引
+python3 ~/my-img/code_index.py \
+  /home/dministrator/stable-diffusion.cpp \
+  /home/dministrator/stable-diffusion-cpp.bin
+```
+
+**注意事项**：
+- 索引文件（.bin）通常保存在项目同级目录或 ~/.indices/ 目录
+- 首次构建需要 1-5 分钟（取决于项目大小）
+- 自动过滤超过 10MB 的文件（避免解析超大词汇表）
+
+#### 2. 使用 code_search.py 查询代码
+
+```bash
+# 查看索引统计
+python3 ~/my-img/code_search.py <index.bin> --stats
+
+# 精确查找函数
+python3 ~/my-img/code_search.py <index.bin> --find <function_name> --json
+
+# 模糊搜索关键字
+python3 ~/my-img/code_search.py <index.bin> --search <keyword> --json
+
+# 正则搜索
+python3 ~/my-img/code_search.py <index.bin> --regex "^ggml_.*" --json
+
+# 查看文件中的所有函数
+python3 ~/my-img/code_search.py <index.bin> --file <filename> --json
+
+# 示例：查找 stable-diffusion.cpp 中的 generate_image 函数
+python3 ~/my-img/code_search.py \
+  /home/dministrator/stable-diffusion-cpp.bin \
+  --find generate_image --json
+```
+
+**关键参数说明**：
+- `--stats`：显示索引统计信息（符号数、文件数等）
+- `--find <name>`：精确查找符号名称
+- `--search <keyword>`：模糊搜索（不区分大小写）
+- `--regex <pattern>`：正则表达式搜索
+- `--file <filename>`：获取指定文件中的所有函数
+- `--json`：输出 JSON 格式，方便 AI 解析
+- `--limit <n>`：限制返回结果数量（默认 20）
+
+#### 3. AI 研究项目时的标准流程
+
+**错误做法** ❌：
+```
+User: 帮我研究 stable-diffusion.cpp 的 img2img 实现
+AI:  （自己遍历文件，读几千行代码，占满上下文）
+```
+
+**正确做法** ✅：
+```
+User: 帮我研究 stable-diffusion.cpp 的 img2img 实现
+
+AI:  首先，我需要查询代码索引来获取相关信息：
+
+Step 1: 检查索引是否存在
+$ python3 ~/my-img/code_search.py /home/dministrator/stable-diffusion-cpp.bin --stats
+
+Step 2: 搜索 img2img 相关函数
+$ python3 ~/my-img/code_search.py /home/dministrator/stable-diffusion-cpp.bin --search img2img --json
+
+Step 3: 精确查找核心函数
+$ python3 ~/my-img/code_search.py /home/dministrator/stable-diffusion-cpp.bin --find generate_image --json
+
+Step 4: 根据结果，继续深入查询相关函数
+... （每次只加载几十到几百 tokens 的代码片段）
+```
+
+### 索引管理
+
+#### 索引文件命名规范
+
+```
+<project_name>_v<version>.bin
+
+# 示例
+stable-diffusion-cpp_v3.bin    # stable-diffusion.cpp V3 格式索引
+koboldcpp_v3.bin               # koboldcpp V3 格式索引
+llama.cpp_v3.bin               # llama.cpp V3 格式索引
+```
+
+#### 索引文件位置
+
+```bash
+# 推荐位置（优先级从高到低）
+1. 项目同级目录：/path/to/project.bin
+2. 家目录索引库：~/.indices/<project>.bin
+3. 全局索引库：/opt/indices/<project>.bin
+```
+
+#### 索引更新
+
+```bash
+# 当项目代码更新后，重新构建索引
+python3 ~/my-img/code_index.py <project_path> <output.bin>
+
+# 建议：每次代码更新后都重新构建索引
+```
+
+### Code Search 输出格式说明
+
+**JSON 输出字段**：
+
+```json
+{
+  "name": "generate_image",
+  "kind": "function",
+  "signature": "sd_image_t* generate_image(...)",
+  "location": {
+    "file": "stable-diffusion.cpp",
+    "line": 3587,
+    "column": 0
+  },
+  "code_snippet": "...",
+  "context": {
+    "includes": ["ggml_extend.hpp", "model.h"],
+    "macros": {},
+    "typedefs": {}
+  }
+}
+```
+
+**字段说明**：
+- `name`：符号名称
+- `kind`：类型（function/class/struct/enum/variable/macro）
+- `signature`：函数签名或类型定义
+- `location`：文件位置和行列号
+- `code_snippet`：代码片段（前 30 行）
+- `context`：文件上下文（头文件、宏定义、类型定义）
+
+### 性能指标
+
+- **索引构建**：10万符号 < 2 分钟
+- **精确查询**：< 1ms
+- **模糊搜索**：< 100ms
+- **内存占用**：索引文件 100MB → 运行时 < 50MB
+
+### 禁止行为
+
+❌ **严禁以下做法**：
+1. 让 AI 直接阅读整个项目的源代码
+2. 让 AI 遍历文件系统查找代码
+3. 在上下文中加载超过 1000 行的代码
+4. 不使用索引直接询问项目实现细节
+
+✅ **必须遵守**：
+1. 所有第三方项目必须先建立索引
+2. 通过 code_search.py 精准查询所需代码
+3. 每次只加载必要的代码片段
+4. 保持 AI 上下文干净，留给推理使用
+
+---
+
 ## ⚡ 重要原则：默认启用 GPU + Flash Attention
 
 **所有新项目必须默认启用 GPU 加速和 Flash Attention，除非硬件/环境确实不支持。**
