@@ -499,6 +499,74 @@ sd-hires --model models/sd15.gguf --upscale-model models/RealESRGAN_x2plus.bin \
 
 这些都是 Linux 系统自带，无需额外安装。
 
+## 代码索引与符号查找 (Code Index)
+
+本项目提供高性能的代码符号索引库，支持 C/C++/LuaJIT 多语言绑定，用于快速查找代码中的函数、类、变量等符号信息。
+
+### 功能特性
+
+- **高性能查询**: 基于内存映射的 V3 索引格式，支持大规模代码库
+- **多语言绑定**: 
+  - C API - 底层高性能接口
+  - C++ Wrapper - 现代 C++ RAII 封装，支持迭代器和范围循环
+  - LuaJIT FFI - Lua 高性能绑定
+- **多种搜索方式**:
+  - 精确匹配 (Exact Match)
+  - 前缀搜索 (Prefix Search)
+  - Glob 模式匹配 (`*`, `?` 通配符)
+  - 模糊搜索 (Fuzzy Search，基于编辑距离)
+  - 正则表达式搜索 (Regex)
+
+### 快速开始
+
+```bash
+# C++ 示例
+#include "symbol_index_v3.hpp"
+
+code_index::SymbolIndexV3 idx("project.bin");
+
+// 范围循环遍历所有符号
+for (const auto& sym : idx) {
+    std::cout << sym.name << " at " << sym.file << ":" << sym.line << std::endl;
+}
+
+// 精确查找
+auto result = idx.find("my_function");
+
+// 前缀搜索
+auto matches = idx.find_prefix("test_");
+
+// Glob 模式
+auto globs = idx.glob("foo*bar");
+
+// 模糊搜索 (编辑距离 <= 2)
+auto fuzzy = idx.fuzzy("myfuncton", 2);
+
+// 正则搜索
+auto regex = idx.regex("^test_.*");
+```
+
+### 详细文档
+
+📖 **[查看完整适配层文档](ADAPTER_LAYER.md)**
+
+文档包含：
+- C/C++/LuaJIT API 详细说明
+- 编译和使用指南
+- 性能优化建议
+- 完整示例代码
+
+### 文件说明
+
+| 文件 | 说明 |
+|------|------|
+| `symbol_index_v3.c` | C 语言核心实现 |
+| `symbol_index_v3.h` | C/C++ 头文件 |
+| `symbol_index_v3.hpp` | C++ 封装类（支持迭代器） |
+| `symbol_index_v3_ffi.lua` | LuaJIT FFI 绑定 |
+| `libsymbol_index_v3.so` | 编译后的共享库 |
+| `ADAPTER_LAYER.md` | 详细文档 |
+
 ## 参考
 
 - [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
