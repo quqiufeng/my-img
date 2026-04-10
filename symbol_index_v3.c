@@ -158,7 +158,7 @@ void symbol_index_close(SymbolIndex *idx) {
 
 /* Get string from string table */
 static inline char *get_string(SymbolIndex *idx, uint32_t offset) {
-    if (offset == 0 || offset >= idx->header->string_table_size) return NULL;
+    if (offset >= idx->header->string_table_size) return NULL;
     return idx->string_table + offset;
 }
 
