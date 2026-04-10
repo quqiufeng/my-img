@@ -29,8 +29,19 @@ extern "C" {
 
 /* Opaque handle types */
 typedef struct SymbolIndex SymbolIndex;
-typedef struct SymbolResult SymbolResult;
 typedef struct SymbolResultPy SymbolResultPy;
+
+/* Search result structure - exposed for C++ wrapper */
+typedef struct {
+    void *symbol_ptr;        /* Internal symbol pointer */
+    char *name;              /* Symbol name */
+    char *signature;         /* Function signature */
+    char *file;              /* Source file path */
+    uint32_t line;           /* Line number */
+    uint32_t kind;           /* Symbol kind */
+    char *code_snippet;      /* Source code snippet */
+    char *context_json;      /* Additional context */
+} SymbolResult;
 
 /*===========================
  * Core API - Index Management
@@ -62,6 +73,9 @@ const char *symbol_kind_name(int kind);
  * Note: Caller must free result with symbol_result_free()
  */
 SymbolResult *symbol_index_find(SymbolIndex *idx, const char *name);
+
+/* Get symbol by index (0-based) */
+SymbolResult *symbol_index_get_by_index(SymbolIndex *idx, uint32_t index);
 
 /* Find symbols by prefix
  * Parameters:
@@ -110,6 +124,15 @@ void symbol_result_free(SymbolResult *res);
 
 /* Free array of search results */
 void symbol_results_free(SymbolResult *res, int count);
+
+/* SymbolResult field accessors for C++ wrapper and other bindings */
+const char *symbol_result_get_name(const SymbolResult *res);
+const char *symbol_result_get_signature(const SymbolResult *res);
+const char *symbol_result_get_file(const SymbolResult *res);
+uint32_t symbol_result_get_line(const SymbolResult *res);
+int symbol_result_get_kind(const SymbolResult *res);
+const char *symbol_result_get_code_snippet(const SymbolResult *res);
+const char *symbol_result_get_context_json(const SymbolResult *res);
 
 /*===========================
  * Python-Compatible API

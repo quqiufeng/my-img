@@ -81,7 +81,7 @@ typedef struct {
     SymbolV3 *symbols;
 } SymbolIndex;
 
-/* Search result */
+/* Search result - exposed for C++ wrapper */
 typedef struct {
     SymbolV3 *symbol;
     char *name;
@@ -222,7 +222,19 @@ SymbolResult *symbol_index_find(SymbolIndex *idx, const char *name) {
     return NULL;
 }
 
-/* Prefix search */
+/* Get symbol by index (0-based)
+ * Returns: result on success, NULL if index out of range
+ * Note: Caller must free result with symbol_result_free()
+ */
+SymbolResult *symbol_index_get_by_index(SymbolIndex *idx, uint32_t index) {
+    if (!idx || index >= idx->header->num_symbols) return NULL;
+    
+    SymbolResult *res = calloc(1, sizeof(SymbolResult));
+    if (!res) return NULL;
+    
+    fill_result(idx, &idx->symbols[index], res);
+    return res;
+}
 SymbolResult *symbol_index_find_prefix(SymbolIndex *idx, const char *prefix, int *count) {
     if (!idx || !prefix || !count) return NULL;
     *count = 0;
@@ -462,6 +474,35 @@ int symbol_result_line(void *res) { return res ? ((SymbolResultPy *)res)->line :
 int symbol_result_kind(void *res) { return res ? ((SymbolResultPy *)res)->kind : -1; }
 char *symbol_result_code_snippet(void *res) { return res ? ((SymbolResultPy *)res)->code_snippet : NULL; }
 char *symbol_result_context_json(void *res) { return res ? ((SymbolResultPy *)res)->context_json : NULL; }
+
+/* SymbolResult field accessors for C++ wrapper */
+const char *symbol_result_get_name(const SymbolResult *res) {
+    return res ? res->name : NULL;
+}
+
+const char *symbol_result_get_signature(const SymbolResult *res) {
+    return res ? res->signature : NULL;
+}
+
+const char *symbol_result_get_file(const SymbolResult *res) {
+    return res ? res->file : NULL;
+}
+
+uint32_t symbol_result_get_line(const SymbolResult *res) {
+    return res ? res->line : 0;
+}
+
+int symbol_result_get_kind(const SymbolResult *res) {
+    return res ? (int)res->kind : -1;
+}
+
+const char *symbol_result_get_code_snippet(const SymbolResult *res) {
+    return res ? res->code_snippet : NULL;
+}
+
+const char *symbol_result_get_context_json(const SymbolResult *res) {
+    return res ? res->context_json : NULL;
+}
 
 /* Test main */
 int main(int argc, char *argv[]) {
