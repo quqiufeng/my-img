@@ -1,25 +1,25 @@
 // =============================================================================
-// sd-img2img: 图生图工具 - 支持 Deep HighRes Fix
+// sd-hires: AI 高清修复工具 - ESRGAN + Deep HighRes Fix
 // =============================================================================
 //
-// Deep HighRes Fix 实现（多次调用版）:
-// 由于 stable-diffusion.cpp 的 API 不暴露中间 latent，我们使用多次调用策略：
-//
-// Phase 1: 低分辨率生成（strength=1.0，即 txt2img）
-// Phase 2: 像素空间放大 + img2img
-// Phase 3: 最终分辨率 img2img
+// 功能流程:
+// 1. 输入图片
+// 2. ESRGAN 放大 (2x/4x)
+// 3. Deep HighRes Fix 重绘 (分阶段 img2img)
 //
 // 用法:
-//   sd-img2img \
+//   sd-hires \
 //     --diffusion-model <path> \
 //     --vae <path> \
 //     --llm <path> \
+//     --upscale-model <path> \
 //     --input <image> \
 //     --output <image> \
 //     --prompt <text> \
-//     [--deep-hires] \
-//     [--target-width 1024] \
-//     [--target-height 1024]
+//     [--scale 2] \
+//     [--strength 0.40] \
+//     [--steps 30] \
+//     [--deep-hires]
 //
 // =============================================================================
 
@@ -34,23 +34,38 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
-#include <vector>
+#include <algorithm>
 
 struct Args {
+    // 模型路径
     const char* diffusion_model = nullptr;
     const char* vae = nullptr;
     const char* llm = nullptr;
+    const char* upscale_model = nullptr;
+    
+    // 输入输出
     const char* input = nullptr;
     const char* output = "output.png";
     const char* prompt = "";
     const char* negative_prompt = "";
-    float strength = 0.45f;
+    
+    // 超分参数
+    int scale = 2;
+    int upscale_tile_size = 512;
+    
+    // 生成参数
+    float strength = 0.40f;
     int steps = 30;
     int64_t seed = 42;
     float cfg_scale = 7.0f;
-    bool deep_hires = false;
+    
+    // Deep HighRes Fix
+    bool deep_hires = true;  // 默认启用
     int target_width = 0;
     int target_height = 0;
+    
+    // 其他
+    bool skip_upscale = false;
     bool vae_tiling = false;
     bool flash_attn = false;
     bool use_gpu = true;
@@ -65,6 +80,8 @@ static bool parse_args(int argc, char** argv, Args& args) {
             args.vae = argv[++i];
         } else if (strcmp(argv[i], "--llm") == 0 && i + 1 < argc) {
             args.llm = argv[++i];
+        } else if (strcmp(argv[i], "--upscale-model") == 0 && i + 1 < argc) {
+            args.upscale_model = argv[++i];
         } else if (strcmp(argv[i], "--input") == 0 && i + 1 < argc) {
             args.input = argv[++i];
         } else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
@@ -73,6 +90,10 @@ static bool parse_args(int argc, char** argv, Args& args) {
             args.prompt = argv[++i];
         } else if (strcmp(argv[i], "--negative-prompt") == 0 && i + 1 < argc) {
             args.negative_prompt = argv[++i];
+        } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
+            args.scale = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--upscale-tile-size") == 0 && i + 1 < argc) {
+            args.upscale_tile_size = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--strength") == 0 && i + 1 < argc) {
             args.strength = atof(argv[++i]);
         } else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) {
@@ -81,12 +102,14 @@ static bool parse_args(int argc, char** argv, Args& args) {
             args.seed = atoll(argv[++i]);
         } else if (strcmp(argv[i], "--cfg-scale") == 0 && i + 1 < argc) {
             args.cfg_scale = atof(argv[++i]);
-        } else if (strcmp(argv[i], "--deep-hires") == 0) {
-            args.deep_hires = true;
+        } else if (strcmp(argv[i], "--no-deep-hires") == 0) {
+            args.deep_hires = false;
         } else if (strcmp(argv[i], "--target-width") == 0 && i + 1 < argc) {
             args.target_width = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--target-height") == 0 && i + 1 < argc) {
             args.target_height = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--skip-upscale") == 0) {
+            args.skip_upscale = true;
         } else if (strcmp(argv[i], "--vae-tiling") == 0) {
             args.vae_tiling = true;
         } else if (strcmp(argv[i], "--flash-attn") == 0) {
@@ -96,21 +119,25 @@ static bool parse_args(int argc, char** argv, Args& args) {
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             args.verbose = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("Usage: sd-img2img [options]\n");
+            printf("Usage: sd-hires [options]\n");
             printf("\nRequired:\n");
             printf("  --diffusion-model <path>  Path to diffusion model (.gguf)\n");
             printf("  --vae <path>              Path to VAE model\n");
             printf("  --llm <path>              Path to LLM/CLIP model\n");
+            printf("  --upscale-model <path>    Path to ESRGAN model (.bin)\n");
             printf("  --input <path>            Input image path\n");
             printf("\nOptional:\n");
             printf("  --output <path>           Output image path (default: output.png)\n");
             printf("  --prompt <text>           Prompt for generation\n");
             printf("  --negative-prompt <text>  Negative prompt\n");
-            printf("  --strength <float>        Denoising strength 0.0-1.0 (default: 0.45)\n");
+            printf("  --scale <int>             ESRGAN upscale factor (default: 2)\n");
+            printf("  --upscale-tile-size <int> ESRGAN tile size (default: 512)\n");
+            printf("  --strength <float>        Denoising strength (default: 0.40)\n");
             printf("  --steps <int>             Sampling steps (default: 30)\n");
             printf("  --seed <int>              Random seed (default: 42)\n");
+            printf("  --skip-upscale             Skip ESRGAN, only do img2img\n");
             printf("\nDeep HighRes Fix:\n");
-            printf("  --deep-hires              Enable Deep HighRes Fix\n");
+            printf("  --no-deep-hires            Disable Deep HighRes Fix\n");
             printf("  --target-width <int>      Target width\n");
             printf("  --target-height <int>     Target height\n");
             printf("\nOther:\n");
@@ -124,6 +151,11 @@ static bool parse_args(int argc, char** argv, Args& args) {
 
     if (!args.diffusion_model || !args.vae || !args.llm || !args.input) {
         printf("Error: Missing required arguments. Use --help for usage.\n");
+        return false;
+    }
+
+    if (!args.skip_upscale && !args.upscale_model) {
+        printf("Error: --upscale-model is required (or use --skip-upscale)\n");
         return false;
     }
 
@@ -162,8 +194,7 @@ static sd_image_t resize_image(const sd_image_t& src, int target_w, int target_h
     if (!dst_data) return {0, 0, 0, nullptr};
     
     stbir_resize_uint8(src.data, src.width, src.height, 0,
-                       dst_data, target_w, target_h, 0,
-                       3);
+                       dst_data, target_w, target_h, 0, 3);
     
     return {(uint32_t)target_w, (uint32_t)target_h, 3, dst_data};
 }
@@ -227,6 +258,7 @@ static sd_image_t* generate_single(sd_ctx_t* ctx,
     return generate_image(ctx, &params);
 }
 
+// Deep HighRes Fix 主流程
 static sd_image_t* deep_hires_generate(sd_ctx_t* ctx, 
                                        const sd_image_t& input_image,
                                        const Args& args) {
@@ -311,6 +343,7 @@ static sd_image_t* deep_hires_generate(sd_ctx_t* ctx,
     return phase3_result;
 }
 
+// 普通 img2img
 static sd_image_t* normal_img2img(sd_ctx_t* ctx, 
                                   const sd_image_t& input_image,
                                   const Args& args) {
@@ -343,6 +376,55 @@ static sd_image_t* normal_img2img(sd_ctx_t* ctx,
     return result;
 }
 
+// ESRGAN 超分
+static sd_image_t esrgan_upscale(const sd_image_t& input_image, const Args& args) {
+    printf("\n[ESRGAN] Upscaling %dx%d by %dx...\n", input_image.width, input_image.height, args.scale);
+    
+    upscaler_ctx_t* upscaler = new_upscaler_ctx(
+        args.upscale_model,
+        !args.use_gpu,
+        false,
+        4,
+        args.upscale_tile_size
+    );
+    
+    if (!upscaler) {
+        fprintf(stderr, "[ERROR] Failed to create upscaler context\n");
+        return {0, 0, 0, nullptr};
+    }
+    
+    int real_scale = get_upscale_factor(upscaler);
+    printf("[ESRGAN] Model scale: %dx\n", real_scale);
+    
+    int actual_scale = args.scale;
+    if (actual_scale != real_scale) {
+        printf("[ESRGAN] Adjusting scale from %dx to %dx\n", args.scale, real_scale);
+        actual_scale = real_scale;
+    }
+    
+    sd_image_t result = upscale(upscaler, input_image, actual_scale);
+    
+    if (!result.data) {
+        fprintf(stderr, "[ERROR] ESRGAN upscale failed\n");
+        free_upscaler_ctx(upscaler);
+        return {0, 0, 0, nullptr};
+    }
+    
+    printf("[ESRGAN] Upscaled to %dx%d\n", result.width, result.height);
+    
+    // 复制数据（因为 free_upscaler_ctx 后原数据可能失效）
+    size_t data_size = result.width * result.height * result.channel;
+    uint8_t* copied_data = (uint8_t*)malloc(data_size);
+    if (copied_data) {
+        memcpy(copied_data, result.data, data_size);
+        free(result.data);
+        result.data = copied_data;
+    }
+    
+    free_upscaler_ctx(upscaler);
+    return result;
+}
+
 int main(int argc, char** argv) {
     Args args;
     if (!parse_args(argc, argv, args)) {
@@ -359,10 +441,25 @@ int main(int argc, char** argv) {
     }
     printf("[INFO] Input image: %dx%d\n", input_image.width, input_image.height);
 
-    printf("[INFO] Loading model...\n");
+    // Step 1: ESRGAN 超分
+    sd_image_t upscaled_image = {0, 0, 0, nullptr};
+    sd_image_t* img_for_hires = &input_image;
+    
+    if (!args.skip_upscale) {
+        upscaled_image = esrgan_upscale(input_image, args);
+        if (!upscaled_image.data) {
+            free_image(input_image);
+            return 1;
+        }
+        img_for_hires = &upscaled_image;
+    }
+
+    // Step 2: Deep HighRes Fix / img2img
+    printf("[INFO] Loading diffusion model...\n");
     sd_ctx_t* ctx = create_sd_context(args);
     if (!ctx) {
         fprintf(stderr, "[ERROR] Failed to create SD context\n");
+        if (upscaled_image.data) free_image(upscaled_image);
         free_image(input_image);
         return 1;
     }
@@ -371,17 +468,18 @@ int main(int argc, char** argv) {
     sd_image_t* result = nullptr;
     
     if (args.deep_hires) {
-        result = deep_hires_generate(ctx, input_image, args);
+        result = deep_hires_generate(ctx, *img_for_hires, args);
     } else {
-        result = normal_img2img(ctx, input_image, args);
+        result = normal_img2img(ctx, *img_for_hires, args);
     }
 
     printf("\n");
 
     if (!result || !result->data) {
         fprintf(stderr, "[ERROR] Image generation failed\n");
-        free_image(input_image);
         free_sd_ctx(ctx);
+        if (upscaled_image.data) free_image(upscaled_image);
+        free_image(input_image);
         return 1;
     }
 
@@ -394,6 +492,7 @@ int main(int argc, char** argv) {
 
     free(result->data);
     free(result);
+    if (upscaled_image.data) free_image(upscaled_image);
     free_image(input_image);
     free_sd_ctx(ctx);
 

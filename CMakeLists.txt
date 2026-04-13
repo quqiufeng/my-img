@@ -46,11 +46,11 @@ message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 set(SD_LIB_PATH "${SD_PATH}/build")
 set(SD_BIN_PATH "${SD_PATH}/bin")
 
-# 查找 ggml 动态库 (在 bin 目录)
-find_library(GGML_CUDA_LIB NAMES ggml-cuda PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
-find_library(GGML_CPU_LIB NAMES ggml-cpu PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
-find_library(GGML_BASE_LIB NAMES ggml-base PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
-find_library(GGML_LIB NAMES ggml PATHS ${SD_BIN_PATH} NO_DEFAULT_PATH)
+# 查找 ggml 库 (优先 build 目录静态库，fallback bin 目录动态库)
+find_library(GGML_CUDA_LIB NAMES ggml-cuda PATHS ${SD_LIB_PATH}/ggml/src/ggml-cuda ${SD_BIN_PATH} NO_DEFAULT_PATH)
+find_library(GGML_CPU_LIB NAMES ggml-cpu PATHS ${SD_LIB_PATH}/ggml/src ${SD_BIN_PATH} NO_DEFAULT_PATH)
+find_library(GGML_BASE_LIB NAMES ggml-base PATHS ${SD_LIB_PATH}/ggml/src ${SD_BIN_PATH} NO_DEFAULT_PATH)
+find_library(GGML_LIB NAMES ggml PATHS ${SD_LIB_PATH}/ggml/src ${SD_BIN_PATH} NO_DEFAULT_PATH)
 
 # 查找 stable-diffusion 静态库 (在 build 目录)
 find_library(SD_LIB NAMES stable-diffusion PATHS ${SD_LIB_PATH} NO_DEFAULT_PATH)
@@ -84,7 +84,7 @@ foreach(src ${SRC_FILES})
     add_executable(${final_name} ${src})
     
     # 链接 stable-diffusion 和 ggml（动态库）
-    target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB})
+    target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
     
     # 链接 CUDA 运行时
     if(CUDA_PATH)

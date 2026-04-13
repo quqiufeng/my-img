@@ -1126,32 +1126,37 @@ grep -n "generate_image\|sd_img_gen_params" ~/stable-diffusion.cpp/examples/cli/
 
 1. **编译系统**
    - CMakeLists.txt 配置完成，支持 GPU + Flash Attention
-   - 依赖库链接完整（CUDA, cuBLAS 等）
+   - 依赖库链接完整（CUDA, cuBLAS, OpenMP 等）
+   - 自动扫描 `src/` 下所有子目录生成二进制
 
 2. **sd-hires 工具**
-   - ESRGAN 超分功能正常
-   - img2img 细节增强功能（Flow 模型支持）
-   - 支持命令行参数：`--model`, `--vae`, `--llm`, `--upscale-model`, `--prompt`, `--strength`, `--steps`, `--gpu/--cpu`, `--no-flash-attn`, `--debug`
+   - ESRGAN 超分放大（2x/4x）
+   - Deep HighRes Fix 分阶段重绘
+   - 支持命令行参数：`--diffusion-model`, `--vae`, `--llm`, `--upscale-model`, `--prompt`, `--strength`, `--steps`, `--scale`, `--deep-hires`, `--vae-tiling`, `--flash-attn`, `--cpu`
 
-3. **hires.sh 脚本**
-   - 去掉放大逻辑，只保留 img2img 细节增强
-   - 保持原图尺寸，修复细节生成高清图片
+3. **sd-img2img 工具**
+   - 普通 img2img 重绘
+   - Deep HighRes Fix 多阶段生成
+   - 支持目标尺寸调整
 
-4. **文档**
+4. **sd-upscale 工具**
+   - ESRGAN 独立超分放大
+
+5. **文档**
    - README.md 完整使用说明
    - claude.md 开发指南
+   - `src/sd-img2img/design.md` Deep HighRes Fix 设计文档
 
 ### ❌ 待完成 / 遇到的问题
 
-1. **img2img 推理崩溃**
-   - 症状：`GGML_ASSERT(image.width == tensor->ne[0]) failed`
-   - CLI 可以正常运行，sd-hires 崩溃
-   - 已添加命令对比到上方文档
-   - 状态：正在调试中
+1. **Deep HighRes Fix 效果验证**
+   - 当前实现为多次调用版（非原生 latent 空间过渡）
+   - 需要实际测试验证分阶段生成的效果
+   - 可能需要调整各阶段的 strength 和步数分配
 
 ### 📋 下一步
 
-1. 测试 img2img 功能，修复尺寸匹配问题
-2. 确认模型参数组合
-3. 测试完整流程：ESRGAN 放大 + img2img 细节增强
+1. 运行实际测试，验证 sd-hires 和 sd-img2img 的生成效果
+2. 根据测试结果优化 Deep HighRes Fix 参数
+3. 继续开发 sd-inpaint 等工具
 
