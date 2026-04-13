@@ -275,6 +275,8 @@ class IndexReader:
 
             # 检查缓存文件是否存在且有效
             if self._use_cache and self._load_cache():
+                # 缓存加载成功，但仍需要打开文件用于读取符号数据
+                self.file = open(self.index_path, "rb")
                 load_time = (datetime.now() - start_time).total_seconds() * 1000
                 self._monitor.record("cache_load", load_time)
                 return True

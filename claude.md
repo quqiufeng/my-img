@@ -39,9 +39,10 @@ python3 ~/my-img/code_index.py \
 ```
 
 **注意事项**：
-- 索引文件（.bin）通常保存在项目同级目录或 ~/.indices/ 目录
+- 索引文件（.bin）通常保存在项目同级目录或 `~` 目录
 - 首次构建需要 1-5 分钟（取决于项目大小）
-- 自动过滤超过 10MB 的文件（避免解析超大词汇表）
+- 自动过滤超过 5MB 的文件（避免解析超大词汇表导致正则回溯卡死）
+- 已修复问题：进度显示、大文件跳过、缓存加载后文件句柄保持打开
 
 #### 2. 使用 code_search.py 查询代码
 
@@ -53,13 +54,16 @@ python3 ~/my-img/code_search.py <index.bin> --stats
 python3 ~/my-img/code_search.py <index.bin> --find <function_name> --json
 
 # 模糊搜索关键字
-python3 ~/my-img/code_search.py <index.bin> --search <keyword> --json
+python3 ~/my-img/code_search.py <index.bin> --search <keyword> --json --limit 10
+
+# 前缀匹配
+python3 ~/my-img/code_search.py <index.bin> --prefix <prefix> --json --limit 10
 
 # 正则搜索
-python3 ~/my-img/code_search.py <index.bin> --regex "^ggml_.*" --json
+python3 ~/my-img/code_search.py <index.bin> --regex "^ggml_.*" --json --limit 10
 
 # 查看文件中的所有函数
-python3 ~/my-img/code_search.py <index.bin> --file <filename> --json
+python3 ~/my-img/code_search.py <index.bin> --file <filename> --json --limit 10
 
 # 示例：查找 stable-diffusion.cpp 中的 generate_image 函数
 python3 ~/my-img/code_search.py \
@@ -69,8 +73,9 @@ python3 ~/my-img/code_search.py \
 
 **关键参数说明**：
 - `--stats`：显示索引统计信息（符号数、文件数等）
-- `--find <name>`：精确查找符号名称
+- `--find <name>`：精确查找符号名称（O(1)，< 1ms）
 - `--search <keyword>`：模糊搜索（不区分大小写）
+- `--prefix <prefix>`：前缀匹配搜索
 - `--regex <pattern>`：正则表达式搜索
 - `--file <filename>`：获取指定文件中的所有函数
 - `--json`：输出 JSON 格式，方便 AI 解析
@@ -94,7 +99,7 @@ Step 1: 检查索引是否存在
 $ python3 ~/my-img/code_search.py /home/dministrator/stable-diffusion-cpp.bin --stats
 
 Step 2: 搜索 img2img 相关函数
-$ python3 ~/my-img/code_search.py /home/dministrator/stable-diffusion-cpp.bin --search img2img --json
+$ python3 ~/my-img/code_search.py /home/dministrator/stable-diffusion-cpp.bin --search img2img --json --limit 10
 
 Step 3: 精确查找核心函数
 $ python3 ~/my-img/code_search.py /home/dministrator/stable-diffusion-cpp.bin --find generate_image --json
@@ -103,26 +108,51 @@ Step 4: 根据结果，继续深入查询相关函数
 ... （每次只加载几十到几百 tokens 的代码片段）
 ```
 
+#### 4. 实际搜索示例
+
+**示例 1：查找 upscale 相关实现**
+```bash
+$ python3 ~/my-img/code_search.py ~/stable-diffusion-cpp.bin --search upscale --json --limit 5
+# 返回：free_upscaler_ctx, upscale, upscale_tensor, ggml_compute_forward_upscale 等
+```
+
+**示例 2：查找 VAE tiling 实现**
+```bash
+$ python3 ~/my-img/code_search.py ~/stable-diffusion-cpp.bin --search tiling --json --limit 5
+# 返回：sd_tiling_calc_tiles, make_vae_tiling_json, vae_tiling_params 等
+```
+
+**示例 3：查找 Flash Attention 相关代码**
+```bash
+$ python3 ~/my-img/code_search.py ~/stable-diffusion-cpp.bin --search flash_attn --json --limit 5
+# 返回：ggml_compute_forward_flash_attn_back, flash_attn_ext_f16_load_tile 等
+```
+
+**示例 4：按文件查找所有符号**
+```bash
+$ python3 ~/my-img/code_search.py ~/stable-diffusion-cpp.bin --file stable-diffusion.cpp --json --limit 5
+# 返回该文件中所有函数、类、变量定义
+```
+
 ### 索引管理
 
 #### 索引文件命名规范
 
 ```
-<project_name>_v<version>.bin
+<project_name>.bin
 
 # 示例
-stable-diffusion-cpp_v3.bin    # stable-diffusion.cpp V3 格式索引
-koboldcpp_v3.bin               # koboldcpp V3 格式索引
-llama.cpp_v3.bin               # llama.cpp V3 格式索引
+stable-diffusion-cpp.bin       # stable-diffusion.cpp 索引
+koboldcpp.bin                  # koboldcpp 索引
+llama-cpp.bin                  # llama.cpp 索引
 ```
 
 #### 索引文件位置
 
 ```bash
 # 推荐位置（优先级从高到低）
-1. 项目同级目录：/path/to/project.bin
-2. 家目录索引库：~/.indices/<project>.bin
-3. 全局索引库：/opt/indices/<project>.bin
+1. 家目录：~/stable-diffusion-cpp.bin
+2. 项目同级目录：/path/to/project/stable-diffusion-cpp.bin
 ```
 
 #### 索引更新
@@ -132,6 +162,7 @@ llama.cpp_v3.bin               # llama.cpp V3 格式索引
 python3 ~/my-img/code_index.py <project_path> <output.bin>
 
 # 建议：每次代码更新后都重新构建索引
+# 旧缓存文件（.bin.cache 和 .bin.idx）会自动失效并重建
 ```
 
 ### Code Search 输出格式说明
@@ -167,10 +198,12 @@ python3 ~/my-img/code_index.py <project_path> <output.bin>
 
 ### 性能指标
 
-- **索引构建**：10万符号 < 2 分钟
+- **索引构建**：10万符号 ≈ 130 秒（stable-diffusion.cpp 共 99,887 符号）
 - **精确查询**：< 1ms
+- **前缀匹配**：< 1ms
 - **模糊搜索**：< 100ms
-- **内存占用**：索引文件 100MB → 运行时 < 50MB
+- **正则搜索**：< 500ms
+- **内存占用**：索引文件 237MB → 运行时 < 50MB
 
 ### 禁止行为
 
