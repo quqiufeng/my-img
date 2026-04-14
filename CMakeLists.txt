@@ -67,8 +67,34 @@ endif()
 # ============================================================
 # 3. 编译你的程序
 # ============================================================
+# 收集所有源文件
 file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
+# 特殊处理 sd-core：编译为静态库
+set(SD_CORE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-core/deep_hires.cpp")
+if(EXISTS ${SD_CORE_SRC})
+    add_library(sd-core STATIC ${SD_CORE_SRC})
+    target_link_libraries(sd-core PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
+    target_include_directories(sd-core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(sd-core PRIVATE 
+        ${SD_PATH}
+        ${SD_PATH}/include
+        ${SD_PATH}/thirdparty
+        ${SD_PATH}/ggml/include
+        ${SD_PATH}/src
+    )
+    if(CUDA_PATH)
+        target_link_libraries(sd-core PRIVATE 
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcudart.so
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublas.so
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
+            /usr/lib/x86_64-linux-gnu/libcuda.so
+        )
+    endif()
+    message(STATUS "[my-img] Created library: sd-core")
+endif()
+
+# 其他目录编译为可执行文件
 foreach(src ${SRC_FILES})
     get_filename_component(name ${src} NAME_WE)
     get_filename_component(dir ${src} PATH)
@@ -80,11 +106,21 @@ foreach(src ${SRC_FILES})
     else()
         set(final_name ${dir})
     endif()
+    
+    # 跳过 sd-core
+    if(final_name STREQUAL "sd-core")
+        continue()
+    endif()
 
     add_executable(${final_name} ${src})
     
-    # 链接 stable-diffusion 和 ggml（动态库）
+    # 链接 stable-diffusion 和 ggml
     target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
+    
+    # 如果有 sd-core 库，也链接上
+    if(TARGET sd-core)
+        target_link_libraries(${final_name} PRIVATE sd-core)
+    endif()
     
     # 链接 CUDA 运行时
     if(CUDA_PATH)
@@ -100,8 +136,10 @@ foreach(src ${SRC_FILES})
     
     target_include_directories(${final_name} PRIVATE 
         ${SD_PATH}
+        ${SD_PATH}/include
         ${SD_PATH}/thirdparty
         ${SD_PATH}/ggml/include
+        ${SD_PATH}/src
     )
 
     message(STATUS "[my-img] Created target: ${final_name}")
