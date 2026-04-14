@@ -295,17 +295,45 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 
 ## 待复刻的 ComfyUI 生态
 
+### 已完成的独立工具
+
 | # | 项目 | 进度 |
 |---|------|------|
 | 1 | sd-hires | ✅ |
 | 2 | sd-img2img | ✅ |
 | 3 | sd-upscale | ✅ |
-| 4 | sd-inpaint | ⬜ |
-| 5 | sd-canny | ⬜ |
-| 6 | sd-depth | ⬜ |
-| 7 | sd-pose | ⬜ |
-| 8 | sd-lora | ⬜ |
-| 9 | sd-video | ⬜ |
+
+### 计划中的 ComfyUI 节点（C++ 复刻）
+
+| # | 节点类别 | 具体节点 | 进度 |
+|---|---------|---------|------|
+| 1 | **加载器** | CheckpointLoaderSimple | ⬜ |
+| 2 | **加载器** | VAELoader / CLIPLoader | ⬜ |
+| 3 | **条件编码** | CLIPTextEncode | ⬜ |
+| 4 | **条件编码** | ConditioningCombine / ConditioningSetArea | ⬜ |
+| 5 | **Latent** | EmptyLatentImage | ⬜ |
+| 6 | **Latent** | VAEEncode / VAEDecode | ⬜ |
+| 7 | **Latent** | LatentUpscale / LatentComposite | ⬜ |
+| 8 | **采样** | KSampler / KSamplerAdvanced | ⬜ |
+| 9 | **采样** | SamplerCustom | ⬜ |
+| 10 | **图像** | LoadImage / SaveImage | ⬜ |
+| 11 | **图像** | ImageScale / ImageCrop | ⬜ |
+| 12 | **图像** | ImageBlur / ImageSharpen | ⬜ |
+| 13 | **超分** | UpscaleModelLoader | ⬜ |
+| 14 | **超分** | ImageUpscaleWithModel | ⬜ |
+| 15 | **修复** | INPAINT_LoadInpaintModel | ⬜ |
+| 16 | **修复** | INPAINT_ApplyInpaint | ⬜ |
+| 17 | **ControlNet** | ControlNetLoader | ⬜ |
+| 18 | **ControlNet** | ControlNetApply / ControlNetApplyAdvanced | ⬜ |
+| 19 | **ControlNet** | CannyEdgePreprocessor | ⬜ |
+| 20 | **ControlNet** | MiDaS-DepthMapPreprocessor | ⬜ |
+| 21 | **ControlNet** | OpenPosePreprocessor | ⬜ |
+| 22 | **LoRA** | LoraLoader / LoraLoaderModelOnly | ⬜ |
+| 23 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ⬜ |
+| 24 | **视频** | AnimateDiff Loader / Sampler | ⬜ |
+| 25 | **视频** | VideoLinearCFGGuidance | ⬜ |
+| 26 | **引擎** | sd-workflow (JSON 执行器) | ⬜ |
+| 27 | **引擎** | DAG 拓扑排序 + 缓存系统 | ⬜ |
 
 ---
 
