@@ -30,12 +30,27 @@ typedef sd::Tensor<float> (*sd_latent_hook_t)(
     int total_steps,
     void* user_data);
 
+// Guidance hook 类型定义
+// 在采样过程中被调用，允许动态修改 cfg_scale
+typedef void (*sd_guidance_hook_t)(
+    float* txt_cfg,
+    float* img_cfg,
+    float* distilled_guidance,
+    int step,
+    int total_steps,
+    void* user_data);
+
 // 设置 latent hook
-// 调用后，stable-diffusion.cpp 的 sample() 函数会在每个采样步骤前调用此 hook
 SD_API void sd_set_latent_hook(sd_latent_hook_t hook, void* user_data);
 
 // 清除 latent hook
 SD_API void sd_clear_latent_hook();
+
+// 设置 guidance hook
+SD_API void sd_set_guidance_hook(sd_guidance_hook_t hook, void* user_data);
+
+// 清除 guidance hook
+SD_API void sd_clear_guidance_hook();
 
 // Deep HighRes Fix 参数结构
 typedef struct {
@@ -49,6 +64,11 @@ typedef struct {
     int target_width;
     int target_height;
     bool vae_tiling;
+    sd_image_t init_image;  // 可选：输入图片（为空则 txt2img）
+    float strength;         // init_image 时的 denoise strength
+    float phase1_cfg_scale; // Phase 1 的 cfg_scale（0 表示使用 cfg_scale）
+    float phase2_cfg_scale; // Phase 2 的 cfg_scale
+    float phase3_cfg_scale; // Phase 3 的 cfg_scale
 } sd_deep_hires_params_t;
 
 // 初始化默认参数

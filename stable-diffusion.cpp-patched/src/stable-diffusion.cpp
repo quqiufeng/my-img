@@ -117,8 +117,19 @@ typedef sd::Tensor<float> (*sd_latent_hook_t)(
     int total_steps,
     void* user_data);
 
+// Guidance hook: allows modifying txt_cfg, img_cfg, and distilled_guidance during sampling
+typedef void (*sd_guidance_hook_t)(
+    float* txt_cfg,
+    float* img_cfg,
+    float* distilled_guidance,
+    int step,
+    int total_steps,
+    void* user_data);
+
 static sd_latent_hook_t g_sd_latent_hook = nullptr;
 static void* g_sd_latent_hook_user_data = nullptr;
+static sd_guidance_hook_t g_sd_guidance_hook = nullptr;
+static void* g_sd_guidance_hook_user_data = nullptr;
 
 // ============================================================================
 
@@ -1626,6 +1637,7 @@ public:
         float cfg_scale     = guidance.txt_cfg;
         float img_cfg_scale = guidance.img_cfg;
         float slg_scale     = guidance.slg.scale;
+        float distilled_guidance = guidance.distilled_guidance;
 
         sd_sample::SampleCacheRuntime cache_runtime = sd_sample::init_sample_cache_runtime(version,
                                                                                            cache_params,
@@ -1646,6 +1658,11 @@ public:
         SamplePreviewContext preview = prepare_sample_preview_context();
 
         auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
+            // Deep HighRes Fix guidance hook: allow modifying cfg_scale during sampling
+            if (g_sd_guidance_hook != nullptr) {
+                g_sd_guidance_hook(&cfg_scale, &img_cfg_scale, &distilled_guidance, step, (int)steps, g_sd_guidance_hook_user_data);
+            }
+
             if (step == 1 || step == -1) {
                 pretty_progress(0, (int)steps, 0);
             }
@@ -1661,7 +1678,7 @@ public:
             adjust_sample_step_scalings(shifted_timestep, timesteps_vec, c_in, &c_skip, &c_out);
 
             sd::Tensor<float> timesteps_tensor({static_cast<int64_t>(timesteps_vec.size())}, timesteps_vec);
-            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{guidance.distilled_guidance});
+            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{distilled_guidance});
             sd::Tensor<float> noised_input = x * c_in;
             if (!denoise_mask.empty() && version == VERSION_WAN2_2_TI2V) {
                 noised_input = noised_input * denoise_mask + init_latent * (1.0f - denoise_mask);
@@ -3252,6 +3269,16 @@ SD_API void sd_set_latent_hook(sd_latent_hook_t hook, void* user_data) {
 SD_API void sd_clear_latent_hook() {
     g_sd_latent_hook = nullptr;
     g_sd_latent_hook_user_data = nullptr;
+}
+
+SD_API void sd_set_guidance_hook(sd_guidance_hook_t hook, void* user_data) {
+    g_sd_guidance_hook = hook;
+    g_sd_guidance_hook_user_data = user_data;
+}
+
+SD_API void sd_clear_guidance_hook() {
+    g_sd_guidance_hook = nullptr;
+    g_sd_guidance_hook_user_data = nullptr;
 }
 
 // ============================================================================

@@ -31,14 +31,16 @@ struct DeepHiresState {
     int phase2_h;
     int target_w;
     int target_h;
-    int latent_channel;
+    float phase1_cfg_scale;
+    float phase2_cfg_scale;
+    float phase3_cfg_scale;
     bool phase1_done;
     bool phase2_done;
 };
 
 // 使用 nearest neighbor 插值放大 latent
-// TODO: 实现更高质量的插值（如双线性）
-static sd::Tensor<float> upscale_latent_nearest(
+// 双线性插值放大 latent
+static sd::Tensor<float> upscale_latent_bilinear(
     const sd::Tensor<float>& latent,
     int target_w,
     int target_h,
@@ -53,13 +55,32 @@ static sd::Tensor<float> upscale_latent_nearest(
     
     sd::Tensor<float> result({target_w, target_h, channels, 1});
     
+    float scale_x = (float)current_w / target_w;
+    float scale_y = (float)current_h / target_h;
+    
     for (int y = 0; y < target_h; y++) {
-        int src_y = y * current_h / target_h;
+        float fy = y * scale_y;
+        int y0 = (int)fy;
+        int y1 = std::min(y0 + 1, current_h - 1);
+        float dy = fy - y0;
+        
         for (int x = 0; x < target_w; x++) {
-            int src_x = x * current_w / target_w;
+            float fx = x * scale_x;
+            int x0 = (int)fx;
+            int x1 = std::min(x0 + 1, current_w - 1);
+            float dx = fx - x0;
+            
             for (int c = 0; c < channels; c++) {
-                result.data()[((y * target_w + x) * channels + c)] =
-                    latent.data()[((src_y * current_w + src_x) * channels + c)];
+                float v00 = latent.data()[((y0 * current_w + x0) * channels + c)];
+                float v01 = latent.data()[((y0 * current_w + x1) * channels + c)];
+                float v10 = latent.data()[((y1 * current_w + x0) * channels + c)];
+                float v11 = latent.data()[((y1 * current_w + x1) * channels + c)];
+                
+                float v0 = v00 * (1.0f - dx) + v01 * dx;
+                float v1 = v10 * (1.0f - dx) + v11 * dx;
+                float v = v0 * (1.0f - dy) + v1 * dy;
+                
+                result.data()[((y * target_w + x) * channels + c)] = v;
             }
         }
     }
@@ -77,27 +98,65 @@ static sd::Tensor<float> deep_hires_latent_hook(
     DeepHiresState* state = (DeepHiresState*)user_data;
     if (!state) return latent;
     
+    // 自动从 latent shape 获取 channel 数
+    int latent_channel = (int)latent.shape()[2];
+    
     // Phase 1 -> Phase 2 过渡
     if (!state->phase1_done && step > state->phase1_steps) {
         state->phase1_done = true;
-        printf("[DeepHires Hook] Step %d/%d: Upsampling latent from %dx%d to %dx%d\n",
+        printf("[DeepHires Hook] Step %d/%d: Upsampling latent from %dx%dx%d to %dx%dx%d\n",
                step, total_steps,
-               (int)latent.shape()[0], (int)latent.shape()[1],
-               state->phase2_w, state->phase2_h);
-        return upscale_latent_nearest(latent, state->phase2_w, state->phase2_h, state->latent_channel);
+               (int)latent.shape()[0], (int)latent.shape()[1], latent_channel,
+               state->phase2_w, state->phase2_h, latent_channel);
+        return upscale_latent_bilinear(latent, state->phase2_w, state->phase2_h, latent_channel);
     }
     
     // Phase 2 -> Phase 3 过渡
     if (!state->phase2_done && step > (state->phase1_steps + state->phase2_steps)) {
         state->phase2_done = true;
-        printf("[DeepHires Hook] Step %d/%d: Upsampling latent from %dx%d to %dx%d\n",
+        printf("[DeepHires Hook] Step %d/%d: Upsampling latent from %dx%dx%d to %dx%dx%d\n",
                step, total_steps,
-               (int)latent.shape()[0], (int)latent.shape()[1],
-               state->target_w, state->target_h);
-        return upscale_latent_nearest(latent, state->target_w, state->target_h, state->latent_channel);
+               (int)latent.shape()[0], (int)latent.shape()[1], latent_channel,
+               state->target_w, state->target_h, latent_channel);
+        return upscale_latent_bilinear(latent, state->target_w, state->target_h, latent_channel);
     }
     
     return latent;
+}
+
+// Guidance hook 回调：动态调整 cfg_scale
+static void deep_hires_guidance_hook(
+    float* txt_cfg,
+    float* img_cfg,
+    float* distilled_guidance,
+    int step,
+    int total_steps,
+    void* user_data) {
+    
+    DeepHiresState* state = (DeepHiresState*)user_data;
+    if (!state) return;
+    
+    (void)img_cfg;
+    (void)distilled_guidance;
+    
+    // Phase 1: 使用 phase1_cfg_scale
+    if (step <= state->phase1_steps) {
+        if (state->phase1_cfg_scale > 0) {
+            *txt_cfg = state->phase1_cfg_scale;
+        }
+    }
+    // Phase 2: 使用 phase2_cfg_scale
+    else if (step <= state->phase1_steps + state->phase2_steps) {
+        if (state->phase2_cfg_scale > 0) {
+            *txt_cfg = state->phase2_cfg_scale;
+        }
+    }
+    // Phase 3: 使用 phase3_cfg_scale
+    else {
+        if (state->phase3_cfg_scale > 0) {
+            *txt_cfg = state->phase3_cfg_scale;
+        }
+    }
 }
 
 void sd_deep_hires_params_init(sd_deep_hires_params_t* params) {
@@ -112,6 +171,7 @@ void sd_deep_hires_params_init(sd_deep_hires_params_t* params) {
     params->total_steps = 30;
     params->target_width = 1024;
     params->target_height = 1024;
+    params->strength = 1.0f;
 }
 
 sd_image_t* generate_image_deep_hires(
@@ -163,10 +223,13 @@ sd_image_t* generate_image_deep_hires(
     state.phase2_h = phase2_h;
     state.target_w = target_w;
     state.target_h = target_h;
-    state.latent_channel = latent_channel;
+    state.phase1_cfg_scale = params->phase1_cfg_scale > 0 ? params->phase1_cfg_scale : params->cfg_scale;
+    state.phase2_cfg_scale = params->phase2_cfg_scale > 0 ? params->phase2_cfg_scale : params->cfg_scale;
+    state.phase3_cfg_scale = params->phase3_cfg_scale > 0 ? params->phase3_cfg_scale : params->cfg_scale;
     
     // 注册 hook
     sd_set_latent_hook(deep_hires_latent_hook, &state);
+    sd_set_guidance_hook(deep_hires_guidance_hook, &state);
     
     // 构建生成参数
     sd_img_gen_params_t gen_params;
@@ -175,7 +238,10 @@ sd_image_t* generate_image_deep_hires(
     gen_params.negative_prompt = params->negative_prompt;
     gen_params.width = phase1_w;  // 从低分辨率开始
     gen_params.height = phase1_h;
-    gen_params.strength = 1.0f;   // txt2img
+    gen_params.strength = params->init_image.data ? params->strength : 1.0f;
+    if (params->init_image.data) {
+        gen_params.init_image = params->init_image;
+    }
     gen_params.seed = params->seed;
     gen_params.sample_params.sample_steps = total_steps;
     gen_params.sample_params.sample_method = (sample_method_t)params->sample_method;
@@ -194,6 +260,7 @@ sd_image_t* generate_image_deep_hires(
     
     // 清除 hook
     sd_clear_latent_hook();
+    sd_clear_guidance_hook();
     
     return result;
 }
