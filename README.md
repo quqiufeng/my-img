@@ -4,6 +4,8 @@
 
 复刻 ComfyUI 生态理念，但无需麻烦的 Python 依赖。只有**干净的 C++ 二进制程序**和**命令管道**。
 
+> 📖 **架构设计文档**: [sd-engine-design.md](docs/sd-engine-design.md) - C++ 版 ComfyUI 工作流执行引擎详细设计
+
 ## 已完成的工具
 
 | 工具 | 功能 | 状态 |
