@@ -6,8 +6,7 @@
 # 用法：
 #   ./apply_patches.sh
 #
-# 这个脚本会将 my-img 修改过的 stable-diffusion.cpp 文件
-# 复制到 stable-diffusion.cpp 目录中。
+# 这个脚本使用 git patch 文件将 my-img 的修改应用到 stable-diffusion.cpp。
 #
 # 升级 stable-diffusion.cpp 后的工作流程：
 #   1. cd stable-diffusion.cpp && git pull
@@ -21,8 +20,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MY_IMG_DIR="$SCRIPT_DIR"
 SD_DIR="$MY_IMG_DIR/stable-diffusion.cpp"
-PATCHED_DIR="$MY_IMG_DIR/stable-diffusion.cpp-patched"
-PATCH_FILE="$MY_IMG_DIR/patches/deep_hires_hook.patch"
+PATCHES_DIR="$MY_IMG_DIR/patches"
+
+# Patch 文件
+FULL_PATCH="$PATCHES_DIR/sd-engine-full.patch"
+EXT_HEADER_PATCH="$PATCHES_DIR/sd-engine-ext-header.patch"
 
 echo "========================================"
 echo "Applying my-img patches to stable-diffusion.cpp"
@@ -35,60 +37,75 @@ if [ ! -d "$SD_DIR" ]; then
     exit 1
 fi
 
-if [ ! -d "$PATCHED_DIR" ]; then
-    echo "Error: Patched files not found at $PATCHED_DIR"
+if [ ! -d "$PATCHES_DIR" ]; then
+    echo "Error: Patches directory not found at $PATCHES_DIR"
     exit 1
 fi
 
-# 方法 1: 尝试使用 git apply 打 patch（推荐，可以检测冲突）
-if [ -f "$PATCH_FILE" ]; then
-    echo ""
-    echo "=== Trying git apply patch ==="
-    cd "$SD_DIR"
-    if git apply --check "$PATCH_FILE" 2>/dev/null; then
-        git apply "$PATCH_FILE"
-        echo "✅ Patch applied successfully via git apply"
-        APPLY_METHOD="patch"
-    else
-        echo "⚠️  Git apply failed (possibly due to upstream changes), falling back to file copy"
-        APPLY_METHOD=""
-    fi
-else
-    echo "⚠️  Patch file not found, using file copy fallback"
-    APPLY_METHOD=""
-fi
+cd "$SD_DIR"
 
-# 方法 2: 文件覆盖（fallback）
-if [ -z "$APPLY_METHOD" ]; then
-    echo ""
-    echo "=== Applying patches via file copy ==="
-    
-    # 备份原始文件（如果不存在）
-    if [ ! -f "$PATCHED_DIR/src/stable-diffusion.cpp.bak" ]; then
-        echo "Creating backup of original stable-diffusion.cpp..."
-        cp "$SD_DIR/src/stable-diffusion.cpp" "$PATCHED_DIR/src/stable-diffusion.cpp.bak"
-    fi
-    
-    # 1. 修改后的 src/stable-diffusion.cpp
-    if [ -f "$PATCHED_DIR/src/stable-diffusion.cpp" ]; then
-        echo "  - src/stable-diffusion.cpp"
-        cp "$PATCHED_DIR/src/stable-diffusion.cpp" "$SD_DIR/src/stable-diffusion.cpp"
-    fi
-    
-    # 2. 扩展头文件
-    if [ -f "$PATCHED_DIR/include/stable-diffusion-ext.h" ]; then
-        echo "  - include/stable-diffusion-ext.h"
-        cp "$PATCHED_DIR/include/stable-diffusion-ext.h" "$SD_DIR/include/stable-diffusion-ext.h"
-    fi
-    
-    echo "✅ Patches applied via file copy"
+# 检查 patch 文件是否存在
+if [ ! -f "$FULL_PATCH" ]; then
+    echo "Error: Main patch file not found: $FULL_PATCH"
+    exit 1
 fi
 
 echo ""
-echo "Patches applied successfully!"
+echo "=== Applying patches via git apply ==="
+
+# 1. 应用主 patch（stable-diffusion.cpp 修改）
+echo ""
+echo "[1/2] Applying sd-engine-full.patch..."
+if git apply --check "$FULL_PATCH" 2>/dev/null; then
+    git apply "$FULL_PATCH"
+    echo "✅ Main patch applied successfully"
+else
+    echo "❌ Failed to apply main patch"
+    echo ""
+    echo "Possible reasons:"
+    echo "  - stable-diffusion.cpp has been updated and the patch no longer applies cleanly"
+    echo "  - The patch has already been applied"
+    echo ""
+    echo "To check the error details, run:"
+    echo "  git apply --check $FULL_PATCH"
+    exit 1
+fi
+
+# 2. 应用扩展头文件 patch（如果不存在则直接复制）
+echo ""
+echo "[2/2] Applying sd-engine-ext-header.patch..."
+if [ -f "$EXT_HEADER_PATCH" ] && [ -s "$EXT_HEADER_PATCH" ]; then
+    if git apply --check "$EXT_HEADER_PATCH" 2>/dev/null; then
+        git apply "$EXT_HEADER_PATCH"
+        echo "✅ Extension header patch applied successfully"
+    else
+        # 如果 patch 失败，直接复制文件
+        echo "⚠️  Patch failed, copying file directly..."
+        cp "$MY_IMG_DIR/stable-diffusion.cpp-patched/include/stable-diffusion-ext.h" \
+           "$SD_DIR/include/stable-diffusion-ext.h"
+        echo "✅ Extension header copied successfully"
+    fi
+else
+    # 直接复制文件
+    cp "$MY_IMG_DIR/stable-diffusion.cpp-patched/include/stable-diffusion-ext.h" \
+       "$SD_DIR/include/stable-diffusion-ext.h"
+    echo "✅ Extension header copied successfully"
+fi
+
+echo ""
+echo "========================================"
+echo "✅ All patches applied successfully!"
+echo "========================================"
+echo ""
+echo "Modified files:"
+echo "  - src/stable-diffusion.cpp (Deep HighRes Fix hooks + ComfyUI-style C API)"
+echo "  - include/stable-diffusion-ext.h (Extension header)"
 echo ""
 echo "Next steps:"
 echo "  1. cd $SD_DIR && mkdir -p build && cd build"
 echo "  2. cmake .. -DSD_CUDA=ON -DSD_FLASH_ATTN=ON"
-echo "  3. make -j4"
-echo "  4. cd $MY_IMG_DIR/build && make -j2"
+echo "  3. make -j\$(nproc)"
+echo "  4. cd $MY_IMG_DIR/build && cmake .. && make -j\$(nproc)"
+echo ""
+echo "To verify the patches are applied:"
+echo "  grep -n 'sd_latent_hook_t\|sd_sampler_run\|sd_apply_loras' $SD_DIR/src/stable-diffusion.cpp | head -5"

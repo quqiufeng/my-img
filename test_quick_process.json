@@ -1,0 +1,43 @@
+{
+    "1": {
+        "class_type": "LoadImage",
+        "inputs": {
+            "image": "/path/to/input.png"
+        }
+    },
+    "2": {
+        "class_type": "ImageScale",
+        "inputs": {
+            "height": 1024,
+            "image": [
+                "1",
+                0
+            ],
+            "method": "bilinear",
+            "width": 1024
+        }
+    },
+    "3": {
+        "class_type": "ImageCrop",
+        "inputs": {
+            "height": 512,
+            "image": [
+                "2",
+                0
+            ],
+            "width": 512,
+            "x": 256,
+            "y": 256
+        }
+    },
+    "4": {
+        "class_type": "SaveImage",
+        "inputs": {
+            "filename_prefix": "test",
+            "images": [
+                "3",
+                0
+            ]
+        }
+    }
+}

@@ -67,8 +67,8 @@ endif()
 # ============================================================
 # 3. 编译你的程序
 # ============================================================
-# 收集所有源文件
-file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+# 第三方库路径
+set(THIRDPARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty")
 
 # 特殊处理 sd-core：编译为静态库
 set(SD_CORE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-core/deep_hires.cpp")
@@ -82,6 +82,7 @@ if(EXISTS ${SD_CORE_SRC})
         ${SD_PATH}/thirdparty
         ${SD_PATH}/ggml/include
         ${SD_PATH}/src
+        ${THIRDPARTY_DIR}
     )
     if(CUDA_PATH)
         target_link_libraries(sd-core PRIVATE 
@@ -94,12 +95,49 @@ if(EXISTS ${SD_CORE_SRC})
     message(STATUS "[my-img] Created library: sd-core")
 endif()
 
+# 特殊处理 sd-engine：编译为静态库
+set(SD_ENGINE_SRC 
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/node.cpp"
+)
+if(EXISTS ${SD_ENGINE_SRC})
+    add_library(sd-engine STATIC 
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/node.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/cache.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/executor.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/init.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow_builder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/test_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/core_nodes.cpp"
+    )
+    target_include_directories(sd-engine PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
+        ${THIRDPARTY_DIR}
+        ${SD_PATH}
+        ${SD_PATH}/include
+        ${SD_PATH}/thirdparty
+        ${SD_PATH}/ggml/include
+        ${SD_PATH}/src
+    )
+    message(STATUS "[my-img] Created library: sd-engine")
+endif()
+
+# 收集所有源文件
+file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+
 # 其他目录编译为可执行文件
 foreach(src ${SRC_FILES})
     get_filename_component(name ${src} NAME_WE)
     get_filename_component(dir ${src} PATH)
-    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "" dir ${dir})
-    string(REPLACE "/" "-" dir ${dir})
+    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "" rel_dir ${dir})
+    
+    # 跳过 sd-core 和 sd-engine 库中的源文件（避免被 GLOB_RECURSE 当成可执行文件）
+    # 但保留 sd-engine/tools 目录下的可执行文件
+    if(rel_dir MATCHES "^sd-core" OR rel_dir MATCHES "^sd-engine/core" OR rel_dir MATCHES "^sd-engine/nodes")
+        continue()
+    endif()
+    
+    string(REPLACE "/" "-" dir ${rel_dir})
     
     if(dir STREQUAL "")
         set(final_name ${name})
@@ -107,15 +145,20 @@ foreach(src ${SRC_FILES})
         set(final_name ${dir})
     endif()
     
-    # 跳过 sd-core
-    if(final_name STREQUAL "sd-core")
-        continue()
+    # 特殊处理 sd-engine-tools -> sd-workflow
+    if(final_name STREQUAL "sd-engine-tools")
+        set(final_name "sd-workflow")
     endif()
 
     add_executable(${final_name} ${src})
     
     # 链接 stable-diffusion 和 ggml
     target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
+    
+    # 链接 sd-engine 库
+    if(TARGET sd-engine)
+        target_link_libraries(${final_name} PRIVATE sd-engine)
+    endif()
     
     # 如果有 sd-core 库，也链接上
     if(TARGET sd-core)
@@ -140,6 +183,8 @@ foreach(src ${SRC_FILES})
         ${SD_PATH}/thirdparty
         ${SD_PATH}/ggml/include
         ${SD_PATH}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
+        ${THIRDPARTY_DIR}
     )
 
     message(STATUS "[my-img] Created target: ${final_name}")

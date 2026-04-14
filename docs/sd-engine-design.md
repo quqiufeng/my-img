@@ -494,34 +494,84 @@ bool DAGExecutor::execute_node(Node* node, const NodeInputs& inputs,
 ## 7. 开发路线图
 
 ### Phase 1: 核心引擎（MVP）
-- [ ] Workflow JSON 解析器
-- [ ] DAG 拓扑排序执行器
-- [ ] 基础节点框架
-- [ ] 结果缓存系统
-- [ ] sd-workflow CLI 工具
+- [x] Workflow JSON 解析器
+- [x] DAG 拓扑排序执行器
+- [x] 基础节点框架（含显式初始化解决静态库注册问题）
+- [x] 结果缓存系统
+- [x] sd-workflow CLI 工具
+- [x] 测试节点验证完整执行链路（ConstantInt → AddInt → MultiplyInt → PrintInt）
 
 **目标**：能跑通最简单的 txt2img 工作流
 
+**当前状态**：Phase 1 核心引擎已完成并编译验证。`sd-workflow` 可成功解析 JSON 工作流，执行 DAG 拓扑排序，调用测试节点完成端到端计算。
+
 ### Phase 2: 核心节点
-- [ ] CheckpointLoaderSimple
-- [ ] CLIPTextEncode
-- [ ] EmptyLatentImage
-- [ ] KSampler
-- [ ] VAEDecode
-- [ ] SaveImage
-- [ ] LoadImage (img2img)
-- [ ] VAEEncode
+- [x] CheckpointLoaderSimple（加载 sd_ctx_t，同时输出 MODEL/CLIP/VAE）
+- [x] CLIPTextEncode（参数存储模式，输出 ConditioningData）
+- [x] EmptyLatentImage（输出 LatentParams）
+- [x] KSampler（核心执行节点，支持 txt2img/img2img，调用 generate_image()）
+- [x] VAEDecode（透传节点，因为 generate_image 已解码）
+- [x] SaveImage（使用 stb_image_write 保存 PNG）
+- [x] LoadImage（使用 stb_image 加载图像）
+- [x] VAEEncode（参数存储模式，输出 Img2ImgParams）
 
 **目标**：支持 txt2img 和 img2img 完整链路
 
-### Phase 3: 图像处理节点
-- [ ] ImageScale
-- [ ] ImageCrop
-- [ ] ImageComposite
-- [ ] UpscaleModelLoader
-- [ ] ImageUpscaleWithModel
+**当前状态**：Phase 2 全部完成，并且已经通过给 `stable-diffusion.cpp` 打 patch 实现了**真正的中间 latent/conditioning 传递**：
 
-**目标**：支持高清修复流程
+- `sd_encode_prompt()` — 真正的 CLIP 文本编码，返回 `sd_conditioning_t*`
+- `sd_create_empty_latent()` — 创建空 latent
+- `sd_encode_image()` — 真正的 VAE 编码，返回 `sd_latent_t*`
+- `sd_sampler_run()` — 真正的采样，输入/输出都是 `sd_latent_t*`
+- `sd_decode_latent()` — 真正的 VAE 解码，返回 `sd_image_t*`
+
+`sd-workflow` 现在支持完整的 ComfyUI 风格节点链路：
+- **txt2img**: CheckpointLoaderSimple → CLIPTextEncode×2 → EmptyLatentImage → KSampler → VAEDecode → SaveImage
+- **img2img**: CheckpointLoaderSimple → CLIPTextEncode×2 → LoadImage → VAEEncode → KSampler → VAEDecode → SaveImage
+
+### Phase 3: 图像处理节点 + 命令行桥接 + LoRA + Deep HighRes Fix
+- [x] ImageScale（支持 bilinear/nearest/lanczos 插值）
+- [x] ImageCrop（像素级裁剪）
+- [x] PreviewImage（终端预览，不保存文件）
+- [x] **命令行 ↔ 节点桥接**（WorkflowBuilder + Quick Mode）
+- [x] **LoRA 支持**（LoRALoader 节点 + KSampler 集成）
+- [x] **DeepHighResFix 节点**（原生 Deep HighRes Fix，支持 txt2img/img2img）
+- [ ] ImageComposite（图像叠加合成）
+- [ ] UpscaleModelLoader（ESRGAN 模型加载）
+
+**目标**：支持图像预处理/后处理流程，实现命令行与节点工作流互通，支持 LoRA 和 Deep HighRes Fix
+
+**当前状态**：Phase 3 完成，新增：
+
+1. **命令行桥接功能**：
+```bash
+# 快速模式：命令行直接生成并执行工作流（无需 JSON）
+sd-workflow --txt2img \
+  --model /path/to/model.gguf \
+  --prompt "a cat" \
+  --width 512 --height 512 \
+  --seed 42 --steps 20 \
+  --output mycat
+
+# 生成 JSON 供后续复用
+sd-workflow --txt2img ... --save-json workflow.json
+```
+
+2. **LoRA 支持**：
+- `LoRALoader` 节点加载 `.safetensors` LoRA 文件
+- `KSampler` 接收 `lora_stack` 输入，采样前调用 `sd_apply_loras()`
+- 扩展 C API：`sd_apply_loras()` / `sd_clear_loras()`
+
+3. **DeepHighResFix 节点**：
+- 将原有的 `sd-hires` 核心逻辑封装为 ComfyUI 风格节点
+- 在单次采样中通过 latent hook 动态改变分辨率
+- 支持三阶段渐进式上采样 + 各阶段独立 cfg_scale
+- 工作流示例：
+```
+CheckpointLoaderSimple → CLIPTextEncode×2 → DeepHighResFix → SaveImage
+```
+
+**架构**：`WorkflowBuilder` 类提供代码级工作流构建，支持程序化生成复杂工作流。
 
 ### Phase 4: ControlNet
 - [ ] ControlNetLoader
@@ -604,4 +654,4 @@ sd-engine 是一个**雄心勃勃但可行**的项目：
 - **需求明确**：ComfyUI 的 Python 依赖确实是生产部署的痛点
 - **生态互补**：不与 ComfyUI 竞争，而是服务不同场景
 
-**下一步**：开始实现 Phase 1 核心引擎？
+**下一步**：开始实现 Phase 2 核心节点（CheckpointLoaderSimple, CLIPTextEncode, KSampler, VAEDecode, SaveImage）

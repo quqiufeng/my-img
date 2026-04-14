@@ -10,6 +10,7 @@
 
 | 工具 | 功能 | 状态 |
 |------|------|------|
+| `sd-workflow` | **C++ 版 ComfyUI 工作流引擎**：解析 JSON 工作流，执行 DAG 拓扑排序，支持 txt2img/img2img/图像处理/LoRA | ✅ |
 | `sd-hires` | AI 高清修复：ESRGAN 放大 + Deep HighRes Fix 分阶段重绘 | ✅ |
 | `sd-img2img` | 图生图重绘（支持普通 img2img 和 Deep HighRes Fix） | ✅ |
 | `sd-upscale` | ESRGAN 独立超分放大 | ✅ |
@@ -22,6 +23,8 @@
 my-img/
 ├── CMakeLists.txt          # 通用编译模板
 ├── README.md               # 本文档
+├── docs/
+│   └── sd-engine-design.md # 架构设计文档
 ├── claude.md               # AI 开发指南
 ├── apply_patches.sh        # 应用 stable-diffusion.cpp 补丁
 ├── build/
@@ -30,14 +33,13 @@ my-img/
 │   ├── sd-core/            # 核心扩展库（Deep HighRes Fix 原生实现）
 │   │   ├── deep_hires.h
 │   │   └── deep_hires.cpp
+│   ├── sd-engine/          # C++ 版 ComfyUI 工作流引擎
+│   │   ├── core/           # 引擎核心（Workflow/DAGExecutor/Cache）
+│   │   ├── nodes/          # 节点实现
+│   │   └── tools/          # CLI 工具
 │   ├── sd-hires/
-│   │   ├── main.cpp
-│   │   └── design.md
 │   ├── sd-img2img/
-│   │   ├── main.cpp
-│   │   └── design.md
 │   └── sd-upscale/
-│       └── main.cpp
 ├── stable-diffusion.cpp-patched/   # 修改备份（升级后覆盖用）
 │   ├── src/stable-diffusion.cpp
 │   └── include/stable-diffusion-ext.h
@@ -63,14 +65,15 @@ cd ~/my-img/build
 cd ~/my-img
 rm -rf build && mkdir build && cd build
 cmake .. -DSD_PATH=/home/dministrator/stable-diffusion.cpp
-make -j2
+make -j$(nproc)
 ```
 
 ### 3. 安装
 
 ```bash
-cp sd-hires sd-img2img sd-upscale ../bin/
+cp sd-workflow sd-hires sd-img2img sd-upscale ../bin/
 
+sudo ln -sf ~/my-img/bin/sd-workflow /usr/local/bin/sd-workflow
 sudo ln -sf ~/my-img/bin/sd-hires /usr/local/bin/sd-hires
 sudo ln -sf ~/my-img/bin/sd-img2img /usr/local/bin/sd-img2img
 sudo ln -sf ~/my-img/bin/sd-upscale /usr/local/bin/sd-upscale
@@ -78,9 +81,119 @@ sudo ln -sf ~/my-img/bin/sd-upscale /usr/local/bin/sd-upscale
 
 ---
 
-## 使用说明
+## sd-workflow：C++ 版 ComfyUI 工作流引擎
 
-### sd-hires：AI 高清修复
+### 双模式设计
+
+`sd-workflow` 支持两种使用方式：
+
+1. **JSON 工作流模式**：执行 ComfyUI 风格的 JSON 工作流
+2. **快速命令行模式**：无需 JSON，直接通过命令行参数生成并执行
+
+### 快速模式
+
+#### txt2img 快速生成
+
+```bash
+sd-workflow --txt2img \
+  --model /path/to/model.gguf \
+  --prompt "masterpiece, best quality, a cat" \
+  --negative "bad quality" \
+  --width 512 --height 512 \
+  --seed 42 --steps 20 --cfg 7.5 \
+  --output mycat
+
+# 保存为 JSON 供后续复用
+sd-workflow --txt2img ... --save-json workflow.json
+```
+
+#### img2img 快速生成
+
+```bash
+sd-workflow --img2img \
+  --model /path/to/model.gguf \
+  --input input.png \
+  --prompt "add details" \
+  --denoise 0.75 \
+  --seed 42 --steps 20
+```
+
+#### 图像处理
+
+```bash
+sd-workflow --process \
+  --input photo.png \
+  --scale-w 1024 --scale-h 1024 \
+  --crop-x 256 --crop-y 256 --crop-w 512 --crop-h 512 \
+  --output processed
+```
+
+#### Deep HighRes Fix（高清修复）
+
+```bash
+# txt2img + Deep HighRes Fix（从小分辨率生成高清大图）
+sd-workflow --deep-hires \
+  --model /path/to/model.gguf \
+  --prompt "masterpiece, best quality, extremely detailed" \
+  --target-width 1024 \
+  --target-height 1024 \
+  --seed 42 --steps 30 \
+  --output hires_output
+
+# img2img + Deep HighRes Fix（从输入图高清重绘）
+sd-workflow --deep-hires \
+  --model /path/to/model.gguf \
+  --input input_512.png \
+  --prompt "masterpiece, best quality" \
+  --target-width 1024 \
+  --target-height 1024 \
+  --denoise 0.45 \
+  --seed 42 --steps 30 \
+  --output hires_output
+```
+
+### JSON 工作流模式
+
+```bash
+# 执行工作流
+sd-workflow --workflow my_workflow.json --verbose
+
+# 仅验证不执行
+sd-workflow --workflow my_workflow.json --dry-run
+
+# 查看支持的节点
+sd-workflow --list-nodes
+```
+
+### 支持的节点（17个）
+
+| 类别 | 节点 | 说明 |
+|------|------|------|
+| 加载器 | `CheckpointLoaderSimple` | 加载 SD 模型 |
+| 加载器 | `LoRALoader` | 加载 LoRA 权重 |
+| 条件编码 | `CLIPTextEncode` | 文本编码为 conditioning |
+| Latent | `EmptyLatentImage` | 创建空 latent |
+| Latent | `VAEEncode` | 图像编码为 latent（img2img） |
+| Latent | `VAEDecode` | latent 解码为图像 |
+| 采样 | `KSampler` | 执行扩散采样（支持 LoRA） |
+| 采样 | `DeepHighResFix` | **原生 Deep HighRes Fix**，单次采样动态改变分辨率 |
+| 图像 | `LoadImage` | 加载图像 |
+| 图像 | `SaveImage` | 保存 PNG |
+| 图像 | `ImageScale` | 图像缩放（bilinear/nearest/lanczos） |
+| 图像 | `ImageCrop` | 图像裁剪 |
+| 图像 | `PreviewImage` | 终端预览 |
+| 测试 | `ConstantInt` / `AddInt` / `MultiplyInt` / `PrintInt` | 测试节点 |
+
+### 核心特性
+
+- **真正的中间 latent/conditioning 传递**：通过扩展 `stable-diffusion.cpp` C API 实现
+- **DAG 拓扑排序执行**：自动计算节点依赖顺序
+- **节点结果缓存**：只重新执行变化的节点
+- **命令行 ↔ 节点桥接**：`WorkflowBuilder` 支持程序化构建工作流
+
+---
+
+## sd-hires：AI 高清修复
 
 **流程**：ESRGAN 像素级放大 → Deep HighRes Fix 分阶段重绘
 
@@ -128,9 +241,11 @@ sd-hires \
 
 > 实现方式：通过在 `stable-diffusion.cpp` 源码中添加 `sd_latent_hook_t` hook，在 `sample()` 函数的每个采样步骤前调用，动态改变 latent 分辨率。
 
+> 💡 **节点化支持**：Deep HighRes Fix 的核心逻辑也已封装为 `DeepHighResFix` 节点，可以在 `sd-workflow` 的工作流中灵活组合使用（见下文 `--deep-hires` 快速模式）。
+
 ---
 
-### sd-img2img：图生图
+## sd-img2img：图生图
 
 ```bash
 # 普通 img2img
@@ -160,7 +275,7 @@ sd-img2img \
 
 ---
 
-### sd-upscale：ESRGAN 独立放大
+## sd-upscale：ESRGAN 独立放大
 
 ```bash
 sd-upscale \
@@ -174,7 +289,7 @@ sd-upscale \
 
 ## 升级 stable-diffusion.cpp
 
-由于 my-img 修改了 `stable-diffusion.cpp` 源码（添加了 latent hook），升级后需要重新应用修改：
+由于 my-img 修改了 `stable-diffusion.cpp` 源码（添加了 latent hook、分离式 C API、LoRA 支持等），升级后需要重新应用修改：
 
 ```bash
 cd ~/stable-diffusion.cpp
@@ -187,7 +302,7 @@ cd ~/my-img/build
 ./build_sd_cpp.sh
 
 cd ~/my-img/build
-cmake .. && make -j2
+cmake .. && make -j$(nproc)
 ```
 
 修改的备份文件存放在 `~/my-img/stable-diffusion.cpp-patched/` 目录下。
@@ -301,41 +416,43 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 
 | # | 项目 | 进度 |
 |---|------|------|
-| 1 | sd-hires | ✅ |
-| 2 | sd-img2img | ✅ |
-| 3 | sd-upscale | ✅ |
+| 1 | `sd-workflow` | ✅ 支持 JSON 工作流 + 快速命令行模式 |
+| 2 | `sd-hires` | ✅ |
+| 3 | `sd-img2img` | ✅ |
+| 4 | `sd-upscale` | ✅ |
 
-### 计划中的 ComfyUI 节点（C++ 复刻）
+### 已完成的 sd-engine 节点
 
 | # | 节点类别 | 具体节点 | 进度 |
 |---|---------|---------|------|
-| 1 | **加载器** | CheckpointLoaderSimple | ⬜ |
-| 2 | **加载器** | VAELoader / CLIPLoader | ⬜ |
-| 3 | **条件编码** | CLIPTextEncode | ⬜ |
-| 4 | **条件编码** | ConditioningCombine / ConditioningSetArea | ⬜ |
-| 5 | **Latent** | EmptyLatentImage | ⬜ |
-| 6 | **Latent** | VAEEncode / VAEDecode | ⬜ |
-| 7 | **Latent** | LatentUpscale / LatentComposite | ⬜ |
-| 8 | **采样** | KSampler / KSamplerAdvanced | ⬜ |
-| 9 | **采样** | SamplerCustom | ⬜ |
-| 10 | **图像** | LoadImage / SaveImage | ⬜ |
-| 11 | **图像** | ImageScale / ImageCrop | ⬜ |
-| 12 | **图像** | ImageBlur / ImageSharpen | ⬜ |
-| 13 | **超分** | UpscaleModelLoader | ⬜ |
-| 14 | **超分** | ImageUpscaleWithModel | ⬜ |
-| 15 | **修复** | INPAINT_LoadInpaintModel | ⬜ |
-| 16 | **修复** | INPAINT_ApplyInpaint | ⬜ |
-| 17 | **ControlNet** | ControlNetLoader | ⬜ |
-| 18 | **ControlNet** | ControlNetApply / ControlNetApplyAdvanced | ⬜ |
-| 19 | **ControlNet** | CannyEdgePreprocessor | ⬜ |
-| 20 | **ControlNet** | MiDaS-DepthMapPreprocessor | ⬜ |
-| 21 | **ControlNet** | OpenPosePreprocessor | ⬜ |
-| 22 | **LoRA** | LoraLoader / LoraLoaderModelOnly | ⬜ |
-| 23 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ⬜ |
-| 24 | **视频** | AnimateDiff Loader / Sampler | ⬜ |
-| 25 | **视频** | VideoLinearCFGGuidance | ⬜ |
-| 26 | **引擎** | sd-workflow (JSON 执行器) | ⬜ |
-| 27 | **引擎** | DAG 拓扑排序 + 缓存系统 | ⬜ |
+| 1 | **加载器** | CheckpointLoaderSimple | ✅ |
+| 2 | **加载器** | LoRALoader | ✅ |
+| 3 | **条件编码** | CLIPTextEncode | ✅ |
+| 4 | **Latent** | EmptyLatentImage | ✅ |
+| 5 | **Latent** | VAEEncode / VAEDecode | ✅ |
+| 6 | **采样** | KSampler（支持 LoRA） | ✅ |
+| 7 | **采样** | DeepHighResFix | ✅ |
+| 8 | **图像** | LoadImage / SaveImage | ✅ |
+| 9 | **图像** | ImageScale / ImageCrop | ✅ |
+| 10 | **图像** | PreviewImage | ✅ |
+| 11 | **引擎** | sd-workflow CLI + DAG 执行器 + 缓存 | ✅ |
+| 12 | **引擎** | WorkflowBuilder（命令行桥接） | ✅ |
+
+### 计划中的节点
+
+| # | 节点类别 | 具体节点 | 进度 |
+|---|---------|---------|------|
+| 1 | **条件编码** | ConditioningCombine / ConditioningSetArea | ⬜ |
+| 2 | **Latent** | LatentUpscale / LatentComposite | ⬜ |
+| 3 | **采样** | KSamplerAdvanced / SamplerCustom | ⬜ |
+| 4 | **图像** | ImageBlur / ImageSharpen / ImageComposite | ⬜ |
+| 5 | **超分** | UpscaleModelLoader / ImageUpscaleWithModel | ⬜ |
+| 6 | **修复** | INPAINT_LoadInpaintModel / INPAINT_ApplyInpaint | ⬜ |
+| 7 | **ControlNet** | ControlNetLoader / ControlNetApply | ⬜ |
+| 8 | **ControlNet** | CannyEdgePreprocessor / MiDaS-DepthMapPreprocessor / OpenPosePreprocessor | ⬜ |
+| 9 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ⬜ |
+| 10 | **视频** | AnimateDiff Loader / Sampler | ⬜ |
+| 11 | **服务** | sd-server HTTP API | ⬜ |
 
 ---
 

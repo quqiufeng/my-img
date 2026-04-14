@@ -1,0 +1,457 @@
+diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+index 683a07d..7a74cc8 100644
+--- a/src/stable-diffusion.cpp
++++ b/src/stable-diffusion.cpp
+@@ -5,6 +5,7 @@
+ #include "rng_mt19937.hpp"
+ #include "rng_philox.hpp"
+ #include "stable-diffusion.h"
++#include "stable-diffusion-ext.h"
+ #include "util.h"
+ 
+ #include "auto_encoder_kl.hpp"
+@@ -102,6 +103,37 @@ static float get_cache_reuse_threshold(const sd_cache_params_t& params) {
+ 
+ /*=============================================== StableDiffusionGGML ================================================*/
+ 
++// ============================================================================
++// Deep HighRes Fix Hook - Added by my-img project
++// ============================================================================
++// This hook allows external code to intercept the latent during sampling
++// and perform operations like resolution interpolation.
++//
++// The hook is called before each sampling step. It receives the current latent
++// tensor and can return a modified/replaced tensor.
++
++typedef sd::Tensor<float> (*sd_latent_hook_t)(
++    sd::Tensor<float>& latent,
++    int step,
++    int total_steps,
++    void* user_data);
++
++// Guidance hook: allows modifying txt_cfg, img_cfg, and distilled_guidance during sampling
++typedef void (*sd_guidance_hook_t)(
++    float* txt_cfg,
++    float* img_cfg,
++    float* distilled_guidance,
++    int step,
++    int total_steps,
++    void* user_data);
++
++static sd_latent_hook_t g_sd_latent_hook = nullptr;
++static void* g_sd_latent_hook_user_data = nullptr;
++static sd_guidance_hook_t g_sd_guidance_hook = nullptr;
++static void* g_sd_guidance_hook_user_data = nullptr;
++
++// ============================================================================
++
+ class StableDiffusionGGML {
+ public:
+     ggml_backend_t backend             = nullptr;  // general backend
+@@ -1606,6 +1638,7 @@ public:
+         float cfg_scale     = guidance.txt_cfg;
+         float img_cfg_scale = guidance.img_cfg;
+         float slg_scale     = guidance.slg.scale;
++        float distilled_guidance = guidance.distilled_guidance;
+ 
+         sd_sample::SampleCacheRuntime cache_runtime = sd_sample::init_sample_cache_runtime(version,
+                                                                                            cache_params,
+@@ -1626,6 +1659,11 @@ public:
+         SamplePreviewContext preview = prepare_sample_preview_context();
+ 
+         auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
++            // Deep HighRes Fix guidance hook: allow modifying cfg_scale during sampling
++            if (g_sd_guidance_hook != nullptr) {
++                g_sd_guidance_hook(&cfg_scale, &img_cfg_scale, &distilled_guidance, step, (int)steps, g_sd_guidance_hook_user_data);
++            }
++
+             if (step == 1 || step == -1) {
+                 pretty_progress(0, (int)steps, 0);
+             }
+@@ -1641,7 +1679,7 @@ public:
+             adjust_sample_step_scalings(shifted_timestep, timesteps_vec, c_in, &c_skip, &c_out);
+ 
+             sd::Tensor<float> timesteps_tensor({static_cast<int64_t>(timesteps_vec.size())}, timesteps_vec);
+-            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{guidance.distilled_guidance});
++            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{distilled_guidance});
+             sd::Tensor<float> noised_input = x * c_in;
+             if (!denoise_mask.empty() && version == VERSION_WAN2_2_TI2V) {
+                 noised_input = noised_input * denoise_mask + init_latent * (1.0f - denoise_mask);
+@@ -1792,7 +1830,16 @@ public:
+             return denoised;
+         };
+ 
+-        auto x0_opt = sample_k_diffusion(method, denoise, x_t, sigmas, sampler_rng, eta, is_flow_denoiser);
++        // Deep HighRes Fix hook: wrap denoise to allow latent modification
++        auto denoise_with_hook = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
++            sd::Tensor<float> mutable_x = x;
++            if (g_sd_latent_hook != nullptr) {
++                mutable_x = g_sd_latent_hook(mutable_x, step, (int)steps, g_sd_latent_hook_user_data);
++            }
++            return denoise(mutable_x, sigma, step);
++        };
++
++        auto x0_opt = sample_k_diffusion(method, denoise_with_hook, x_t, sigmas, sampler_rng, eta, is_flow_denoiser);
+         if (x0_opt.empty()) {
+             LOG_ERROR("Diffusion model sampling failed");
+             if (control_net) {
+@@ -3211,6 +3258,32 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+     return result;
+ }
+ 
++// ============================================================================
++// Deep HighRes Fix API - Added by my-img project
++// ============================================================================
++
++SD_API void sd_set_latent_hook(sd_latent_hook_t hook, void* user_data) {
++    g_sd_latent_hook = hook;
++    g_sd_latent_hook_user_data = user_data;
++}
++
++SD_API void sd_clear_latent_hook() {
++    g_sd_latent_hook = nullptr;
++    g_sd_latent_hook_user_data = nullptr;
++}
++
++SD_API void sd_set_guidance_hook(sd_guidance_hook_t hook, void* user_data) {
++    g_sd_guidance_hook = hook;
++    g_sd_guidance_hook_user_data = user_data;
++}
++
++SD_API void sd_clear_guidance_hook() {
++    g_sd_guidance_hook = nullptr;
++    g_sd_guidance_hook_user_data = nullptr;
++}
++
++// ============================================================================
++
+ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
+                                                                               const sd_vid_gen_params_t* sd_vid_gen_params,
+                                                                               GenerationRequest* request) {
+@@ -3606,3 +3679,326 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
+     LOG_INFO("generate_video completed in %.2fs", (t1 - t0) * 1.0f / 1000);
+     return result;
+ }
++
++// ============================================================================
++// ComfyUI-style Node-level API - Added by my-img project
++// ============================================================================
++
++struct sd_latent_t {
++    sd::Tensor<float> tensor;
++};
++
++struct sd_conditioning_t {
++    SDCondition cond;
++};
++
++SD_API sd_conditioning_t* sd_encode_prompt(
++    sd_ctx_t* sd_ctx,
++    const char* prompt,
++    int clip_skip) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || prompt == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->cond_stage_model == nullptr) {
++        LOG_ERROR("cond_stage_model is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0 = ggml_time_ms();
++    ConditionerParams condition_params;
++    condition_params.text = prompt;
++    condition_params.clip_skip = clip_skip;
++    condition_params.width = 512;   // default, will be overridden by KSampler
++    condition_params.height = 512;  // default
++    condition_params.adm_in_channels = static_cast<int>(sd_ctx->sd->diffusion_model->get_adm_in_channels());
++
++    auto cond = sd_ctx->sd->cond_stage_model->get_learned_condition(
++        sd_ctx->sd->n_threads, condition_params);
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_encode_prompt completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    sd_conditioning_t* result = new sd_conditioning_t();
++    result->cond = std::move(cond);
++    return result;
++}
++
++SD_API void sd_free_conditioning(sd_conditioning_t* cond) {
++    delete cond;
++}
++
++SD_API sd_latent_t* sd_create_empty_latent(
++    sd_ctx_t* sd_ctx,
++    int width,
++    int height) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return nullptr;
++    }
++
++    // Align dimensions to VAE scale factor
++    int vae_scale = sd_ctx->sd->first_stage_model ?
++        sd_ctx->sd->first_stage_model->get_scale_factor() : 8;
++    int latent_w = width / vae_scale;
++    int latent_h = height / vae_scale;
++
++    // Standard SD latent shape: [batch=1, channels=4, height, width]
++    sd::Tensor<float> latent({latent_w, latent_h, 4, 1});
++    latent.fill_(0.0f);
++
++    sd_latent_t* result = new sd_latent_t();
++    result->tensor = std::move(latent);
++    return result;
++}
++
++SD_API sd_latent_t* sd_encode_image(
++    sd_ctx_t* sd_ctx,
++    const sd_image_t* image) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || image == nullptr || image->data == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->first_stage_model == nullptr) {
++        LOG_ERROR("first_stage_model (VAE) is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0 = ggml_time_ms();
++    sd::Tensor<float> image_tensor = sd_image_to_tensor(*image, image->width, image->height);
++    sd::Tensor<float> latent = sd_ctx->sd->encode_first_stage(image_tensor);
++
++    if (latent.empty()) {
++        LOG_ERROR("encode_first_stage failed");
++        return nullptr;
++    }
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_encode_image completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    if (sd_ctx->sd->free_params_immediately) {
++        sd_ctx->sd->first_stage_model->free_params_buffer();
++    }
++
++    sd_latent_t* result = new sd_latent_t();
++    result->tensor = std::move(latent);
++    return result;
++}
++
++SD_API sd_image_t* sd_decode_latent(
++    sd_ctx_t* sd_ctx,
++    const sd_latent_t* latent) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || latent == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->first_stage_model == nullptr) {
++        LOG_ERROR("first_stage_model (VAE) is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0 = ggml_time_ms();
++    sd::Tensor<float> image_tensor = sd_ctx->sd->decode_first_stage(latent->tensor);
++
++    if (image_tensor.empty()) {
++        LOG_ERROR("decode_first_stage failed");
++        if (sd_ctx->sd->free_params_immediately) {
++            sd_ctx->sd->first_stage_model->free_params_buffer();
++        }
++        return nullptr;
++    }
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_decode_latent completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    if (sd_ctx->sd->free_params_immediately) {
++        sd_ctx->sd->first_stage_model->free_params_buffer();
++    }
++
++    sd_image_t* result = (sd_image_t*)malloc(sizeof(sd_image_t));
++    if (result == nullptr) {
++        return nullptr;
++    }
++    *result = tensor_to_sd_image(image_tensor);
++    return result;
++}
++
++SD_API void sd_free_latent(sd_latent_t* latent) {
++    delete latent;
++}
++
++SD_API void sd_free_image(sd_image_t* image) {
++    if (image) {
++        if (image->data) {
++            free(image->data);
++            image->data = nullptr;
++        }
++        free(image);
++    }
++}
++
++SD_API void sd_latent_get_shape(
++    const sd_latent_t* latent,
++    int* width,
++    int* height,
++    int* channels) {
++    if (latent == nullptr || latent->tensor.empty()) {
++        if (width) *width = 0;
++        if (height) *height = 0;
++        if (channels) *channels = 0;
++        return;
++    }
++    const auto& shape = latent->tensor.shape();
++    // Typical shape: [W, H, C, 1] or [W, H, C]
++    if (width) *width = static_cast<int>(shape[0]);
++    if (height) *height = static_cast<int>(shape[1]);
++    if (channels) *channels = static_cast<int>(shape[2]);
++}
++
++SD_API sd_latent_t* sd_latent_copy(const sd_latent_t* latent) {
++    if (latent == nullptr) return nullptr;
++    sd_latent_t* copy = new sd_latent_t();
++    copy->tensor = latent->tensor;  // sd::Tensor has value semantics
++    return copy;
++}
++
++SD_API sd_conditioning_t* sd_conditioning_copy(const sd_conditioning_t* cond) {
++    if (cond == nullptr) return nullptr;
++    sd_conditioning_t* copy = new sd_conditioning_t();
++    copy->cond = cond->cond;  // SDCondition has value semantics
++    return copy;
++}
++
++SD_API sd_latent_t* sd_sampler_run(
++    sd_ctx_t* sd_ctx,
++    const sd_latent_t* init_latent,
++    const sd_conditioning_t* positive,
++    const sd_conditioning_t* negative,
++    const sd_node_sample_params_t* params,
++    float strength) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || init_latent == nullptr ||
++        positive == nullptr || params == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->diffusion_model == nullptr) {
++        LOG_ERROR("diffusion_model is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0 = ggml_time_ms();
++
++    // Setup RNGs
++    sd_ctx->sd->rng->manual_seed(params->seed);
++    if (sd_ctx->sd->sampler_rng) {
++        sd_ctx->sd->sampler_rng->manual_seed(params->seed);
++    }
++
++    // Build sigma schedule using the denoiser
++    int total_steps = params->steps;
++    scheduler_t scheduler = params->scheduler;
++    
++    // Get image sequence length for the denoiser
++    int image_seq_len = sd_ctx->sd->get_image_seq_len(
++        init_latent->tensor.shape()[1] * 8,  // height * vae_scale
++        init_latent->tensor.shape()[0] * 8   // width * vae_scale
++    );
++    
++    std::vector<float> sigmas = sd_ctx->sd->denoiser->get_sigmas(
++        total_steps,
++        image_seq_len,
++        scheduler,
++        sd_ctx->sd->version
++    );
++
++    if (sigmas.empty()) {
++        LOG_ERROR("failed to generate sigma schedule");
++        return nullptr;
++    }
++
++    // Adjust sigmas for strength (img2img)
++    if (strength < 1.0f && sigmas.size() > 1) {
++        int start_step = static_cast<int>((1.0f - strength) * (sigmas.size() - 1));
++        sigmas = std::vector<float>(sigmas.begin() + start_step, sigmas.end());
++    }
++
++    // Prepare noise
++    sd::Tensor<float> noise = sd::randn_like<float>(init_latent->tensor, sd_ctx->sd->rng);
++
++    // Prepare guidance
++    sd_guidance_params_t guidance;
++    guidance.txt_cfg = params->cfg_scale;
++    guidance.img_cfg = 1.0f;
++    guidance.distilled_guidance = 0.0f;
++    guidance.slg.scale = 0.0f;
++
++    // Use empty conditioning for negative if not provided
++    SDCondition uncond;
++    if (negative != nullptr) {
++        uncond = negative->cond;
++    }
++
++    // Setup cache params (disabled by default for node API)
++    sd_cache_params_t cache_params;
++    sd_cache_params_init(&cache_params);
++    cache_params.mode = SD_CACHE_DISABLED;
++
++    // Run sampling
++    sd::Tensor<float> x_0 = sd_ctx->sd->sample(
++        sd_ctx->sd->diffusion_model,
++        true,  // is_image_generation
++        init_latent->tensor,
++        std::move(noise),
++        positive->cond,
++        uncond,
++        SDCondition(),  // img_cond
++        SDCondition(),  // id_cond
++        sd::Tensor<float>(),  // control_image
++        0.0f,  // control_strength
++        guidance,
++        params->eta,
++        0,     // shifted_timestep
++        params->sample_method,
++        sd_ctx->sd->is_flow_denoiser(),
++        sigmas,
++        -1,    // start_merge_step
++        {},    // ref_latents
++        false, // increase_ref_index
++        sd::Tensor<float>(),  // denoise_mask
++        sd::Tensor<float>(),  // vace_context
++        1.0f,  // vace_strength
++        &cache_params
++    );
++
++    if (sd_ctx->sd->free_params_immediately) {
++        sd_ctx->sd->diffusion_model->free_params_buffer();
++    }
++
++    if (x_0.empty()) {
++        LOG_ERROR("sampling failed");
++        return nullptr;
++    }
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_sampler_run completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    sd_latent_t* result = new sd_latent_t();
++    result->tensor = std::move(x_0);
++    return result;
++}
++
++// ============================================================================
++// LoRA Support - Added by my-img project
++// ============================================================================
++
++SD_API void sd_apply_loras(
++    sd_ctx_t* sd_ctx,
++    const sd_lora_t* loras,
++    uint32_t lora_count) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return;
++    }
++    sd_ctx->sd->apply_loras(loras, lora_count);
++}
++
++SD_API void sd_clear_loras(sd_ctx_t* sd_ctx) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return;
++    }
++    sd_ctx->sd->apply_loras(nullptr, 0);
++}

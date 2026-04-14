@@ -1,0 +1,40 @@
+{
+    "1": {
+        "class_type": "LoadImage",
+        "inputs": {
+            "image": "/path/to/input.png"
+        }
+    },
+    "2": {
+        "class_type": "ImageScale",
+        "inputs": {
+            "image": ["1", 0],
+            "width": 1024,
+            "height": 1024,
+            "method": "bilinear"
+        }
+    },
+    "3": {
+        "class_type": "ImageCrop",
+        "inputs": {
+            "image": ["2", 0],
+            "x": 256,
+            "y": 256,
+            "width": 512,
+            "height": 512
+        }
+    },
+    "4": {
+        "class_type": "PreviewImage",
+        "inputs": {
+            "images": ["3", 0]
+        }
+    },
+    "5": {
+        "class_type": "SaveImage",
+        "inputs": {
+            "images": ["3", 0],
+            "filename_prefix": "processed"
+        }
+    }
+}
