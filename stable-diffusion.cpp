@@ -1,1 +1,0 @@
-/home/dministrator/stable-diffusion.cpp

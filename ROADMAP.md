@@ -180,4 +180,15 @@
 
 ---
 
+## 🧹 待清理项目
+
+### 清理脚本和代码
+- [ ] 删除测试 JSON 文件（test_*.json）
+- [ ] 删除旧的 deep_hires_hook.patch（已被 sd-engine-full.patch 替代）
+- [ ] 清理 sd-core 目录（逻辑已迁移到 DeepHighResFix 节点）
+- [ ] 移除 stable-diffusion.cpp 软链接
+- [ ] 添加 .gitignore 规则
+
+---
+
 *最后更新：2025-04-14*

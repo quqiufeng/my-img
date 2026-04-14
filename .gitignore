@@ -62,3 +62,9 @@ Thumbs.db
 
 # debug information files
 *.dwo
+
+# Test files
+test_*.json
+
+# Stable diffusion source (should be cloned separately)
+stable-diffusion.cpp/
