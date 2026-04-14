@@ -21,30 +21,39 @@ my-img/
 ├── CMakeLists.txt          # 通用编译模板
 ├── README.md               # 本文档
 ├── claude.md               # AI 开发指南
+├── apply_patches.sh        # 应用 stable-diffusion.cpp 补丁
+├── build/
+│   └── build_sd_cpp.sh     # 编译 stable-diffusion.cpp 脚本（自动打补丁）
 ├── src/                    # 源代码
+│   ├── sd-core/            # 核心扩展库（Deep HighRes Fix 原生实现）
+│   │   ├── deep_hires.h
+│   │   └── deep_hires.cpp
 │   ├── sd-hires/
 │   │   ├── main.cpp
-│   │   └── design.md       # Deep HighRes Fix 设计文档
+│   │   └── design.md
 │   ├── sd-img2img/
 │   │   ├── main.cpp
 │   │   └── design.md
 │   └── sd-upscale/
 │       └── main.cpp
-├── include/
-│   └── stable-diffusion.h  # 从 stable-diffusion.cpp 复制
-└── bin/                    # 编译后的二进制（手动复制）
+├── stable-diffusion.cpp-patched/   # 修改备份（升级后覆盖用）
+│   ├── src/stable-diffusion.cpp
+│   └── include/stable-diffusion-ext.h
+└── bin/                    # 编译后的二进制
 ```
 
 ---
 
 ## 编译
 
-### 1. 先编译依赖库
+### 1. 编译 stable-diffusion.cpp（自动应用补丁）
 
 ```bash
-# 编译 stable-diffusion.cpp 静态库（只需一次）
-~/my-shell/build_sd_cpp.sh
+cd ~/my-img/build
+./build_sd_cpp.sh
 ```
+
+这个脚本会自动调用 `apply_patches.sh`，将 my-img 所需的修改应用到 `stable-diffusion.cpp` 源码中，然后编译。
 
 ### 2. 编译 my-img
 
@@ -58,10 +67,8 @@ make -j2
 ### 3. 安装
 
 ```bash
-# 复制到 bin 目录
 cp sd-hires sd-img2img sd-upscale ../bin/
 
-# 创建系统软链接
 sudo ln -sf ~/my-img/bin/sd-hires /usr/local/bin/sd-hires
 sudo ln -sf ~/my-img/bin/sd-img2img /usr/local/bin/sd-img2img
 sudo ln -sf ~/my-img/bin/sd-upscale /usr/local/bin/sd-upscale
@@ -104,15 +111,20 @@ sd-hires \
 - `--flash-attn`：启用 Flash Attention
 - `--cpu`：强制 CPU 运行
 
-**Deep HighRes Fix 流程**（当 `--deep-hires` 启用时）：
+**Deep HighRes Fix 流程**（原生实现，单次采样中动态改变分辨率）：
 
-| 阶段 | 分辨率 | 步数 | strength | 作用 |
-|------|--------|------|----------|------|
-| Phase 1 | 低分辨率（如 512x512） | 总步数 × 25% | 1.0 | 确定构图 |
-| Phase 2 | 中分辨率（如 768x768） | 总步数 × 25% | 0.55 | 过渡细化 |
-| Phase 3 | 目标分辨率 | 总步数 × 50% | 0.35 | 细节增强 |
+| 阶段 | 分辨率 | 步数 | 作用 |
+|------|--------|------|------|
+| Phase 1 | 低分辨率（如 512x512） | 总步数 × 25% | 确定构图 |
+| Phase 2 | 中分辨率（如 768x768） | 总步数 × 25% | 过渡细化 |
+| Phase 3 | 目标分辨率 | 总步数 × 50% | 细节增强 |
 
-> ⚠️ **注意**：当前 Deep HighRes Fix 是**多次调用版**的近似实现。由于 `stable-diffusion.cpp` 的 API 不暴露中间 latent，我们通过多次 `generate_image()` 调用来模拟分段过程，而非真正的 latent 空间插值过渡。效果优于单次 img2img，但不及修改源码后的原生实现。
+**核心优势**：
+- ✅ **单次采样过程**：不是多次调用 `generate_image()`
+- ✅ **Latent 空间过渡**：在采样过程中直接对 latent 插值上采样
+- ✅ **只 VAE decode 一次**：信息损失最小化
+
+> 实现方式：通过在 `stable-diffusion.cpp` 源码中添加 `sd_latent_hook_t` hook，在 `sample()` 函数的每个采样步骤前调用，动态改变 latent 分辨率。
 
 ---
 
@@ -158,6 +170,28 @@ sd-upscale \
 
 ---
 
+## 升级 stable-diffusion.cpp
+
+由于 my-img 修改了 `stable-diffusion.cpp` 源码（添加了 latent hook），升级后需要重新应用修改：
+
+```bash
+cd ~/stable-diffusion.cpp
+git pull
+
+cd ~/my-img
+./apply_patches.sh
+
+cd ~/my-img/build
+./build_sd_cpp.sh
+
+cd ~/my-img/build
+cmake .. && make -j2
+```
+
+修改的备份文件存放在 `~/my-img/stable-diffusion.cpp-patched/` 目录下。
+
+---
+
 ## 3080 (10GB) 高清修复方案
 
 ### 核心原理
@@ -182,31 +216,6 @@ sd-upscale \
 4. **VAE 卸载**
    - 开启 `keep_vae_on_cpu = true` 减少显存压力
    - VAE 在 CPU 跑，显存全力供给 U-Net
-
-### 羽化融合代码
-
-```cpp
-static void blend_tile_to_canvas(uint8_t* canvas, int canvas_w, int canvas_h,
-                                 uint8_t* tile, int tile_w, int tile_h,
-                                 int x, int y, int overlap) {
-    for (int i = 0; i < tile_h && (y + i) < canvas_h; i++) {
-        for (int j = 0; j < tile_w && (x + j) < canvas_w; j++) {
-            float w_x = (j < overlap && x > 0) ? (float)j / overlap : 1.0f;
-            float w_y = (i < overlap && y > 0) ? (float)i / overlap : 1.0f;
-            float weight = w_x * w_y;
-
-            int canvas_idx = ((y + i) * canvas_w + (x + j)) * 3;
-            int tile_idx = (i * tile_w + j) * 3;
-            for (int c = 0; c < 3; c++) {
-                canvas[canvas_idx + c] = (uint8_t)(
-                    canvas[canvas_idx + c] * (1.0f - weight) +
-                    tile[tile_idx + c] * weight
-                );
-            }
-        }
-    }
-}
-```
 
 ### 参数建议
 
