@@ -560,6 +560,46 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 
 ---
 
+---
+
+## 项目评估
+
+### 总体评分：B+（良好，接近生产可用）
+
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| **功能完整性** | A- | 46 个核心节点覆盖 txt2img/img2img/LoRA/ControlNet/IPAdapter/人脸/图像处理/Deep HighRes Fix |
+| **架构设计** | A- | DAG 执行引擎 + 缓存 + 多线程并行 + 对象池，设计清晰 |
+| **代码质量** | B | 约 9200 行 C++，核心模块规范，但 `core_nodes.cpp` 已达 3865 行，需要进一步拆分 |
+| **测试覆盖** | B | 19 个 test cases / 89 assertions，覆盖了工作流、执行器、缓存、人脸模块，但缺少采样节点和 VAE 的端到端测试 |
+| **性能优化** | B+ | 无 GIL、多线程分层执行、对象池、模型 Session 缓存，但 latent CPU 插值和人脸串行处理仍有优化空间 |
+| **生产就绪度** | B | 近期修复了 sd_ctx 内存泄漏、缓存哈希碰撞、对象池失效等关键问题，基本可用 |
+| **文档完整性** | A- | README、架构设计文档、人脸方案文档、编译脚本齐全 |
+
+### 核心优势
+
+1. **零 Python 依赖**：单二进制部署，彻底摆脱 ComfyUI 的依赖地狱
+2. **性能领先**：C++ 原生执行，无 GIL，DAG 同层节点多线程并行
+3. **功能丰富**：46 个节点，涵盖从基础生成到人脸修复/换脸的高级 pipeline
+4. **扩展性强**：基于 `stable-diffusion.cpp` + 模块化补丁，新增节点只需继承 `Node` 基类
+5. **双模式使用**：既支持 ComfyUI JSON 工作流，也支持命令行快速模式
+
+### 已知短板与风险
+
+1. **`core_nodes.cpp` 过大**：3865 行，46 个节点类挤在一个文件，维护成本高
+2. **测试未覆盖核心生成链路**：`KSampler`、`VAEDecode` 等关键节点缺乏端到端测试（需要大模型，测试成本高）
+3. **日志系统简陋**：全部使用 `printf`/`fprintf`，无级别控制和结构化输出
+4. **ONNX 模型需自备**：LineArt、人脸修复等节点需要用户自行转换/下载 ONNX 模型
+5. **部分高级预处理器缺失**：MiDaS Depth、OpenPose、LineArt（模型型）等尚未支持
+
+### 生产部署建议
+
+- ✅ **适合**：批量图像生成服务、API 后端、无头服务器部署
+- ⚠️ **注意**：长进程服务务必在工作流末尾添加 `UnloadModel` 节点释放模型上下文
+- ⚠️ **注意**：大显存场景建议开启 VAE tiling 和分块处理
+
+---
+
 ## 参考
 
 - [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
