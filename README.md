@@ -12,7 +12,7 @@
 
 | 工具 | 功能 | 状态 |
 |------|------|------|
-| `sd-workflow` | **C++ 版 ComfyUI 工作流引擎**：解析 JSON 工作流，执行 DAG 拓扑排序，支持 txt2img/img2img/图像处理/LoRA | ✅ |
+| `sd-workflow` | **C++ 版 ComfyUI 工作流引擎**：解析 JSON 工作流，执行 DAG 拓扑排序，支持 txt2img/img2img/图像处理/LoRA/人脸修复/换脸 | ✅ |
 | `sd-hires` | AI 高清修复：ESRGAN 放大 + Deep HighRes Fix 分阶段重绘 | ✅ |
 | `sd-img2img` | 图生图重绘（支持普通 img2img 和 Deep HighRes Fix） | ✅ |
 | `sd-upscale` | ESRGAN 独立超分放大 | ✅ |
@@ -26,7 +26,8 @@ my-img/
 ├── CMakeLists.txt          # 通用编译模板
 ├── README.md               # 本文档
 ├── docs/
-│   └── sd-engine-design.md # 架构设计文档
+│   ├── sd-engine-design.md # 架构设计文档
+│   └── face-onnx-design.md # 人脸修复与换脸方案设计
 ├── claude.md               # AI 开发指南
 ├── apply_patches.sh        # 应用 stable-diffusion.cpp 补丁
 ├── build/
@@ -37,6 +38,7 @@ my-img/
 │   │   └── deep_hires.cpp
 │   ├── sd-engine/          # C++ 版 ComfyUI 工作流引擎
 │   │   ├── core/           # 引擎核心（Workflow/DAGExecutor/Cache）
+│   │   ├── face/           # 人脸检测/修复/换脸 ONNX 推理模块
 │   │   ├── nodes/          # 节点实现
 │   │   └── tools/          # CLI 工具
 │   ├── sd-hires/
@@ -167,7 +169,7 @@ sd-workflow --workflow my_workflow.json --dry-run
 sd-workflow --list-nodes
 ```
 
-### 支持的节点（41个）
+### 支持的节点（47个）
 
 | 类别 | 节点 | 说明 |
 |------|------|------|
@@ -177,6 +179,9 @@ sd-workflow --list-nodes
 | **加载器** | `UpscaleModelLoader` | ESRGAN 模型加载 |
 | **加载器** | `ControlNetLoader` | ControlNet 模型加载 |
 | **加载器** | `RemBGModelLoader` | 背景抠图 ONNX 模型加载 |
+| **加载器** | `FaceDetectModelLoader` | YuNet 人脸检测 ONNX 模型加载 |
+| **加载器** | `FaceRestoreModelLoader` | GFPGAN/CodeFormer 修复模型加载 |
+| **加载器** | `FaceSwapModelLoader` | inswapper_128 + ArcFace 换脸模型加载 |
 | **加载器** | `IPAdapterLoader` | IPAdapter 模型加载 |
 | **条件编码** | `CLIPTextEncode` | 文本编码为 conditioning |
 | **条件编码** | `CLIPSetLastLayer` | 设置 CLIP 跳过层（clip_skip） |
@@ -200,6 +205,9 @@ sd-workflow --list-nodes
 | **图像** | `ImageCompositeMasked` | 蒙版合成 |
 | **图像** | `ImageUpscaleWithModel` | ESRGAN 模型放大 |
 | **图像** | `ImageRemoveBackground` | 背景抠图（输出 RGBA + Mask） |
+| **图像** | `FaceDetect` | 人脸检测（输出检测框和关键点） |
+| **图像** | `FaceRestoreWithModel` | 人脸修复（GFPGAN / CodeFormer） |
+| **图像** | `FaceSwap` | 人脸换脸（inswapper_128 + ArcFace） |
 | **图像** | `ImageInvert` | 颜色反转 |
 | **图像** | `ImageColorAdjust` | 亮度/对比度/饱和度调整 |
 | **图像** | `ImageBlur` | 盒式模糊 |
@@ -420,9 +428,9 @@ wget https://huggingface.co/leejet/taesd/resolve/main/taesd_decoder.static.gguf 
 
 ### 可选第三方依赖
 
-#### ONNX Runtime（用于 RemBG 背景抠图）
+#### ONNX Runtime（用于 RemBG / Face Restore / Face Swap）
 
-`RemBGModelLoader` 和 `ImageRemoveBackground` 节点需要 ONNX Runtime。如果不需要背景抠图功能，可以跳过此步骤。
+`RemBGModelLoader`、`ImageRemoveBackground`、`FaceDetectModelLoader`、`FaceRestoreModelLoader`、`FaceSwapModelLoader` 等人脸相关节点需要 ONNX Runtime。如果不需要这些功能，可以跳过此步骤，其他所有功能不受影响。
 
 **Linux x64 安装方法：**
 
@@ -442,20 +450,36 @@ export ONNXRUNTIME_ROOT=/opt/onnxruntime-linux-x64-1.20.1
 2. 如果未设置，自动回退到 `~/onnxruntime-linux-x64-1.20.1`
 3. 如果都找不到，RemBG 节点会被编译为占位符（运行时提示不可用），其他所有功能不受影响
 
-**模型下载（BRIA-RMBG）：**
+**模型下载：**
 
 ```bash
-# 下载 BRIA-RMBG ONNX 模型（约 40MB，开源可商用）
+# BRIA-RMBG ONNX 模型（约 40MB，开源可商用）
 wget https://huggingface.co/briaai/RMBG-1-4/resolve/main/onnx/model.onnx -P ~/models/
-# 重命名为方便使用的名称
 mv ~/models/model.onnx ~/models/bria-rmbg.onnx
+
+# YuNet 人脸检测（OpenCV Zoo）
+# 通常随 OpenCV 分发，或从 OpenCV Zoo 下载
+
+# GFPGAN v1.4 人脸修复
+wget https://huggingface.co/neurobytemind/GFPGANv1.4.onnx/resolve/main/GFPGANv1.4.onnx -P ~/models/
+
+# CodeFormer 人脸修复
+wget https://huggingface.co/bluefoxcreation/Codeformer-ONNX/resolve/main/codeformer.onnx -P ~/models/
+
+# InsightFace inswapper_128 换脸
+wget https://huggingface.co/ezioruan/inswapper_128.onnx/resolve/main/inswapper_128.onnx -P ~/models/
+
+# ArcFace 人脸特征提取（换脸配套）
+wget https://huggingface.co/onnx-community/arcface-onnx/resolve/main/arcface.onnx -P ~/models/
 ```
 
 工作流中使用示例：
 ```json
 {
-  "class_type": "RemBGModelLoader",
-  "inputs": { "model_path": "~/models/bria-rmbg.onnx" }
+  "1": { "class_type": "RemBGModelLoader", "inputs": { "model_path": "~/models/bria-rmbg.onnx" } },
+  "2": { "class_type": "FaceDetectModelLoader", "inputs": { "model_path": "~/models/yunet_320_320.onnx" } },
+  "3": { "class_type": "FaceRestoreModelLoader", "inputs": { "model_path": "~/models/GFPGANv1.4.onnx", "model_type": "gfpgan" } },
+  "4": { "class_type": "FaceSwapModelLoader", "inputs": { "inswapper_path": "~/models/inswapper_128.onnx", "arcface_path": "~/models/arcface.onnx" } }
 }
 ```
 
@@ -494,17 +518,29 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 | # | 节点类别 | 具体节点 | 进度 |
 |---|---------|---------|------|
 | 1 | **加载器** | CheckpointLoaderSimple | ✅ |
-| 2 | **加载器** | LoRALoader | ✅ |
-| 3 | **条件编码** | CLIPTextEncode | ✅ |
-| 4 | **Latent** | EmptyLatentImage | ✅ |
-| 5 | **Latent** | VAEEncode / VAEDecode | ✅ |
-| 6 | **采样** | KSampler（支持 LoRA） | ✅ |
-| 7 | **采样** | DeepHighResFix | ✅ |
-| 8 | **图像** | LoadImage / SaveImage | ✅ |
-| 9 | **图像** | ImageScale / ImageCrop | ✅ |
-| 10 | **图像** | PreviewImage | ✅ |
-| 11 | **引擎** | sd-workflow CLI + DAG 执行器 + 缓存 | ✅ |
-| 12 | **引擎** | WorkflowBuilder（命令行桥接） | ✅ |
+| 2 | **加载器** | LoRALoader / LoRAStack | ✅ |
+| 3 | **加载器** | UpscaleModelLoader | ✅ |
+| 4 | **加载器** | ControlNetLoader | ✅ |
+| 5 | **加载器** | RemBGModelLoader | ✅ |
+| 6 | **加载器** | IPAdapterLoader | ✅ |
+| 7 | **加载器** | FaceDetectModelLoader | ✅ |
+| 8 | **加载器** | FaceRestoreModelLoader | ✅ |
+| 9 | **加载器** | FaceSwapModelLoader | ✅ |
+| 10 | **条件编码** | CLIPTextEncode / CLIPSetLastLayer | ✅ |
+| 11 | **条件编码** | ConditioningCombine / Concat / Average | ✅ |
+| 12 | **条件编码** | ControlNetApply / IPAdapterApply | ✅ |
+| 13 | **CLIP Vision** | CLIPVisionEncode | ✅ |
+| 14 | **Latent** | EmptyLatentImage / VAEEncode / VAEDecode | ✅ |
+| 15 | **采样** | KSampler / KSamplerAdvanced | ✅ |
+| 16 | **采样** | DeepHighResFix | ✅ |
+| 17 | **图像** | LoadImage / SaveImage / PreviewImage | ✅ |
+| 18 | **图像** | ImageScale / ImageCrop / ImageBlend / ImageCompositeMasked | ✅ |
+| 19 | **图像** | ImageUpscaleWithModel / ImageRemoveBackground | ✅ |
+| 20 | **图像** | ImageInvert / ImageColorAdjust / ImageBlur / ImageGrayscale / ImageThreshold | ✅ |
+| 21 | **图像** | CannyEdgePreprocessor / LoadImageMask | ✅ |
+| 22 | **人脸** | FaceDetect / FaceRestoreWithModel / FaceSwap | ✅ |
+| 23 | **引擎** | sd-workflow CLI + DAG 执行器 + 缓存 | ✅ |
+| 24 | **引擎** | WorkflowBuilder（命令行桥接） | ✅ |
 
 ### 计划中的节点
 
@@ -515,11 +551,12 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 | 3 | **采样** | KSamplerAdvanced / SamplerCustom | ✅ |
 | 4 | **图像** | ImageBlend / ImageCompositeMasked / ImageRemoveBackground | ✅ |
 | 5 | **超分** | UpscaleModelLoader / ImageUpscaleWithModel | ✅ |
-| 6 | **修复** | INPAINT_LoadInpaintModel / INPAINT_ApplyInpaint | ⬜ |
+| 6 | **人脸** | FaceDetect / FaceRestoreWithModel / FaceSwap | ✅ |
 | 7 | **ControlNet** | ControlNetLoader / ControlNetApply / CannyEdgePreprocessor | ✅ |
 | 8 | **ControlNet** | MiDaS-DepthMapPreprocessor / OpenPosePreprocessor | ⬜ |
 | 9 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ✅ |
-| 10 | **视频** | AnimateDiff Loader / Sampler | ⬜ |
+| 10 | **修复** | INPAINT_LoadInpaintModel / INPAINT_ApplyInpaint | ⬜ |
+| 11 | **视频** | AnimateDiff Loader / Sampler | ⬜ |
 
 ---
 

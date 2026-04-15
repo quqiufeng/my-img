@@ -187,6 +187,20 @@ std::string WorkflowBuilder::add_canny_preprocessor(const std::string& image_nod
     return add_node("CannyEdgePreprocessor", inputs);
 }
 
+std::string WorkflowBuilder::add_lineart_loader(const std::string& model_path) {
+    std::map<std::string, json> inputs;
+    inputs["model_name"] = model_path;
+    return add_node("LineArtLoader", inputs);
+}
+
+std::string WorkflowBuilder::add_lineart_preprocessor(const std::string& image_node_id,
+                                                      const std::string& lineart_model_node_id) {
+    std::map<std::string, json> inputs;
+    inputs["image"] = make_link(image_node_id, 0);
+    inputs["lineart_model"] = make_link(lineart_model_node_id, 0);
+    return add_node("LineArtPreprocessor", inputs);
+}
+
 std::string WorkflowBuilder::add_load_image_mask(const std::string& image_path,
                                                  const std::string& channel) {
     std::map<std::string, json> inputs;

@@ -139,7 +139,7 @@ private:
 /// @endcode
 #define REGISTER_NODE(class_type, node_class) \
     static bool _registered_##node_class = []() { \
-        sdengine::NodeRegistry::instance().register_node(class_type, []() { \
+        ::sdengine::NodeRegistry::instance().register_node(class_type, []() { \
             return std::make_unique<node_class>(); \
         }); \
         return true; \

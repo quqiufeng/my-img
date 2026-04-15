@@ -100,6 +100,26 @@ set(SD_ENGINE_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/node.cpp"
 )
 if(EXISTS ${SD_ENGINE_SRC})
+    set(SD_ENGINE_FACE_SRC)
+    if(HAS_ONNXRUNTIME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_detect.cpp")
+        set(SD_ENGINE_FACE_SRC
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_detect.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_align.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_utils.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_restore.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_swap.cpp"
+        )
+        message(STATUS "[my-img] Face module enabled with ONNX Runtime")
+    endif()
+
+    set(SD_ENGINE_PREPROCESSOR_SRC)
+    if(HAS_ONNXRUNTIME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/preprocessors/lineart.cpp")
+        set(SD_ENGINE_PREPROCESSOR_SRC
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/preprocessors/lineart.cpp"
+        )
+        message(STATUS "[my-img] Preprocessor module enabled with ONNX Runtime")
+    endif()
+
     add_library(sd-engine STATIC 
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/node.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow.cpp"
@@ -109,9 +129,12 @@ if(EXISTS ${SD_ENGINE_SRC})
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow_builder.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/test_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/core_nodes.cpp"
+        ${SD_ENGINE_FACE_SRC}
+        ${SD_ENGINE_PREPROCESSOR_SRC}
     )
     target_include_directories(sd-engine PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/preprocessors
         ${THIRDPARTY_DIR}
         ${SD_PATH}
         ${SD_PATH}/include
@@ -138,7 +161,7 @@ foreach(src ${SRC_FILES})
     
     # 跳过 sd-engine 库中的源文件（避免被 GLOB_RECURSE 当成可执行文件）
     # 但保留 sd-engine/tools 目录下的可执行文件
-    if(rel_dir MATCHES "^sd-engine/core" OR rel_dir MATCHES "^sd-engine/nodes")
+    if(rel_dir MATCHES "^sd-engine/core" OR rel_dir MATCHES "^sd-engine/nodes" OR rel_dir MATCHES "^sd-engine/face" OR rel_dir MATCHES "^sd-engine/preprocessors")
         continue()
     endif()
     

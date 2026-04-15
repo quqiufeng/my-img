@@ -101,7 +101,14 @@ public:
     std::string add_canny_preprocessor(const std::string& image_node_id,
                                        int low_threshold = 100,
                                        int high_threshold = 200);
-    
+
+    // 添加 LineArtLoader 节点
+    std::string add_lineart_loader(const std::string& model_path);
+
+    // 添加 LineArtPreprocessor 节点
+    std::string add_lineart_preprocessor(const std::string& image_node_id,
+                                         const std::string& lineart_model_node_id);
+
     // 添加 LoadImageMask 节点
     std::string add_load_image_mask(const std::string& image_path,
                                     const std::string& channel = "alpha");
