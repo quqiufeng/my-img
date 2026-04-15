@@ -4,7 +4,9 @@
 
 复刻 ComfyUI 生态理念，但无需麻烦的 Python 依赖。只有**干净的 C++ 二进制程序**和**命令管道**。
 
-> 📖 **架构设计文档**: [sd-engine-design.md](docs/sd-engine-design.md) - C++ 版 ComfyUI 工作流执行引擎详细设计
+> 📖 **文档索引**
+> - [架构设计文档](docs/sd-engine-design.md) — C++ 版 ComfyUI 工作流执行引擎详细设计
+> - [人脸修复与换脸方案](docs/face-onnx-design.md) — 基于 ONNX Runtime 的 Face Restore / Face Swap 完整技术方案
 
 ## 已完成的工具
 
@@ -165,24 +167,48 @@ sd-workflow --workflow my_workflow.json --dry-run
 sd-workflow --list-nodes
 ```
 
-### 支持的节点（17个）
+### 支持的节点（41个）
 
 | 类别 | 节点 | 说明 |
 |------|------|------|
-| 加载器 | `CheckpointLoaderSimple` | 加载 SD 模型 |
-| 加载器 | `LoRALoader` | 加载 LoRA 权重 |
-| 条件编码 | `CLIPTextEncode` | 文本编码为 conditioning |
-| Latent | `EmptyLatentImage` | 创建空 latent |
-| Latent | `VAEEncode` | 图像编码为 latent（img2img） |
-| Latent | `VAEDecode` | latent 解码为图像 |
-| 采样 | `KSampler` | 执行扩散采样（支持 LoRA） |
-| 采样 | `DeepHighResFix` | **原生 Deep HighRes Fix**，单次采样动态改变分辨率 |
-| 图像 | `LoadImage` | 加载图像 |
-| 图像 | `SaveImage` | 保存 PNG |
-| 图像 | `ImageScale` | 图像缩放（bilinear/nearest/lanczos） |
-| 图像 | `ImageCrop` | 图像裁剪 |
-| 图像 | `PreviewImage` | 终端预览 |
-| 测试 | `ConstantInt` / `AddInt` / `MultiplyInt` / `PrintInt` | 测试节点 |
+| **加载器** | `CheckpointLoaderSimple` | 加载 SD 模型 |
+| **加载器** | `LoRALoader` | 加载 LoRA 权重 |
+| **加载器** | `LoRAStack` | 多 LoRA 堆叠 |
+| **加载器** | `UpscaleModelLoader` | ESRGAN 模型加载 |
+| **加载器** | `ControlNetLoader` | ControlNet 模型加载 |
+| **加载器** | `RemBGModelLoader` | 背景抠图 ONNX 模型加载 |
+| **加载器** | `IPAdapterLoader` | IPAdapter 模型加载 |
+| **条件编码** | `CLIPTextEncode` | 文本编码为 conditioning |
+| **条件编码** | `CLIPSetLastLayer` | 设置 CLIP 跳过层（clip_skip） |
+| **条件编码** | `ConditioningCombine` | 条件合并（token 拼接） |
+| **条件编码** | `ConditioningConcat` | 条件拼接 |
+| **条件编码** | `ConditioningAverage` | 条件加权平均 |
+| **条件编码** | `ControlNetApply` | 应用 ControlNet |
+| **条件编码** | `IPAdapterApply` | 应用 IPAdapter |
+| **CLIP Vision** | `CLIPVisionEncode` | CLIP Vision 图像编码 |
+| **Latent** | `EmptyLatentImage` | 创建空 latent |
+| **Latent** | `VAEEncode` | 图像编码为 latent（img2img） |
+| **Latent** | `VAEDecode` | latent 解码为图像 |
+| **采样** | `KSampler` | 执行扩散采样（支持 LoRA/ControlNet/IPAdapter/Mask） |
+| **采样** | `KSamplerAdvanced` | 高级采样器（start/end step / add_noise） |
+| **采样** | `DeepHighResFix` | **原生 Deep HighRes Fix**，单次采样动态改变分辨率 |
+| **图像** | `LoadImage` | 加载图像 |
+| **图像** | `SaveImage` | 保存 PNG |
+| **图像** | `ImageScale` | 图像缩放（bilinear/nearest/lanczos） |
+| **图像** | `ImageCrop` | 图像裁剪 |
+| **图像** | `ImageBlend` | 图像混合（normal/add/multiply/screen） |
+| **图像** | `ImageCompositeMasked` | 蒙版合成 |
+| **图像** | `ImageUpscaleWithModel` | ESRGAN 模型放大 |
+| **图像** | `ImageRemoveBackground` | 背景抠图（输出 RGBA + Mask） |
+| **图像** | `ImageInvert` | 颜色反转 |
+| **图像** | `ImageColorAdjust` | 亮度/对比度/饱和度调整 |
+| **图像** | `ImageBlur` | 盒式模糊 |
+| **图像** | `ImageGrayscale` | 灰度转换 |
+| **图像** | `ImageThreshold` | 二值化 |
+| **图像** | `CannyEdgePreprocessor` | Canny 边缘检测预处理 |
+| **图像** | `LoadImageMask` | 加载 mask |
+| **图像** | `PreviewImage` | 终端预览 |
+| **测试** | `ConstantInt` / `AddInt` / `MultiplyInt` / `PrintInt` | 测试节点 |
 
 ### 核心特性
 
@@ -385,11 +411,53 @@ wget https://huggingface.co/leejet/taesd/resolve/main/taesd_decoder.static.gguf 
 
 ## 依赖说明
 
+### 必需依赖
 编译后运行只需系统自带库：
 - `libgomp.so.1` - GCC OpenMP
 - `libstdc++.so.6` - C++ 标准库
 - `libm.so.6` - 数学库
 - `libc.so.6` - C 库
+
+### 可选第三方依赖
+
+#### ONNX Runtime（用于 RemBG 背景抠图）
+
+`RemBGModelLoader` 和 `ImageRemoveBackground` 节点需要 ONNX Runtime。如果不需要背景抠图功能，可以跳过此步骤。
+
+**Linux x64 安装方法：**
+
+```bash
+# 方法 1：自动下载并解压到用户目录
+cd ~
+wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz
+tar -xzf onnxruntime-linux-x64-1.20.1.tgz
+
+# 方法 2：自定义路径（下载后解压到任意位置）
+# 假设解压到 /opt/onnxruntime-linux-x64-1.20.1
+export ONNXRUNTIME_ROOT=/opt/onnxruntime-linux-x64-1.20.1
+```
+
+**CMake 自动检测规则：**
+1. 优先读取环境变量 `ONNXRUNTIME_ROOT`
+2. 如果未设置，自动回退到 `~/onnxruntime-linux-x64-1.20.1`
+3. 如果都找不到，RemBG 节点会被编译为占位符（运行时提示不可用），其他所有功能不受影响
+
+**模型下载（BRIA-RMBG）：**
+
+```bash
+# 下载 BRIA-RMBG ONNX 模型（约 40MB，开源可商用）
+wget https://huggingface.co/briaai/RMBG-1-4/resolve/main/onnx/model.onnx -P ~/models/
+# 重命名为方便使用的名称
+mv ~/models/model.onnx ~/models/bria-rmbg.onnx
+```
+
+工作流中使用示例：
+```json
+{
+  "class_type": "RemBGModelLoader",
+  "inputs": { "model_path": "~/models/bria-rmbg.onnx" }
+}
+```
 
 ---
 
@@ -442,17 +510,16 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 
 | # | 节点类别 | 具体节点 | 进度 |
 |---|---------|---------|------|
-| 1 | **条件编码** | ConditioningCombine / ConditioningSetArea | ⬜ |
+| 1 | **条件编码** | ConditioningCombine / ConditioningConcat / ConditioningAverage | ✅ |
 | 2 | **Latent** | LatentUpscale / LatentComposite | ⬜ |
-| 3 | **采样** | KSamplerAdvanced / SamplerCustom | ⬜ |
-| 4 | **图像** | ImageBlur / ImageSharpen / ImageComposite | ⬜ |
-| 5 | **超分** | UpscaleModelLoader / ImageUpscaleWithModel | ⬜ |
+| 3 | **采样** | KSamplerAdvanced / SamplerCustom | ✅ |
+| 4 | **图像** | ImageBlend / ImageCompositeMasked / ImageRemoveBackground | ✅ |
+| 5 | **超分** | UpscaleModelLoader / ImageUpscaleWithModel | ✅ |
 | 6 | **修复** | INPAINT_LoadInpaintModel / INPAINT_ApplyInpaint | ⬜ |
-| 7 | **ControlNet** | ControlNetLoader / ControlNetApply | ⬜ |
-| 8 | **ControlNet** | CannyEdgePreprocessor / MiDaS-DepthMapPreprocessor / OpenPosePreprocessor | ⬜ |
-| 9 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ⬜ |
+| 7 | **ControlNet** | ControlNetLoader / ControlNetApply / CannyEdgePreprocessor | ✅ |
+| 8 | **ControlNet** | MiDaS-DepthMapPreprocessor / OpenPosePreprocessor | ⬜ |
+| 9 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ✅ |
 | 10 | **视频** | AnimateDiff Loader / Sampler | ⬜ |
-| 11 | **服务** | sd-server HTTP API | ⬜ |
 
 ---
 

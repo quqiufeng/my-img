@@ -65,6 +65,9 @@ bool Workflow::parse_comfyui_json(const std::string& json_str) {
                 continue;
             }
             
+            // 在 move 之前先获取输入定义
+            auto input_defs = node->get_inputs();
+            
             node->set_id(node_id);
             nodes_[node_id] = std::move(node);
             
@@ -79,8 +82,15 @@ bool Workflow::parse_comfyui_json(const std::string& json_str) {
                         link.src_node_id = input_value[0].get<std::string>();
                         link.src_slot = input_value[1].get<int>();
                         link.dst_node_id = node_id;
-                        // dst_slot 需要根据输入名称推断，这里简化处理
-                        
+                        // 根据输入名称推断 dst_slot
+                        link.dst_slot = -1;
+                        for (int i = 0; i < (int)input_defs.size(); i++) {
+                            if (input_defs[i].name == input_name) {
+                                link.dst_slot = i;
+                                break;
+                            }
+                        }
+
                         input_links_[node_id].push_back(link);
                         output_links_[link.src_node_id].push_back(link);
                     } else {

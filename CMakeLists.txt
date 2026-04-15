@@ -38,7 +38,32 @@ endif()
 message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
 
 # ============================================================
-# 2. 链接已有的 stable-diffusion.cpp 编译产物
+# 2. 查找 ONNX Runtime（可选依赖，用于 RemBG 背景抠图）
+# ============================================================
+set(ONNXRUNTIME_ROOT "")
+if(DEFINED ENV{ONNXRUNTIME_ROOT})
+    set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})
+elseif(EXISTS /home/dministrator/onnxruntime-linux-x64-1.20.1)
+    set(ONNXRUNTIME_ROOT /home/dministrator/onnxruntime-linux-x64-1.20.1)
+endif()
+
+if(ONNXRUNTIME_ROOT)
+    find_library(ONNXRUNTIME_LIB NAMES onnxruntime PATHS ${ONNXRUNTIME_ROOT}/lib NO_DEFAULT_PATH)
+    find_path(ONNXRUNTIME_INCLUDE_DIR NAMES onnxruntime_cxx_api.h PATHS ${ONNXRUNTIME_ROOT}/include NO_DEFAULT_PATH)
+    if(ONNXRUNTIME_LIB AND ONNXRUNTIME_INCLUDE_DIR)
+        set(HAS_ONNXRUNTIME ON)
+        message(STATUS "[my-img] ONNX Runtime found: ${ONNXRUNTIME_LIB}")
+        message(STATUS "[my-img] ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIR}")
+    else()
+        message(WARNING "[my-img] ONNX Runtime root set but library/headers not found. RemBG will be disabled.")
+    endif()
+else()
+    message(STATUS "[my-img] ONNX Runtime not found. RemBG background removal will be disabled.")
+    message(STATUS "[my-img] To enable: download onnxruntime-linux-x64-*.tgz and set ONNXRUNTIME_ROOT")
+endif()
+
+# ============================================================
+# 3. 链接已有的 stable-diffusion.cpp 编译产物
 # ============================================================
 # 直接链接 ~/stable-diffusion.cpp/bin 中的库，不重新编译
 
@@ -70,31 +95,6 @@ endif()
 # 第三方库路径
 set(THIRDPARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty")
 
-# 特殊处理 sd-core：编译为静态库
-set(SD_CORE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-core/deep_hires.cpp")
-if(EXISTS ${SD_CORE_SRC})
-    add_library(sd-core STATIC ${SD_CORE_SRC})
-    target_link_libraries(sd-core PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
-    target_include_directories(sd-core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_include_directories(sd-core PRIVATE 
-        ${SD_PATH}
-        ${SD_PATH}/include
-        ${SD_PATH}/thirdparty
-        ${SD_PATH}/ggml/include
-        ${SD_PATH}/src
-        ${THIRDPARTY_DIR}
-    )
-    if(CUDA_PATH)
-        target_link_libraries(sd-core PRIVATE 
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcudart.so
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublas.so
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
-            /usr/lib/x86_64-linux-gnu/libcuda.so
-        )
-    endif()
-    message(STATUS "[my-img] Created library: sd-core")
-endif()
-
 # 特殊处理 sd-engine：编译为静态库
 set(SD_ENGINE_SRC 
     "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/node.cpp"
@@ -119,6 +119,11 @@ if(EXISTS ${SD_ENGINE_SRC})
         ${SD_PATH}/ggml/include
         ${SD_PATH}/src
     )
+    if(HAS_ONNXRUNTIME)
+        target_compile_definitions(sd-engine PRIVATE HAS_ONNXRUNTIME=1)
+        target_include_directories(sd-engine PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        target_link_libraries(sd-engine PRIVATE ${ONNXRUNTIME_LIB})
+    endif()
     message(STATUS "[my-img] Created library: sd-engine")
 endif()
 
@@ -131,9 +136,9 @@ foreach(src ${SRC_FILES})
     get_filename_component(dir ${src} PATH)
     string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "" rel_dir ${dir})
     
-    # 跳过 sd-core 和 sd-engine 库中的源文件（避免被 GLOB_RECURSE 当成可执行文件）
+    # 跳过 sd-engine 库中的源文件（避免被 GLOB_RECURSE 当成可执行文件）
     # 但保留 sd-engine/tools 目录下的可执行文件
-    if(rel_dir MATCHES "^sd-core" OR rel_dir MATCHES "^sd-engine/core" OR rel_dir MATCHES "^sd-engine/nodes")
+    if(rel_dir MATCHES "^sd-engine/core" OR rel_dir MATCHES "^sd-engine/nodes")
         continue()
     endif()
     
@@ -152,18 +157,13 @@ foreach(src ${SRC_FILES})
 
     add_executable(${final_name} ${src})
     
-    # 链接 stable-diffusion 和 ggml
-    target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
-    
-    # 链接 sd-engine 库
+    # 链接 sd-engine 库（必须在 SD_LIB 之前，因为 sd-engine 依赖 SD_LIB）
     if(TARGET sd-engine)
         target_link_libraries(${final_name} PRIVATE sd-engine)
     endif()
     
-    # 如果有 sd-core 库，也链接上
-    if(TARGET sd-core)
-        target_link_libraries(${final_name} PRIVATE sd-core)
-    endif()
+    # 链接 stable-diffusion 和 ggml（必须在 sd-engine 之后）
+    target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
     
     # 链接 CUDA 运行时
     if(CUDA_PATH)
@@ -186,9 +186,61 @@ foreach(src ${SRC_FILES})
         ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
         ${THIRDPARTY_DIR}
     )
+    if(HAS_ONNXRUNTIME)
+        target_compile_definitions(${final_name} PRIVATE HAS_ONNXRUNTIME=1)
+        target_include_directories(${final_name} PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        target_link_libraries(${final_name} PRIVATE ${ONNXRUNTIME_LIB})
+    endif()
 
     message(STATUS "[my-img] Created target: ${final_name}")
 endforeach()
+
+# ============================================================
+# 4. 单元测试
+# ============================================================
+enable_testing()
+
+# Catch2 amalgamated 源文件
+set(CATCH2_SRC "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/catch2/catch_amalgamated.cpp")
+set(CATCH2_INC "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/catch2")
+
+# 收集测试源文件
+file(GLOB TEST_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
+
+if(EXISTS ${CATCH2_SRC} AND TEST_SRC_FILES)
+    add_executable(sd-engine-tests ${TEST_SRC_FILES} ${CATCH2_SRC})
+    target_include_directories(sd-engine-tests PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
+        ${THIRDPARTY_DIR}
+        ${SD_PATH}
+        ${SD_PATH}/include
+        ${SD_PATH}/thirdparty
+        ${SD_PATH}/ggml/include
+        ${SD_PATH}/src
+        ${CATCH2_INC}
+    )
+    if(HAS_ONNXRUNTIME)
+        target_compile_definitions(sd-engine-tests PRIVATE HAS_ONNXRUNTIME=1)
+        target_include_directories(sd-engine-tests PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        target_link_libraries(sd-engine-tests PRIVATE ${ONNXRUNTIME_LIB})
+    endif()
+    if(TARGET sd-engine)
+        target_link_libraries(sd-engine-tests PRIVATE sd-engine)
+    endif()
+    target_link_libraries(sd-engine-tests PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
+    if(CUDA_PATH)
+        target_link_libraries(sd-engine-tests PRIVATE 
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcudart.so
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublas.so
+            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
+            /usr/lib/x86_64-linux-gnu/libcuda.so
+        )
+    endif()
+    add_test(NAME sd-engine-tests COMMAND sd-engine-tests)
+    message(STATUS "[my-img] Created target: sd-engine-tests")
+else()
+    message(STATUS "[my-img] Tests disabled: Catch2 or test sources not found")
+endif()
 
 # 自动复制二进制到 SD_PATH/bin
 if(SD_PATH)

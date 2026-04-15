@@ -141,6 +141,12 @@ typedef struct {
     enum sample_method_t sample_method;
     enum scheduler_t scheduler;
     float eta;  // 用于某些采样器
+    sd_image_t control_image;  // ControlNet 输入图像（可选，data 为空表示不使用）
+    float control_strength;    // ControlNet 强度
+    sd_image_t mask_image;     // Inpaint mask（可选，data 为空表示不使用）
+    int start_at_step;         // 高级采样：开始步骤（默认 0）
+    int end_at_step;           // 高级采样：结束步骤（默认 0 = steps）
+    bool add_noise;            // 高级采样：是否添加噪声（默认 true）
 } sd_node_sample_params_t;
 
 // 执行采样
@@ -176,6 +182,44 @@ SD_API sd_latent_t* sd_latent_copy(const sd_latent_t* latent);
 // 复制 conditioning（用于缓存）
 SD_API sd_conditioning_t* sd_conditioning_copy(const sd_conditioning_t* cond);
 
+// 拼接两个 conditioning（在 token 维度 dim=1 拼接 c_crossattn）
+SD_API sd_conditioning_t* sd_conditioning_concat(const sd_conditioning_t* cond1,
+                                                  const sd_conditioning_t* cond2);
+
+// 对两个 conditioning 做加权平均（conditioning_to_strength: 0.0=全cond1, 1.0=全cond2）
+SD_API sd_conditioning_t* sd_conditioning_average(const sd_conditioning_t* cond1,
+                                                   const sd_conditioning_t* cond2,
+                                                   float conditioning_to_strength);
+
+// ============================================================================
+// IPAdapter 支持
+// ============================================================================
+
+// 加载 IPAdapter 模型
+// ipadapter_path: IPAdapter safetensors 文件路径
+// cross_attention_dim: UNet 的 cross_attention_dim（SD1.5=768, SDXL=2048）
+// num_tokens: 图像 token 数量（通常为 4）
+// clip_embeddings_dim: CLIP Vision 输出维度（ViT-H=1024, ViT-bigG=1280）
+SD_API bool sd_load_ipadapter(
+    sd_ctx_t* sd_ctx,
+    const char* ipadapter_path,
+    int cross_attention_dim,
+    int num_tokens,
+    int clip_embeddings_dim
+);
+
+// 设置 IPAdapter 的参考图像（CLIP Vision 编码后的输出）
+// image: 参考图像
+// strength: IPAdapter 强度（0.0 - 1.0+）
+SD_API void sd_set_ipadapter_image(
+    sd_ctx_t* sd_ctx,
+    const sd_image_t* image,
+    float strength
+);
+
+// 清除已加载的 IPAdapter
+SD_API void sd_clear_ipadapter(sd_ctx_t* sd_ctx);
+
 // ============================================================================
 // LoRA 支持
 // ============================================================================
@@ -191,3 +235,25 @@ SD_API void sd_apply_loras(
 
 // 清除已应用的所有 LoRA
 SD_API void sd_clear_loras(sd_ctx_t* sd_ctx);
+
+// ============================================================================
+// CLIP Vision 支持
+// ============================================================================
+
+typedef struct {
+    float* data;
+    int numel;
+} sd_clip_vision_output_t;
+
+// 使用 CLIP Vision 编码图像
+// image: 输入图像
+// return_pooled: true 返回 pooled 特征（一维向量），false 返回完整特征图
+// 返回的 sd_clip_vision_output_t* 需要用 sd_free_clip_vision_output() 释放
+SD_API sd_clip_vision_output_t* sd_clip_vision_encode_image(
+    sd_ctx_t* sd_ctx,
+    const sd_image_t* image,
+    bool return_pooled
+);
+
+// 释放 CLIP Vision 输出
+SD_API void sd_free_clip_vision_output(sd_clip_vision_output_t* output);

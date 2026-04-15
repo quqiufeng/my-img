@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "cache.h"
+#include "sd_ptr.h"
 #include <algorithm>
 
 namespace sdengine {
@@ -82,8 +83,25 @@ std::string ExecutionCache::make_key(const std::string& node_id,
 size_t ExecutionCache::estimate_size(const NodeOutputs& outputs) const {
     size_t size = 0;
     for (const auto& [_, value] : outputs) {
-        // 简化估算
         size += sizeof(value);
+        // 估算智能指针类型的实际内存占用
+        if (value.type() == typeid(LatentPtr)) {
+            auto ptr = std::any_cast<LatentPtr>(value);
+            if (ptr) size += 1024 * 1024;  // latent 约 1MB
+        } else if (value.type() == typeid(ConditioningPtr)) {
+            auto ptr = std::any_cast<ConditioningPtr>(value);
+            if (ptr) size += 512 * 1024;  // conditioning 约 512KB
+        } else if (value.type() == typeid(ImagePtr)) {
+            auto ptr = std::any_cast<ImagePtr>(value);
+            if (ptr) {
+                size += ptr->width * ptr->height * ptr->channel;
+            }
+        } else if (value.type() == typeid(sd_image_t)) {
+            auto img = std::any_cast<sd_image_t>(value);
+            size += img.width * img.height * img.channel;
+        } else if (value.type() == typeid(UpscalerPtr)) {
+            size += 1024 * 1024;  // upscaler model ~1MB
+        }
     }
     return std::max(size, (size_t)1024);  // 最小 1KB
 }

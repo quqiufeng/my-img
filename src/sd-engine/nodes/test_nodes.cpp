@@ -25,10 +25,10 @@ public:
         return {{"value", "INT"}};
     }
     
-    bool execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
+    sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int value = std::any_cast<int>(inputs.at("value"));
         outputs["value"] = value;
-        return true;
+        return sd_error_t::OK;
     }
 };
 REGISTER_NODE("ConstantInt", ConstantIntNode);
@@ -50,11 +50,11 @@ public:
         return {{"result", "INT"}};
     }
     
-    bool execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
+    sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int a = std::any_cast<int>(inputs.at("a"));
         int b = std::any_cast<int>(inputs.at("b"));
         outputs["result"] = a + b;
-        return true;
+        return sd_error_t::OK;
     }
 };
 REGISTER_NODE("AddInt", AddIntNode);
@@ -76,11 +76,11 @@ public:
         return {{"result", "INT"}};
     }
     
-    bool execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
+    sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int a = std::any_cast<int>(inputs.at("a"));
         int b = std::any_cast<int>(inputs.at("b"));
         outputs["result"] = a * b;
-        return true;
+        return sd_error_t::OK;
     }
 };
 REGISTER_NODE("MultiplyInt", MultiplyIntNode);
@@ -99,11 +99,11 @@ public:
         return {};
     }
     
-    bool execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
+    sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
         int value = std::any_cast<int>(inputs.at("value"));
         printf("[PrintInt] Result: %d\n", value);
-        return true;
+        return sd_error_t::OK;
     }
 };
 REGISTER_NODE("PrintInt", PrintIntNode);

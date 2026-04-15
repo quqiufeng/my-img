@@ -111,7 +111,8 @@ static bool execute_workflow(Workflow& workflow, bool dry_run, bool verbose) {
     config.use_cache = true;
     config.verbose = verbose;
     
-    bool success = executor.execute(&workflow, config);
+    sd_error_t result = executor.execute(&workflow, config);
+    bool success = is_ok(result);
     
     printf("\n");
     
