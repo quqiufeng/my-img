@@ -67,13 +67,9 @@ struct ConditioningDeleter {
     }
 };
 
-/// @brief sd_image_t 自定义删除器
+/// @brief sd_image_t 自定义删除器（优先归还对象池）
 struct ImageDeleter {
-    void operator()(sd_image_t* p) const {
-        if (p) {
-            sd_free_image(p);
-        }
-    }
+    void operator()(sd_image_t* p) const;
 };
 
 /// @brief upscaler_ctx_t 自定义删除器
@@ -83,11 +79,24 @@ struct UpscalerDeleter {
     }
 };
 
+/// @brief sd_ctx_t 自定义删除器
+struct SDContextDeleter {
+    void operator()(sd_ctx_t* p) const {
+        if (p) free_sd_ctx(p);
+    }
+};
+
 using LatentPtr           = std::shared_ptr<sd_latent_t>;                ///< latent 智能指针
 using ConditioningPtr     = std::shared_ptr<sd_conditioning_t>;          ///< conditioning 智能指针
 using ImagePtr            = std::shared_ptr<sd_image_t>;                 ///< image 智能指针
 using UpscalerPtr         = std::shared_ptr<upscaler_ctx_t>;             ///< upscaler 智能指针
 using CLIPVisionOutputPtr = std::shared_ptr<sd_clip_vision_output_t>;    ///< CLIP Vision 输出智能指针
+using SDContextPtr        = std::shared_ptr<sd_ctx_t>;                   ///< SD 上下文智能指针
+
+/// @brief 创建 sd_ctx_t 智能指针
+inline SDContextPtr make_sd_context_ptr(sd_ctx_t* p) {
+    return SDContextPtr(p, SDContextDeleter{});
+}
 
 /// @brief 创建 latent 智能指针
 inline LatentPtr make_latent_ptr(sd_latent_t* p) {
@@ -146,5 +155,12 @@ inline void release_image(sd_image_t* p) {
 /// 在 sd_image_t 已经池化的前提下，latent/conditioning 的分配开销相对较小，
 /// 此优化可作为后续进阶工程任务处理。
 /// @}
+
+// ImageDeleter 的 operator() 定义（必须在 release_image 声明之后）
+inline void ImageDeleter::operator()(sd_image_t* p) const {
+    if (p) {
+        release_image(p);
+    }
+}
 
 } // namespace sdengine

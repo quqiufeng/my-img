@@ -23,6 +23,7 @@
 #include <vector>
 #include <map>
 #include <cmath>
+#include <cstdint>
 
 // stb_image for LoadImage/SaveImage
 #define STB_IMAGE_IMPLEMENTATION
@@ -45,10 +46,55 @@
 namespace sdengine {
 
 // ============================================================================
+// 公共辅助函数
+// ============================================================================
+
+/// 将 RGBA 图像转换为 RGB
+static std::vector<uint8_t> convert_rgba_to_rgb(const uint8_t* src, int w, int h) {
+    std::vector<uint8_t> dst(w * h * 3);
+    for (int i = 0; i < w * h; i++) {
+        dst[i * 3 + 0] = src[i * 4 + 0];
+        dst[i * 3 + 1] = src[i * 4 + 1];
+        dst[i * 3 + 2] = src[i * 4 + 2];
+    }
+    return dst;
+}
+
+/// 从已分配的 data 创建 ImagePtr（失败时释放 data 并返回错误）
+static ImagePtr create_image_ptr(int w, int h, int c, uint8_t* data, sd_error_t* out_err = nullptr) {
+    sd_image_t* img = acquire_image();
+    if (!img) {
+        free(data);
+        if (out_err) *out_err = sd_error_t::ERROR_MEMORY_ALLOCATION;
+        return nullptr;
+    }
+    img->width = w;
+    img->height = h;
+    img->channel = c;
+    img->data = data;
+    return make_image_ptr(img);
+}
+
+/// 获取 sd_ctx_t*，兼容 SDContextPtr 和裸指针
+static sd_ctx_t* extract_sd_ctx(const NodeInputs& inputs, const std::string& key) {
+    sd_ctx_t* sd_ctx = nullptr;
+    try {
+        auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at(key));
+        sd_ctx = ctx_ptr.get();
+    } catch (const std::bad_any_cast&) {
+        try {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at(key));
+        } catch (...) {}
+    }
+    return sd_ctx;
+}
+
+// ============================================================================
 // CLIP 包装器（供 CLIPSetLastLayer / CLIPTextEncode 共享）
 // ============================================================================
 struct CLIPWrapper {
     sd_ctx_t* sd_ctx = nullptr;
+    SDContextPtr sd_ctx_ptr;  // keep shared_ptr alive if needed
     int clip_skip = -1;
 };
 
@@ -151,9 +197,10 @@ public:
 
         printf("[CheckpointLoaderSimple] Model loaded successfully\n");
 
-        outputs["MODEL"] = sd_ctx;
-        outputs["CLIP"] = sd_ctx;
-        outputs["VAE"] = sd_ctx;
+        auto sd_ctx_ptr = make_sd_context_ptr(sd_ctx);
+        outputs["MODEL"] = sd_ctx_ptr;
+        outputs["CLIP"] = sd_ctx_ptr;
+        outputs["VAE"] = sd_ctx_ptr;
 
         return sd_error_t::OK;
     }
@@ -180,7 +227,13 @@ public:
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
+        sd_ctx_t* sd_ctx = nullptr;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
+            sd_ctx = ctx_ptr.get();
+        } catch (const std::bad_any_cast&) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
+        }
         int clip_skip = inputs.count("stop_at_clip_layer") ?
             std::any_cast<int>(inputs.at("stop_at_clip_layer")) : -1;
 
@@ -191,6 +244,9 @@ public:
 
         CLIPWrapper wrapper;
         wrapper.sd_ctx = sd_ctx;
+        try {
+            wrapper.sd_ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
+        } catch (...) {}
         wrapper.clip_skip = clip_skip;
 
         outputs["CLIP"] = wrapper;
@@ -220,7 +276,13 @@ public:
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
+        sd_ctx_t* sd_ctx = nullptr;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
+            sd_ctx = ctx_ptr.get();
+        } catch (const std::bad_any_cast&) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
+        }
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
 
         if (!sd_ctx || !image || !image->data) {
@@ -278,8 +340,13 @@ public:
                 clip_skip = wrapper.clip_skip;
             }
         } catch (const std::bad_any_cast&) {
-            // Fallback to raw sd_ctx_t* (backward compatibility)
-            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
+            // Fallback to SDContextPtr or raw sd_ctx_t*
+            try {
+                auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
+                sd_ctx = ctx_ptr.get();
+            } catch (const std::bad_any_cast&) {
+                sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
+            }
         }
 
         if (!sd_ctx) {
@@ -496,7 +563,13 @@ public:
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_image_t image = std::any_cast<sd_image_t>(inputs.at("pixels"));
-        sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("vae"));
+        sd_ctx_t* sd_ctx = nullptr;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("vae"));
+            sd_ctx = ctx_ptr.get();
+        } catch (const std::bad_any_cast&) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("vae"));
+        }
 
         if (!image.data) {
             fprintf(stderr, "[ERROR] VAEEncode: No image data\n");
@@ -1322,9 +1395,16 @@ public:
             fprintf(stderr, "[ERROR] LineArtLoader: model_name is required\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
-        outputs["LINEART_MODEL"] = path;
+
+        auto preprocessor = std::make_shared<LineArtPreprocessor>();
+        if (!preprocessor->load(path)) {
+            fprintf(stderr, "[ERROR] LineArtLoader: Failed to load model: %s\n", path.c_str());
+            return sd_error_t::ERROR_MODEL_LOADING;
+        }
+
+        outputs["LINEART_MODEL"] = preprocessor;
         outputs["path"] = path;
-        printf("[LineArtLoader] LineArt model path: %s\n", path.c_str());
+        printf("[LineArtLoader] LineArt model loaded: %s\n", path.c_str());
         return sd_error_t::OK;
     }
 };
@@ -1351,23 +1431,22 @@ public:
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr src = std::any_cast<ImagePtr>(inputs.at("image"));
-        std::string model_path = std::any_cast<std::string>(inputs.at("lineart_model"));
+        auto preprocessor = std::any_cast<std::shared_ptr<LineArtPreprocessor>>(inputs.at("lineart_model"));
 
         if (!src || !src->data || src->channel != 3) {
             fprintf(stderr, "[ERROR] LineArtPreprocessor: Requires RGB image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        printf("[LineArtPreprocessor] Processing %dx%d with model: %s\n",
-               src->width, src->height, model_path.c_str());
-
-        LineArtPreprocessor preprocessor;
-        if (!preprocessor.load(model_path)) {
-            fprintf(stderr, "[ERROR] LineArtPreprocessor: Failed to load model: %s\n", model_path.c_str());
+        if (!preprocessor) {
+            fprintf(stderr, "[ERROR] LineArtPreprocessor: Model not loaded\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        LineArtResult result = preprocessor.process(src->data, src->width, src->height);
+        printf("[LineArtPreprocessor] Processing %dx%d\n",
+               src->width, src->height);
+
+        LineArtResult result = preprocessor->process(src->data, src->width, src->height);
         if (!result.success) {
             fprintf(stderr, "[ERROR] LineArtPreprocessor: Processing failed\n");
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -1535,7 +1614,13 @@ public:
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+        sd_ctx_t* sd_ctx = nullptr;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("model"));
+            sd_ctx = ctx_ptr.get();
+        } catch (const std::bad_any_cast&) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+        }
         int64_t seed = inputs.count("seed") ? std::any_cast<int>(inputs.at("seed")) : 0;
         int steps = inputs.count("steps") ? std::any_cast<int>(inputs.at("steps")) : 20;
         float cfg = inputs.count("cfg") ? std::any_cast<float>(inputs.at("cfg")) : 8.0f;
@@ -1612,7 +1697,13 @@ public:
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+        sd_ctx_t* sd_ctx = nullptr;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("model"));
+            sd_ctx = ctx_ptr.get();
+        } catch (const std::bad_any_cast&) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+        }
         int64_t seed = inputs.count("seed") ? std::any_cast<int>(inputs.at("seed")) : 0;
         int steps = inputs.count("steps") ? std::any_cast<int>(inputs.at("steps")) : 20;
         float cfg = inputs.count("cfg") ? std::any_cast<float>(inputs.at("cfg")) : 8.0f;
@@ -1680,7 +1771,13 @@ public:
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         LatentPtr latent = std::any_cast<LatentPtr>(inputs.at("samples"));
-        sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("vae"));
+        sd_ctx_t* sd_ctx = nullptr;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("vae"));
+            sd_ctx = ctx_ptr.get();
+        } catch (const std::bad_any_cast&) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("vae"));
+        }
 
         if (!latent) {
             fprintf(stderr, "[ERROR] VAEDecode: No latent data\n");
@@ -3597,7 +3694,13 @@ public:
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+        sd_ctx_t* sd_ctx = nullptr;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("model"));
+            sd_ctx = ctx_ptr.get();
+        } catch (const std::bad_any_cast&) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+        }
         ConditioningPtr positive = std::any_cast<ConditioningPtr>(inputs.at("positive"));
         ConditioningPtr negative = inputs.count("negative") ?
             std::any_cast<ConditioningPtr>(inputs.at("negative")) : nullptr;
@@ -3714,6 +3817,43 @@ public:
     }
 };
 REGISTER_NODE("DeepHighResFix", DeepHighResFixNode);
+
+// ============================================================================
+// UnloadModel - 释放模型上下文
+// ============================================================================
+class UnloadModelNode : public Node {
+public:
+    std::string get_class_type() const override { return "UnloadModel"; }
+    std::string get_category() const override { return "model_management"; }
+
+    std::vector<PortDef> get_inputs() const override {
+        return {
+            {"model", "MODEL", true, nullptr}
+        };
+    }
+
+    std::vector<PortDef> get_outputs() const override {
+        return {};
+    }
+
+    sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
+        (void)outputs;
+        try {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("model"));
+            if (ctx_ptr) {
+                printf("[UnloadModel] Releasing model context (ref_count=%ld)\n", ctx_ptr.use_count());
+            }
+        } catch (const std::bad_any_cast&) {
+            sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+            if (sd_ctx) {
+                printf("[UnloadModel] Releasing raw model context\n");
+                free_sd_ctx(sd_ctx);
+            }
+        }
+        return sd_error_t::OK;
+    }
+};
+REGISTER_NODE("UnloadModel", UnloadModelNode);
 
 // ============================================================================
 // 显式初始化函数

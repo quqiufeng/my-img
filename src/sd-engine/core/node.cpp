@@ -36,19 +36,51 @@ std::string Node::compute_hash(const NodeInputs& inputs) const {
             ss << (std::any_cast<bool>(value) ? "1" : "0");
         } else if (value.type() == typeid(LatentPtr)) {
             auto ptr = std::any_cast<LatentPtr>(value);
-            ss << (ptr ? "[latent]" : "[latent-null]");
+            if (ptr) {
+                int w = 0, h = 0, c = 0;
+                sd_latent_get_shape(ptr.get(), &w, &h, &c);
+                ss << "[latent:" << w << "x" << h << "x" << c << "]";
+            } else {
+                ss << "[latent-null]";
+            }
         } else if (value.type() == typeid(ConditioningPtr)) {
             auto ptr = std::any_cast<ConditioningPtr>(value);
-            ss << (ptr ? "[cond]" : "[cond-null]");
+            // conditioning 是 opaque 类型，无法计算内容哈希，使用指针地址区分
+            ss << "[cond:" << ptr.get() << "]";
         } else if (value.type() == typeid(ImagePtr)) {
             auto ptr = std::any_cast<ImagePtr>(value);
-            ss << (ptr ? "[image]" : "[image-null]");
+            if (ptr && ptr->data) {
+                // 快速内容哈希：尺寸 + 像素校验和（每 64 像素采样一个，避免大图像遍历过慢）
+                size_t pixels = (size_t)ptr->width * ptr->height * ptr->channel;
+                uint64_t checksum = 0;
+                size_t stride = std::max((size_t)1, pixels / 64);
+                for (size_t i = 0; i < pixels; i += stride) {
+                    checksum = checksum * 31 + ptr->data[i];
+                }
+                ss << "[image:" << ptr->width << "x" << ptr->height << "x" << ptr->channel << ":" << checksum << "]";
+            } else {
+                ss << "[image-null]";
+            }
         } else if (value.type() == typeid(sd_image_t)) {
             auto img = std::any_cast<sd_image_t>(value);
-            ss << "[sdimg:" << img.width << "x" << img.height << "]";
+            if (img.data) {
+                size_t pixels = (size_t)img.width * img.height * img.channel;
+                uint64_t checksum = 0;
+                size_t stride = std::max((size_t)1, pixels / 64);
+                for (size_t i = 0; i < pixels; i += stride) {
+                    checksum = checksum * 31 + img.data[i];
+                }
+                ss << "[sdimg:" << img.width << "x" << img.height << "x" << img.channel << ":" << checksum << "]";
+            } else {
+                ss << "[sdimg:" << img.width << "x" << img.height << ":null]";
+            }
         } else if (value.type() == typeid(UpscalerPtr)) {
             auto ptr = std::any_cast<UpscalerPtr>(value);
             ss << (ptr ? "[upscaler]" : "[upscaler-null]");
+        } else if (value.type() == typeid(SDContextPtr)) {
+            auto ptr = std::any_cast<SDContextPtr>(value);
+            // 模型上下文使用指针地址即可（同一模型实例内容相同）
+            ss << "[sdctx:" << ptr.get() << "]";
         } else {
             ss << "[complex]";
         }
