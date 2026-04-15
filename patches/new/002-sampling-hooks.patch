@@ -1,0 +1,51 @@
+diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+index 683a07d..7a74cc8 100644
+--- a/src/stable-diffusion.cpp
++++ b/src/stable-diffusion.cpp
+@@ -1606,6 +1638,7 @@ public:
+         float cfg_scale     = guidance.txt_cfg;
+         float img_cfg_scale = guidance.img_cfg;
+         float slg_scale     = guidance.slg.scale;
++        float distilled_guidance = guidance.distilled_guidance;
+ 
+         sd_sample::SampleCacheRuntime cache_runtime = sd_sample::init_sample_cache_runtime(version,
+                                                                                            cache_params,
+@@ -1626,6 +1659,11 @@ public:
+         SamplePreviewContext preview = prepare_sample_preview_context();
+ 
+         auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
++            // Deep HighRes Fix guidance hook: allow modifying cfg_scale during sampling
++            if (g_sd_guidance_hook != nullptr) {
++                g_sd_guidance_hook(&cfg_scale, &img_cfg_scale, &distilled_guidance, step, (int)steps, g_sd_guidance_hook_user_data);
++            }
++
+             if (step == 1 || step == -1) {
+                 pretty_progress(0, (int)steps, 0);
+             }
+@@ -1641,7 +1679,7 @@ public:
+             adjust_sample_step_scalings(shifted_timestep, timesteps_vec, c_in, &c_skip, &c_out);
+ 
+             sd::Tensor<float> timesteps_tensor({static_cast<int64_t>(timesteps_vec.size())}, timesteps_vec);
+-            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{guidance.distilled_guidance});
++            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{distilled_guidance});
+             sd::Tensor<float> noised_input = x * c_in;
+             if (!denoise_mask.empty() && version == VERSION_WAN2_2_TI2V) {
+                 noised_input = noised_input * denoise_mask + init_latent * (1.0f - denoise_mask);
+@@ -1792,7 +1830,16 @@ public:
+             return denoised;
+         };
+ 
+-        auto x0_opt = sample_k_diffusion(method, denoise, x_t, sigmas, sampler_rng, eta, is_flow_denoiser);
++        // Deep HighRes Fix hook: wrap denoise to allow latent modification
++        auto denoise_with_hook = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
++            sd::Tensor<float> mutable_x = x;
++            if (g_sd_latent_hook != nullptr) {
++                mutable_x = g_sd_latent_hook(mutable_x, step, (int)steps, g_sd_latent_hook_user_data);
++            }
++            return denoise(mutable_x, sigma, step);
++        };
++
++        auto x0_opt = sample_k_diffusion(method, denoise_with_hook, x_t, sigmas, sampler_rng, eta, is_flow_denoiser);
+         if (x0_opt.empty()) {
+             LOG_ERROR("Diffusion model sampling failed");
+             if (control_net) {

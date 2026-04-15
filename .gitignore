@@ -1,70 +1,20 @@
-# Build
-build/
+# Build directories
+/build/
 bin/
+*.o
+*.a
+*.so
 
-# Log files
-*.log
+# Environment files
+.env
 
-# Model files (too large)
-*.gguf
-*.bin
-*.safetensors
-*.ckpt
-
-# Test images
-*.png
-*.jpg
-*.jpeg
-*.webp
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# debug information files
-*.dwo
-
-# Test files
-test_*.json
-
-# Stable diffusion source (should be cloned separately)
-stable-diffusion.cpp/
