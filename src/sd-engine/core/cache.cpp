@@ -8,20 +8,23 @@
 
 namespace sdengine {
 
-ExecutionCache::ExecutionCache(size_t max_size_bytes) 
+ExecutionCache::ExecutionCache(size_t max_size_bytes)
     : max_size_(max_size_bytes) {}
 
 bool ExecutionCache::has(const std::string& node_id, const std::string& hash) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return cache_.find(make_key(node_id, hash)) != cache_.end();
+    std::string key = make_key(node_id, hash);
+    return cache_.find(key) != cache_.end();
 }
 
 NodeOutputs ExecutionCache::get(const std::string& node_id, const std::string& hash) {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = cache_.find(make_key(node_id, hash));
+    std::string key = make_key(node_id, hash);
+    auto it = cache_.find(key);
     if (it != cache_.end()) {
-        it->second.last_access = std::chrono::steady_clock::now();
-        return it->second.outputs;
+        it->second.entry.last_access = std::chrono::steady_clock::now();
+        touch(key);
+        return it->second.entry.outputs;
     }
     return {};
 }
@@ -29,53 +32,80 @@ NodeOutputs ExecutionCache::get(const std::string& node_id, const std::string& h
 void ExecutionCache::put(const std::string& node_id, const std::string& hash,
                          const NodeOutputs& outputs) {
     std::lock_guard<std::mutex> lock(mutex_);
-    
+
     std::string key = make_key(node_id, hash);
     size_t entry_size = estimate_size(outputs);
-    
-    // 如果已存在，先减去旧大小
+
     auto it = cache_.find(key);
     if (it != cache_.end()) {
-        current_size_ -= it->second.memory_size;
+        // 更新已有条目
+        current_size_ -= it->second.entry.memory_size;
+        it->second.entry.outputs = outputs;
+        it->second.entry.last_access = std::chrono::steady_clock::now();
+        it->second.entry.memory_size = entry_size;
+        current_size_ += entry_size;
+        touch(key);
+    } else {
+        // 新条目
+        while (current_size_ + entry_size > max_size_ && !cache_.empty()) {
+            evict_one();
+        }
+
+        lru_list_.push_back(key);
+        CacheEntry entry;
+        entry.hash = hash;
+        entry.outputs = outputs;
+        entry.last_access = std::chrono::steady_clock::now();
+        entry.memory_size = entry_size;
+
+        CacheItem item;
+        item.entry = std::move(entry);
+        item.lru_iter = std::prev(lru_list_.end());
+        cache_[key] = std::move(item);
+        current_size_ += entry_size;
     }
-    
-    // 检查是否需要清理
-    while (current_size_ + entry_size > max_size_ && !cache_.empty()) {
-        gc();
+}
+
+void ExecutionCache::touch(const std::string& key) const {
+    auto it = cache_.find(key);
+    if (it == cache_.end()) return;
+
+    // 移动到 LRU 链表尾部（最近使用）
+    lru_list_.splice(lru_list_.end(), lru_list_, it->second.lru_iter);
+}
+
+void ExecutionCache::evict_one() {
+    if (lru_list_.empty()) return;
+
+    std::string key = lru_list_.front();
+    lru_list_.pop_front();
+
+    auto it = cache_.find(key);
+    if (it != cache_.end()) {
+        current_size_ -= it->second.entry.memory_size;
+        cache_.erase(it);
     }
-    
-    CacheEntry entry;
-    entry.hash = hash;
-    entry.outputs = outputs;
-    entry.last_access = std::chrono::steady_clock::now();
-    entry.memory_size = entry_size;
-    
-    cache_[key] = entry;
-    current_size_ += entry_size;
 }
 
 void ExecutionCache::gc() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (cache_.empty()) return;
-    
-    // 找到最久未访问的条目
-    auto oldest = std::min_element(cache_.begin(), cache_.end(),
-        [](const auto& a, const auto& b) {
-            return a.second.last_access < b.second.last_access;
-        });
-    
-    if (oldest != cache_.end()) {
-        current_size_ -= oldest->second.memory_size;
-        cache_.erase(oldest);
-    }
+    evict_one();
 }
 
 void ExecutionCache::clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     cache_.clear();
+    lru_list_.clear();
     current_size_ = 0;
 }
 
-std::string ExecutionCache::make_key(const std::string& node_id, 
+size_t ExecutionCache::size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return cache_.size();
+}
+
+std::string ExecutionCache::make_key(const std::string& node_id,
                                      const std::string& hash) const {
     return node_id + "::" + hash;
 }

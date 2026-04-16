@@ -5,15 +5,18 @@
 /// @brief 节点执行结果缓存
 ///
 /// ExecutionCache 用于缓存节点的执行结果，避免重复计算。
-/// 支持基于内存上限的自动垃圾回收（LRU 策略）。
+/// 支持基于内存上限的自动垃圾回收（LRU 策略），使用 list + unordered_map
+/// 实现 O(1) 的 get/put/lru 淘汰。
 // ============================================================================
 
 #pragma once
 
 #include "node.h"
-#include <map>
+#include <list>
+#include <unordered_map>
 #include <chrono>
 #include <mutex>
+#include <string>
 
 namespace sdengine {
 
@@ -57,14 +60,33 @@ public:
     /// @brief 获取缓存内存上限
     size_t get_max_size() const { return max_size_; }
 
+    /// @brief 获取当前缓存条目数量
+    size_t size() const;
+
 private:
+    using LRUList = std::list<std::string>;
+    using LRUListIter = LRUList::iterator;
+
     mutable std::mutex mutex_;
-    std::map<std::string, CacheEntry> cache_;  ///< 缓存存储，键格式为 "node_id::hash"
+
+    // LRU 链表：队首是最久未访问，队尾是最近访问
+    mutable LRUList lru_list_;
+
+    // 哈希表：键 -> {条目, LRU链表迭代器}
+    struct CacheItem {
+        CacheEntry entry;
+        LRUListIter lru_iter;
+    };
+    std::unordered_map<std::string, CacheItem> cache_;
+
     size_t current_size_ = 0;
     size_t max_size_;
 
     std::string make_key(const std::string& node_id, const std::string& hash) const;
     size_t estimate_size(const NodeOutputs& outputs) const;
+
+    void touch(const std::string& key) const;
+    void evict_one();
 };
 
 } // namespace sdengine

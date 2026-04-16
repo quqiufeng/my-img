@@ -6,6 +6,9 @@
 #include "core/workflow.h"
 #include "core/executor.h"
 #include "core/workflow_builder.h"
+#include "core/cache.h"
+#include "core/sd_ptr.h"
+#include "stable-diffusion.h"
 
 #ifdef HAS_ONNXRUNTIME
 #include "face/face_restore.hpp"
@@ -338,10 +341,171 @@ TEST_CASE("WorkflowBuilder creates valid JSON", "[workflow_builder]") {
     std::string sampler = builder.add_ksampler(loader, positive, negative, latent, 0, 20, 7.5f);
     std::string decoded = builder.add_vae_decode(sampler, loader);
     builder.add_save_image(decoded, "output");
-    
+
     std::string json_str = builder.to_json_string();
     REQUIRE(!json_str.empty());
     REQUIRE(json_str.find("CheckpointLoaderSimple") != std::string::npos);
     REQUIRE(json_str.find("CLIPTextEncode") != std::string::npos);
     REQUIRE(json_str.find("KSampler") != std::string::npos);
+}
+
+TEST_CASE("ExecutionCache basic operations", "[cache]") {
+    ExecutionCache cache(1024 * 1024);
+
+    NodeOutputs outputs;
+    outputs["value"] = 42;
+
+    REQUIRE(!cache.has("node1", "hash1"));
+    cache.put("node1", "hash1", outputs);
+    REQUIRE(cache.has("node1", "hash1"));
+    REQUIRE(cache.size() == 1);
+
+    auto got = cache.get("node1", "hash1");
+    REQUIRE(got.count("value"));
+    REQUIRE(std::any_cast<int>(got.at("value")) == 42);
+}
+
+TEST_CASE("ExecutionCache LRU eviction", "[cache]") {
+    // 限制很小的缓存，只能容纳约 2 个条目
+    ExecutionCache cache(3000);
+
+    NodeOutputs out1, out2, out3;
+    out1["v"] = 1;
+    out2["v"] = 2;
+    out3["v"] = 3;
+
+    cache.put("n1", "h1", out1);
+    cache.put("n2", "h2", out2);
+    // 访问 n1，使其变为最近使用
+    (void)cache.get("n1", "h1");
+
+    cache.put("n3", "h3", out3);
+
+    // n2 应该被淘汰（最久未使用）
+    REQUIRE(cache.has("n1", "h1"));
+    REQUIRE(!cache.has("n2", "h2"));
+    REQUIRE(cache.has("n3", "h3"));
+}
+
+TEST_CASE("ExecutionCache clear", "[cache]") {
+    ExecutionCache cache;
+    NodeOutputs out;
+    out["v"] = 1;
+    cache.put("n", "h", out);
+    REQUIRE(cache.size() == 1);
+
+    cache.clear();
+    REQUIRE(cache.size() == 0);
+    REQUIRE(!cache.has("n", "h"));
+}
+
+TEST_CASE("ImageScale node resizes correctly", "[image_nodes]") {
+    auto loader = NodeRegistry::instance().create("LoadImage");
+    REQUIRE(loader != nullptr);
+
+    // 创建一个 4x4 RGB 测试图像
+    uint8_t* data = (uint8_t*)malloc(4 * 4 * 3);
+    REQUIRE(data != nullptr);
+    for (int i = 0; i < 4 * 4 * 3; i++) {
+        data[i] = (uint8_t)(i % 256);
+    }
+    sd_image_t* img = acquire_image();
+    REQUIRE(img != nullptr);
+    img->width = 4;
+    img->height = 4;
+    img->channel = 3;
+    img->data = data;
+
+    NodeInputs load_inputs;
+    load_inputs["image"] = std::string("dummy.png");
+    NodeOutputs load_outputs;
+    // 直接构造 ImagePtr 绕过文件加载
+    load_outputs["IMAGE"] = make_image_ptr(img);
+
+    auto scaler = NodeRegistry::instance().create("ImageScale");
+    REQUIRE(scaler != nullptr);
+
+    NodeInputs scale_inputs;
+    scale_inputs["image"] = load_outputs["IMAGE"];
+    scale_inputs["width"] = 8;
+    scale_inputs["height"] = 8;
+    scale_inputs["method"] = std::string("bilinear");
+
+    NodeOutputs scale_outputs;
+    sd_error_t err = scaler->execute(scale_inputs, scale_outputs);
+    REQUIRE(is_ok(err));
+
+    ImagePtr result = std::any_cast<ImagePtr>(scale_outputs["IMAGE"]);
+    REQUIRE(result != nullptr);
+    REQUIRE(result->width == 8);
+    REQUIRE(result->height == 8);
+    REQUIRE(result->channel == 3);
+}
+
+TEST_CASE("ImageCrop node crops correctly", "[image_nodes]") {
+    uint8_t* data = (uint8_t*)malloc(8 * 8 * 3);
+    REQUIRE(data != nullptr);
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            data[(y * 8 + x) * 3 + 0] = (uint8_t)x;
+            data[(y * 8 + x) * 3 + 1] = (uint8_t)y;
+            data[(y * 8 + x) * 3 + 2] = 0;
+        }
+    }
+    sd_image_t* img = acquire_image();
+    REQUIRE(img != nullptr);
+    img->width = 8;
+    img->height = 8;
+    img->channel = 3;
+    img->data = data;
+
+    auto cropper = NodeRegistry::instance().create("ImageCrop");
+    REQUIRE(cropper != nullptr);
+
+    NodeInputs inputs;
+    inputs["image"] = make_image_ptr(img);
+    inputs["x"] = 2;
+    inputs["y"] = 3;
+    inputs["width"] = 4;
+    inputs["height"] = 4;
+
+    NodeOutputs outputs;
+    sd_error_t err = cropper->execute(inputs, outputs);
+    REQUIRE(is_ok(err));
+
+    ImagePtr result = std::any_cast<ImagePtr>(outputs["IMAGE"]);
+    REQUIRE(result != nullptr);
+    REQUIRE(result->width == 4);
+    REQUIRE(result->height == 4);
+    REQUIRE(result->channel == 3);
+
+    // 验证左上角像素对应原图 (2,3)
+    REQUIRE(result->data[0] == 2);
+    REQUIRE(result->data[1] == 3);
+}
+
+TEST_CASE("ImageCrop node rejects invalid region", "[image_nodes]") {
+    uint8_t* data = (uint8_t*)malloc(4 * 4 * 3);
+    REQUIRE(data != nullptr);
+    memset(data, 0, 4 * 4 * 3);
+    sd_image_t* img = acquire_image();
+    REQUIRE(img != nullptr);
+    img->width = 4;
+    img->height = 4;
+    img->channel = 3;
+    img->data = data;
+
+    auto cropper = NodeRegistry::instance().create("ImageCrop");
+    REQUIRE(cropper != nullptr);
+
+    NodeInputs inputs;
+    inputs["image"] = make_image_ptr(img);
+    inputs["x"] = 2;
+    inputs["y"] = 2;
+    inputs["width"] = 10; // 超出边界
+    inputs["height"] = 10;
+
+    NodeOutputs outputs;
+    sd_error_t err = cropper->execute(inputs, outputs);
+    REQUIRE(is_error(err));
 }

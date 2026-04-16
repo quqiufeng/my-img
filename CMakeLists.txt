@@ -127,6 +127,7 @@ if(EXISTS ${SD_ENGINE_SRC})
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/executor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/init.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow_builder.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/log.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/test_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/node_utils.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/loader_nodes.cpp"
