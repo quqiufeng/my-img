@@ -38,9 +38,9 @@ class CLIPSetLastLayerNode : public Node {
 
         CLIPWrapper wrapper;
         wrapper.sd_ctx = sd_ctx;
-        const auto& clip_val = inputs.at("clip");
-        if (clip_val.type() == typeid(SDContextPtr))
-            wrapper.sd_ctx_ptr = std::any_cast<SDContextPtr>(clip_val);
+        auto it = inputs.find("clip");
+        if (it != inputs.end() && it->second.type() == typeid(SDContextPtr))
+            wrapper.sd_ctx_ptr = std::any_cast<SDContextPtr>(it->second);
         wrapper.clip_skip = clip_skip;
 
         outputs["CLIP"] = wrapper;
@@ -121,16 +121,19 @@ class CLIPTextEncodeNode : public Node {
         int clip_skip = get_input_opt<int>(inputs, "clip_skip", -1);
 
         sd_ctx_t* sd_ctx = nullptr;
-        const auto& clip_val = inputs.at("clip");
-        if (clip_val.type() == typeid(CLIPWrapper)) {
-            const auto& wrapper = std::any_cast<CLIPWrapper>(clip_val);
-            sd_ctx = wrapper.sd_ctx;
-            if (clip_skip == -1)
-                clip_skip = wrapper.clip_skip;
-        } else if (clip_val.type() == typeid(SDContextPtr)) {
-            sd_ctx = std::any_cast<SDContextPtr>(clip_val).get();
-        } else if (clip_val.type() == typeid(sd_ctx_t*)) {
-            sd_ctx = std::any_cast<sd_ctx_t*>(clip_val);
+        auto it = inputs.find("clip");
+        if (it != inputs.end()) {
+            const auto& clip_val = it->second;
+            if (clip_val.type() == typeid(CLIPWrapper)) {
+                const auto& wrapper = std::any_cast<CLIPWrapper>(clip_val);
+                sd_ctx = wrapper.sd_ctx;
+                if (clip_skip == -1)
+                    clip_skip = wrapper.clip_skip;
+            } else if (clip_val.type() == typeid(SDContextPtr)) {
+                sd_ctx = std::any_cast<SDContextPtr>(clip_val).get();
+            } else if (clip_val.type() == typeid(sd_ctx_t*)) {
+                sd_ctx = std::any_cast<sd_ctx_t*>(clip_val);
+            }
         }
 
         if (!sd_ctx) {
