@@ -188,14 +188,36 @@ sd_error_t DAGExecutor::execute(Workflow* workflow, const ExecutionConfig& confi
             continue;
         }
         
-        // 多节点并行执行
+        // 多节点并行执行：先统一准备 inputs，减少锁竞争
+        std::vector<std::pair<std::string, NodeInputs>> prepared_inputs;
+        prepared_inputs.reserve(layer_nodes.size());
+        
+        {
+            std::lock_guard<std::mutex> lock(computed_mutex);
+            for (const auto& node_id : layer_nodes) {
+                NodeInputs inputs;
+                sd_error_t prep_err = prepare_inputs(workflow, node_id, inputs, computed);
+                if (is_error(prep_err)) {
+                    if (error_cb_) error_cb_("Failed to prepare inputs for node: " + node_id);
+                    return prep_err;
+                }
+                for (const auto& [key, value] : config.overrides) {
+                    inputs[key] = value;
+                }
+                prepared_inputs.push_back({node_id, std::move(inputs)});
+            }
+        }
+        
         std::vector<std::future<std::pair<std::string, sd_error_t>>> futures;
         
-        for (const auto& node_id : layer_nodes) {
+        for (size_t i = 0; i < layer_nodes.size(); i++) {
+            const auto& node_id = prepared_inputs[i].first;
+            NodeInputs inputs = std::move(prepared_inputs[i].second);
+            
             futures.push_back(std::async(std::launch::async, [this, workflow, &config,
                                                               &computed, &computed_mutex,
                                                               &current, &progress_mutex,
-                                                              &total, node_id]() -> std::pair<std::string, sd_error_t> {
+                                                              &total, node_id, inputs]() mutable -> std::pair<std::string, sd_error_t> {
                 Node* node = workflow->get_node(node_id);
                 if (!node) {
                     return {node_id, sd_error_t::ERROR_INVALID_INPUT};
@@ -213,20 +235,6 @@ sd_error_t DAGExecutor::execute(Workflow* workflow, const ExecutionConfig& confi
                                current, total,
                                std::hash<std::thread::id>{}(std::this_thread::get_id()) % 1000);
                     }
-                }
-                
-                NodeInputs inputs;
-                {
-                    std::lock_guard<std::mutex> lock(computed_mutex);
-                    sd_error_t prep_err = prepare_inputs(workflow, node_id, inputs, computed);
-                    if (is_error(prep_err)) {
-                        if (error_cb_) error_cb_("Failed to prepare inputs for node: " + node_id);
-                        return {node_id, prep_err};
-                    }
-                }
-                
-                for (const auto& [key, value] : config.overrides) {
-                    inputs[key] = value;
                 }
                 
                 NodeOutputs outputs;

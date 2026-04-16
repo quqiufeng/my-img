@@ -128,6 +128,13 @@ if(EXISTS ${SD_ENGINE_SRC})
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/init.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow_builder.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/test_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/node_utils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/loader_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/conditioning_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/latent_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/preprocessor_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/core_nodes.cpp"
         ${SD_ENGINE_FACE_SRC}
         ${SD_ENGINE_PREPROCESSOR_SRC}

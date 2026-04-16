@@ -87,7 +87,11 @@ size_t ExecutionCache::estimate_size(const NodeOutputs& outputs) const {
         // 估算智能指针类型的实际内存占用
         if (value.type() == typeid(LatentPtr)) {
             auto ptr = std::any_cast<LatentPtr>(value);
-            if (ptr) size += 1024 * 1024;  // latent 约 1MB
+            if (ptr) {
+                int w = 0, h = 0, c = 0;
+                sd_latent_get_shape(ptr.get(), &w, &h, &c);
+                size += (size_t)w * h * c * sizeof(float);
+            }
         } else if (value.type() == typeid(ConditioningPtr)) {
             auto ptr = std::any_cast<ConditioningPtr>(value);
             if (ptr) size += 512 * 1024;  // conditioning 约 512KB
