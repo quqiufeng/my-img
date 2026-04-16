@@ -565,3 +565,163 @@ TEST_CASE("DAGExecutor multithreaded with cache", "[executor]") {
     sd_error_t err2 = executor.execute(&wf, config);
     REQUIRE(is_ok(err2));
 }
+
+// ============================================================================
+// ObjectPool 单元测试
+// ============================================================================
+#include "core/object_pool.h"
+
+TEST_CASE("ObjectPool basic acquire and release", "[object_pool]") {
+    int created = 0;
+    int resetted = 0;
+    ObjectPool<int> pool(
+        [&created]() {
+            ++created;
+            return new int(0);
+        },
+        [&resetted](int* p) {
+            ++resetted;
+            *p = 0;
+        },
+        4);
+
+    int* a = pool.acquire();
+    REQUIRE(a != nullptr);
+    *a = 42;
+
+    int* b = pool.acquire();
+    REQUIRE(b != nullptr);
+    REQUIRE(b != a);
+
+    pool.release(a);
+    REQUIRE(pool.size() == 1);
+
+    int* c = pool.acquire();
+    REQUIRE(c == a); // 优先复用池中对象
+    REQUIRE(pool.size() == 0);
+    REQUIRE(created == 2);
+    REQUIRE(resetted == 1);
+}
+
+TEST_CASE("ObjectPool respects max size", "[object_pool]") {
+    int resetted = 0;
+    ObjectPool<int> pool([]() { return new int(0); },
+                         [&resetted](int* p) {
+                             *p = -1;
+                             ++resetted;
+                         },
+                         2);
+
+    int* a = pool.acquire();
+    int* b = pool.acquire();
+    int* c = pool.acquire();
+
+    pool.release(a);
+    pool.release(b);
+    pool.release(c); // 超出 max_size，应直接删除
+
+    REQUIRE(pool.size() == 2);
+    REQUIRE(resetted == 3);
+}
+
+TEST_CASE("ObjectPool reserve and clear", "[object_pool]") {
+    ObjectPool<int> pool([]() { return new int(0); }, nullptr, 8);
+    pool.reserve(4);
+    REQUIRE(pool.size() == 4);
+
+    pool.clear();
+    REQUIRE(pool.size() == 0);
+}
+
+TEST_CASE("ObjectPool set_max_size shrinks pool", "[object_pool]") {
+    ObjectPool<int> pool([]() { return new int(0); }, nullptr, 8);
+
+    pool.reserve(6);
+    REQUIRE(pool.size() == 6);
+
+    pool.set_max_size(3);
+    REQUIRE(pool.size() == 3);
+}
+
+// ============================================================================
+// Node::compute_hash 单元测试
+// ============================================================================
+#include "core/node.h"
+
+class HashTestNode : public Node {
+  public:
+    std::string get_class_type() const override {
+        return "HashTest";
+    }
+    std::string get_category() const override {
+        return "test";
+    }
+    std::vector<PortDef> get_inputs() const override {
+        return {};
+    }
+    std::vector<PortDef> get_outputs() const override {
+        return {{"out", "INT"}};
+    }
+    sd_error_t execute(const NodeInputs&, NodeOutputs&) override {
+        return sd_error_t::OK;
+    }
+};
+
+TEST_CASE("Node::compute_hash is deterministic for basic types", "[hash]") {
+    HashTestNode node;
+    NodeInputs inputs;
+    inputs["i"] = 42;
+    inputs["f"] = 3.14f;
+    inputs["d"] = 2.718;
+    inputs["s"] = std::string("hello");
+    inputs["b"] = true;
+
+    std::string h1 = node.compute_hash(inputs);
+    std::string h2 = node.compute_hash(inputs);
+    REQUIRE(h1 == h2);
+    REQUIRE(h1.find("HashTest") != std::string::npos);
+}
+
+TEST_CASE("Node::compute_hash distinguishes different float values", "[hash]") {
+    HashTestNode node;
+    NodeInputs a, b;
+    a["v"] = 1.0f;
+    b["v"] = 1.0f + std::numeric_limits<float>::epsilon();
+
+    REQUIRE(node.compute_hash(a) != node.compute_hash(b));
+}
+
+TEST_CASE("Node::compute_hash unifies positive and negative zero", "[hash]") {
+    HashTestNode node;
+    NodeInputs a, b;
+    float pzero = 0.0f;
+    float nzero = -0.0f;
+    a["v"] = pzero;
+    b["v"] = nzero;
+
+    REQUIRE(node.compute_hash(a) == node.compute_hash(b));
+}
+
+TEST_CASE("Node::compute_hash handles image checksum sampling", "[hash]") {
+    HashTestNode node;
+    NodeInputs inputs;
+
+    // 构造 8x8 RGB 测试图像
+    sd_image_t img = {};
+    img.width = 8;
+    img.height = 8;
+    img.channel = 3;
+    std::vector<uint8_t> data(8 * 8 * 3, 128);
+    data[0] = 255; // 改变一个像素
+    img.data = data.data();
+
+    inputs["image"] = img;
+    std::string h = node.compute_hash(inputs);
+    REQUIRE(h.find("[sdimg:8x8x3:") != std::string::npos);
+
+    // 改变未采样到的像素（假设 stride > 1）不应影响哈希
+    data[1] = 0;
+    std::string h2 = node.compute_hash(inputs);
+    // 由于 stride = max(1, 192/64) = 3，改变 data[1] 不影响 checksum
+    REQUIRE(h == h2);
+}
