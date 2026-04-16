@@ -15,7 +15,8 @@ json WorkflowBuilder::make_link(const std::string& node_id, int slot) {
     return json::array({node_id, slot});
 }
 
-std::string WorkflowBuilder::add_node(const std::string& class_type, const std::map<std::string, json>& inputs) {
+std::string WorkflowBuilder::add_node(const std::string& class_type,
+                                      const std::unordered_map<std::string, json>& inputs) {
     std::string id = get_next_id();
     json node;
     node["class_type"] = class_type;
@@ -29,7 +30,7 @@ std::string WorkflowBuilder::add_node(const std::string& class_type, const std::
 
 std::string WorkflowBuilder::add_checkpoint_loader(const std::string& ckpt_path, const std::string& vae_path,
                                                    const std::string& clip_path) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["ckpt_name"] = ckpt_path;
     if (!vae_path.empty())
         inputs["vae_name"] = vae_path;
@@ -39,7 +40,7 @@ std::string WorkflowBuilder::add_checkpoint_loader(const std::string& ckpt_path,
 }
 
 std::string WorkflowBuilder::add_clip_encode(const std::string& text, const std::string& clip_node_id, int clip_skip) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["text"] = text;
     inputs["clip"] = make_link(clip_node_id, 1); // CLIP output slot
     if (clip_skip != -1)
@@ -48,7 +49,7 @@ std::string WorkflowBuilder::add_clip_encode(const std::string& text, const std:
 }
 
 std::string WorkflowBuilder::add_empty_latent(int width, int height, int batch_size) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["width"] = width;
     inputs["height"] = height;
     inputs["batch_size"] = batch_size;
@@ -56,7 +57,7 @@ std::string WorkflowBuilder::add_empty_latent(int width, int height, int batch_s
 }
 
 std::string WorkflowBuilder::add_lora_loader(const std::string& lora_path, float strength_model, float strength_clip) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["lora_name"] = lora_path;
     inputs["strength_model"] = strength_model;
     inputs["strength_clip"] = strength_clip;
@@ -64,7 +65,7 @@ std::string WorkflowBuilder::add_lora_loader(const std::string& lora_path, float
 }
 
 std::string WorkflowBuilder::add_lora_stack(const std::vector<std::string>& lora_node_ids) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     for (size_t i = 0; i < lora_node_ids.size() && i < 4; i++) {
         inputs["lora_" + std::to_string(i + 1)] = make_link(lora_node_ids[i], 0);
     }
@@ -75,7 +76,7 @@ std::string WorkflowBuilder::add_ksampler(const std::string& model_node_id, cons
                                           const std::string& negative_node_id, const std::string& latent_node_id,
                                           int seed, int steps, float cfg, const std::string& sampler, float denoise,
                                           const std::string& lora_stack_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["model"] = make_link(model_node_id, 0); // MODEL slot
     inputs["positive"] = make_link(positive_node_id, 0);
     inputs["negative"] = make_link(negative_node_id, 0);
@@ -92,27 +93,27 @@ std::string WorkflowBuilder::add_ksampler(const std::string& model_node_id, cons
 }
 
 std::string WorkflowBuilder::add_vae_decode(const std::string& latent_node_id, const std::string& vae_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["samples"] = make_link(latent_node_id, 0);
     inputs["vae"] = make_link(vae_node_id, 2); // VAE slot
     return add_node("VAEDecode", inputs);
 }
 
 std::string WorkflowBuilder::add_save_image(const std::string& image_node_id, const std::string& filename_prefix) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["images"] = make_link(image_node_id, 0);
     inputs["filename_prefix"] = filename_prefix;
     return add_node("SaveImage", inputs);
 }
 
 std::string WorkflowBuilder::add_load_image(const std::string& image_path) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = image_path;
     return add_node("LoadImage", inputs);
 }
 
 std::string WorkflowBuilder::add_vae_encode(const std::string& image_node_id, const std::string& vae_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["pixels"] = make_link(image_node_id, 0);
     inputs["vae"] = make_link(vae_node_id, 2); // VAE slot
     return add_node("VAEEncode", inputs);
@@ -120,7 +121,7 @@ std::string WorkflowBuilder::add_vae_encode(const std::string& image_node_id, co
 
 std::string WorkflowBuilder::add_image_scale(const std::string& image_node_id, int width, int height,
                                              const std::string& method) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["width"] = width;
     inputs["height"] = height;
@@ -129,7 +130,7 @@ std::string WorkflowBuilder::add_image_scale(const std::string& image_node_id, i
 }
 
 std::string WorkflowBuilder::add_upscale_model_loader(const std::string& model_path, bool use_gpu, int tile_size) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["model_name"] = model_path;
     inputs["use_gpu"] = use_gpu;
     inputs["tile_size"] = tile_size;
@@ -138,14 +139,14 @@ std::string WorkflowBuilder::add_upscale_model_loader(const std::string& model_p
 
 std::string WorkflowBuilder::add_image_upscale_with_model(const std::string& image_node_id,
                                                           const std::string& upscaler_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["upscale_model"] = make_link(upscaler_node_id, 0);
     return add_node("ImageUpscaleWithModel", inputs);
 }
 
 std::string WorkflowBuilder::add_controlnet_loader(const std::string& model_path) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["control_net_name"] = model_path;
     return add_node("ControlNetLoader", inputs);
 }
@@ -153,7 +154,7 @@ std::string WorkflowBuilder::add_controlnet_loader(const std::string& model_path
 std::string WorkflowBuilder::add_controlnet_apply(const std::string& conditioning_node_id,
                                                   const std::string& controlnet_node_id,
                                                   const std::string& image_node_id, float strength) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["conditioning"] = make_link(conditioning_node_id, 0);
     inputs["control_net"] = make_link(controlnet_node_id, 0);
     inputs["image"] = make_link(image_node_id, 0);
@@ -163,7 +164,7 @@ std::string WorkflowBuilder::add_controlnet_apply(const std::string& conditionin
 
 std::string WorkflowBuilder::add_canny_preprocessor(const std::string& image_node_id, int low_threshold,
                                                     int high_threshold) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["low_threshold"] = low_threshold;
     inputs["high_threshold"] = high_threshold;
@@ -171,21 +172,21 @@ std::string WorkflowBuilder::add_canny_preprocessor(const std::string& image_nod
 }
 
 std::string WorkflowBuilder::add_lineart_loader(const std::string& model_path) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["model_name"] = model_path;
     return add_node("LineArtLoader", inputs);
 }
 
 std::string WorkflowBuilder::add_lineart_preprocessor(const std::string& image_node_id,
                                                       const std::string& lineart_model_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["lineart_model"] = make_link(lineart_model_node_id, 0);
     return add_node("LineArtPreprocessor", inputs);
 }
 
 std::string WorkflowBuilder::add_load_image_mask(const std::string& image_path, const std::string& channel) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = image_path;
     inputs["channel"] = channel;
     return add_node("LoadImageMask", inputs);
@@ -193,7 +194,7 @@ std::string WorkflowBuilder::add_load_image_mask(const std::string& image_path, 
 
 std::string WorkflowBuilder::add_ipadapter_loader(const std::string& model_path, int cross_attention_dim,
                                                   int num_tokens, int clip_embeddings_dim) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["ipadapter_file"] = model_path;
     inputs["cross_attention_dim"] = cross_attention_dim;
     inputs["num_tokens"] = num_tokens;
@@ -204,7 +205,7 @@ std::string WorkflowBuilder::add_ipadapter_loader(const std::string& model_path,
 std::string WorkflowBuilder::add_ipadapter_apply(const std::string& conditioning_node_id,
                                                  const std::string& ipadapter_node_id, const std::string& image_node_id,
                                                  float strength) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["conditioning"] = make_link(conditioning_node_id, 0);
     inputs["ipadapter"] = make_link(ipadapter_node_id, 0);
     inputs["image"] = make_link(image_node_id, 0);
@@ -214,7 +215,7 @@ std::string WorkflowBuilder::add_ipadapter_apply(const std::string& conditioning
 
 std::string WorkflowBuilder::add_conditioning_combine(const std::string& cond1_node_id,
                                                       const std::string& cond2_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["conditioning_1"] = make_link(cond1_node_id, 0);
     inputs["conditioning_2"] = make_link(cond2_node_id, 0);
     return add_node("ConditioningCombine", inputs);
@@ -222,7 +223,7 @@ std::string WorkflowBuilder::add_conditioning_combine(const std::string& cond1_n
 
 std::string WorkflowBuilder::add_conditioning_concat(const std::string& cond_to_node_id,
                                                      const std::string& cond_from_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["conditioning_to"] = make_link(cond_to_node_id, 0);
     inputs["conditioning_from"] = make_link(cond_from_node_id, 0);
     return add_node("ConditioningConcat", inputs);
@@ -230,7 +231,7 @@ std::string WorkflowBuilder::add_conditioning_concat(const std::string& cond_to_
 
 std::string WorkflowBuilder::add_conditioning_average(const std::string& cond_to_node_id,
                                                       const std::string& cond_from_node_id, float strength) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["conditioning_to"] = make_link(cond_to_node_id, 0);
     inputs["conditioning_from"] = make_link(cond_from_node_id, 0);
     inputs["conditioning_to_strength"] = strength;
@@ -238,42 +239,42 @@ std::string WorkflowBuilder::add_conditioning_average(const std::string& cond_to
 }
 
 std::string WorkflowBuilder::add_clip_set_last_layer(const std::string& clip_node_id, int stop_at_clip_layer) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["clip"] = make_link(clip_node_id, 0);
     inputs["stop_at_clip_layer"] = stop_at_clip_layer;
     return add_node("CLIPSetLastLayer", inputs);
 }
 
 std::string WorkflowBuilder::add_clip_vision_encode(const std::string& clip_node_id, const std::string& image_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["clip"] = make_link(clip_node_id, 0);
     inputs["image"] = make_link(image_node_id, 0);
     return add_node("CLIPVisionEncode", inputs);
 }
 
 std::string WorkflowBuilder::add_rembg_model_loader(const std::string& model_path) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["model_path"] = model_path;
     return add_node("RemBGModelLoader", inputs);
 }
 
 std::string WorkflowBuilder::add_image_remove_background(const std::string& image_node_id,
                                                          const std::string& model_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["model"] = make_link(model_node_id, 0);
     return add_node("ImageRemoveBackground", inputs);
 }
 
 std::string WorkflowBuilder::add_image_invert(const std::string& image_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     return add_node("ImageInvert", inputs);
 }
 
 std::string WorkflowBuilder::add_image_color_adjust(const std::string& image_node_id, float brightness, float contrast,
                                                     float saturation) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["brightness"] = brightness;
     inputs["contrast"] = contrast;
@@ -282,20 +283,20 @@ std::string WorkflowBuilder::add_image_color_adjust(const std::string& image_nod
 }
 
 std::string WorkflowBuilder::add_image_blur(const std::string& image_node_id, int radius) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["radius"] = radius;
     return add_node("ImageBlur", inputs);
 }
 
 std::string WorkflowBuilder::add_image_grayscale(const std::string& image_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     return add_node("ImageGrayscale", inputs);
 }
 
 std::string WorkflowBuilder::add_image_threshold(const std::string& image_node_id, int threshold) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["image"] = make_link(image_node_id, 0);
     inputs["threshold"] = threshold;
     return add_node("ImageThreshold", inputs);
@@ -305,7 +306,7 @@ std::string WorkflowBuilder::add_ksampler_advanced(
     const std::string& model_node_id, const std::string& positive_node_id, const std::string& negative_node_id,
     const std::string& latent_node_id, int seed, int steps, float cfg, const std::string& sampler, float denoise,
     int start_at_step, int end_at_step, bool add_noise, const std::string& lora_stack_node_id) {
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["model"] = make_link(model_node_id, 0);
     inputs["positive"] = make_link(positive_node_id, 0);
     inputs["negative"] = make_link(negative_node_id, 0);
@@ -398,7 +399,7 @@ std::string ImageProcessBuilder::build(const std::string& input_image, int targe
     }
 
     if (crop_x >= 0 && crop_y >= 0 && crop_w > 0 && crop_h > 0) {
-        std::map<std::string, json> inputs;
+        std::unordered_map<std::string, json> inputs;
         inputs["image"] = builder.make_link(current, 0);
         inputs["x"] = crop_x;
         inputs["y"] = crop_y;
@@ -424,7 +425,7 @@ std::string DeepHiresBuilder::build(const std::string& ckpt_path, const std::str
     std::string positive = builder.add_clip_encode(prompt, loader);
     std::string negative = builder.add_clip_encode(negative_prompt, loader);
 
-    std::map<std::string, json> inputs;
+    std::unordered_map<std::string, json> inputs;
     inputs["model"] = builder.make_link(loader, 0);
     inputs["positive"] = builder.make_link(positive, 0);
     inputs["negative"] = builder.make_link(negative, 0);

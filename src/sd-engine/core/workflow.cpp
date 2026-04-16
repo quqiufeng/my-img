@@ -9,6 +9,7 @@
 #include <queue>
 #include <set>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace sdengine {
 
@@ -145,14 +146,14 @@ std::vector<Link> Workflow::get_output_links(const std::string& node_id) const {
     return it != output_links_.end() ? it->second : std::vector<Link>{};
 }
 
-std::map<std::string, std::any> Workflow::get_input_values(const std::string& node_id) const {
+NodeInputs Workflow::get_input_values(const std::string& node_id) const {
     auto it = input_values_.find(node_id);
-    return it != input_values_.end() ? it->second : std::map<std::string, std::any>{};
+    return it != input_values_.end() ? it->second : NodeInputs{};
 }
 
 std::vector<std::string> Workflow::topological_sort() const {
     std::vector<std::string> result;
-    std::map<std::string, int> in_degree;
+    std::unordered_map<std::string, int> in_degree;
     std::queue<std::string> queue;
 
     // 初始化入度

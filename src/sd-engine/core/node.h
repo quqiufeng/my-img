@@ -12,7 +12,6 @@
 
 #include <any>
 #include <functional>
-#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -54,10 +53,10 @@ struct PortDef {
 };
 
 /// @brief 节点输入数据集合
-using NodeInputs = std::map<std::string, std::any>;
+using NodeInputs = std::unordered_map<std::string, std::any>;
 
 /// @brief 节点输出数据集合
-using NodeOutputs = std::map<std::string, std::any>;
+using NodeOutputs = std::unordered_map<std::string, std::any>;
 
 /// @brief 节点之间的连接关系
 struct Link {

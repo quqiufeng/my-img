@@ -12,9 +12,9 @@
 
 #include "node.h"
 #include <any>
-#include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sdengine {
@@ -57,7 +57,7 @@ class Workflow {
     std::vector<Link> get_output_links(const std::string& node_id) const;
 
     /// @brief 获取节点的字面量输入值（非连接值）
-    std::map<std::string, std::any> get_input_values(const std::string& node_id) const;
+    NodeInputs get_input_values(const std::string& node_id) const;
 
     /// @brief 拓扑排序，返回节点的执行顺序
     ///
@@ -73,10 +73,10 @@ class Workflow {
     void clear();
 
   private:
-    std::map<std::string, std::unique_ptr<Node>> nodes_;                  ///< 节点实例
-    std::map<std::string, std::vector<Link>> input_links_;                ///< 节点的输入连接
-    std::map<std::string, std::vector<Link>> output_links_;               ///< 节点的输出连接
-    std::map<std::string, std::map<std::string, std::any>> input_values_; ///< 节点的字面量输入值
+    std::unordered_map<std::string, std::unique_ptr<Node>> nodes_;    ///< 节点实例
+    std::unordered_map<std::string, std::vector<Link>> input_links_;  ///< 节点的输入连接
+    std::unordered_map<std::string, std::vector<Link>> output_links_; ///< 节点的输出连接
+    std::unordered_map<std::string, NodeInputs> input_values_;        ///< 节点的字面量输入值
 
     /// @brief 解析 ComfyUI JSON 格式
     bool parse_comfyui_json(const std::string& json_str);

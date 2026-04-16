@@ -23,8 +23,9 @@ void DAGExecutor::set_error_callback(std::function<void(const std::string&)> cb)
 }
 
 // 计算每个节点的执行深度（最长前置路径长度）
-static std::map<std::string, int> compute_node_depths(const std::vector<std::string>& order, Workflow* workflow) {
-    std::map<std::string, int> depths;
+static std::unordered_map<std::string, int> compute_node_depths(const std::vector<std::string>& order,
+                                                                Workflow* workflow) {
+    std::unordered_map<std::string, int> depths;
     for (const auto& node_id : order) {
         int depth = 0;
         auto links = workflow->get_input_links(node_id);
@@ -61,7 +62,7 @@ sd_error_t DAGExecutor::execute(Workflow* workflow, const ExecutionConfig& confi
     }
 
     // 存储已计算节点的输出
-    std::map<std::string, NodeOutputs> computed;
+    std::unordered_map<std::string, NodeOutputs> computed;
     std::mutex computed_mutex;
 
     int max_threads =
@@ -275,7 +276,7 @@ sd_error_t DAGExecutor::execute(Workflow* workflow, const ExecutionConfig& confi
 }
 
 sd_error_t DAGExecutor::prepare_inputs(Workflow* workflow, const std::string& node_id, NodeInputs& inputs,
-                                       std::map<std::string, NodeOutputs>& computed) {
+                                       std::unordered_map<std::string, NodeOutputs>& computed) {
     Node* node = workflow->get_node(node_id);
     if (!node)
         return sd_error_t::ERROR_INVALID_INPUT;

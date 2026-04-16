@@ -9,8 +9,8 @@
 #pragma once
 
 #include "nlohmann/json.hpp"
-#include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace sdengine {
@@ -23,7 +23,7 @@ class WorkflowBuilder {
     WorkflowBuilder() = default;
 
     // 添加节点，返回节点 ID
-    std::string add_node(const std::string& class_type, const std::map<std::string, json>& inputs);
+    std::string add_node(const std::string& class_type, const std::unordered_map<std::string, json>& inputs);
 
     // 添加 CheckpointLoaderSimple 节点
     std::string add_checkpoint_loader(const std::string& ckpt_path, const std::string& vae_path = "",
