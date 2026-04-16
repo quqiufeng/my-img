@@ -196,8 +196,9 @@ void init_face_nodes();
             return output_defs_fn();                                                                                   \
         }                                                                                                              \
         sd_error_t execute(const NodeInputs&, NodeOutputs&) override {                                                 \
-            fprintf(stderr,                                                                                            \
-                    "[ERROR] " type_name ": ONNX Runtime not available. Build with HAS_ONNXRUNTIME to enable.\n");     \
+            ::sdengine::Logger::instance().log(::sdengine::LogLevel::ERROR, __FILE__, __LINE__,                        \
+                                               "[ERROR] " type_name                                                    \
+                                               ": ONNX Runtime not available. Build with HAS_ONNXRUNTIME to enable."); \
             return err_code;                                                                                           \
         }                                                                                                              \
     };
