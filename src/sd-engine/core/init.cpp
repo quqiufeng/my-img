@@ -16,6 +16,8 @@ extern void init_image_nodes();
 extern void init_loader_nodes();
 extern void init_conditioning_nodes();
 extern void init_latent_nodes();
+extern void init_preprocessor_cpu_nodes();
+extern void init_preprocessor_onnx_nodes();
 extern void init_preprocessor_nodes();
 extern void init_face_nodes();
 
@@ -29,6 +31,8 @@ void init_builtin_nodes() {
     init_loader_nodes();
     init_conditioning_nodes();
     init_latent_nodes();
+    init_preprocessor_cpu_nodes();
+    init_preprocessor_onnx_nodes();
     init_preprocessor_nodes();
     init_face_nodes();
 }

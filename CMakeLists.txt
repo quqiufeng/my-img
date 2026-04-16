@@ -138,6 +138,8 @@ if(EXISTS ${SD_ENGINE_SRC})
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_transform_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_filter_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/preprocessor_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/preprocessor_cpu_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/preprocessor_onnx_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/core_nodes.cpp"
         ${SD_ENGINE_FACE_SRC}
