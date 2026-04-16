@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "core/log.h"
 #include "core/node.h"
 #include "core/sd_ptr.h"
 #include "stable-diffusion-ext.h"
@@ -90,6 +91,56 @@ inline sd_ctx_t* extract_sd_ctx(const NodeInputs& inputs, const std::string& key
     if (val.type() == typeid(sd_ctx_t*))
         return std::any_cast<sd_ctx_t*>(val);
     return nullptr;
+}
+
+// ============================================================================
+// 类型安全的节点输入提取辅助函数
+// ============================================================================
+
+/// 获取必需输入，类型不匹配时返回错误（无异常）
+template <typename T>
+inline sd_error_t get_input(const NodeInputs& inputs, const std::string& key, T& out_val) {
+    auto it = inputs.find(key);
+    if (it == inputs.end()) {
+        return sd_error_t::ERROR_INVALID_INPUT;
+    }
+    const auto& val = it->second;
+    if (val.type() != typeid(T)) {
+        return sd_error_t::ERROR_INVALID_INPUT;
+    }
+    out_val = std::any_cast<T>(val);
+    return sd_error_t::OK;
+}
+
+/// 获取可选输入，不存在或类型不匹配时返回默认值（无异常）
+template <typename T>
+inline T get_input_opt(const NodeInputs& inputs, const std::string& key, const T& default_val = T{}) {
+    auto it = inputs.find(key);
+    if (it == inputs.end()) {
+        return default_val;
+    }
+    const auto& val = it->second;
+    if (val.type() != typeid(T)) {
+        return default_val;
+    }
+    return std::any_cast<T>(val);
+}
+
+/// 获取可选输入（指针版本），存在且类型匹配时返回 true 并通过指针输出
+template <typename T>
+inline bool get_input_ptr(const NodeInputs& inputs, const std::string& key, T* out_val) {
+    if (!out_val)
+        return false;
+    auto it = inputs.find(key);
+    if (it == inputs.end()) {
+        return false;
+    }
+    const auto& val = it->second;
+    if (val.type() != typeid(T)) {
+        return false;
+    }
+    *out_val = std::any_cast<T>(val);
+    return true;
 }
 
 // ============================================================================

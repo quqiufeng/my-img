@@ -33,11 +33,17 @@ class ImageBlendNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr img1 = std::any_cast<ImagePtr>(inputs.at("image1"));
-        ImagePtr img2 = std::any_cast<ImagePtr>(inputs.at("image2"));
-        float blend_factor = inputs.count("blend_factor") ? std::any_cast<float>(inputs.at("blend_factor")) : 0.5f;
+        ImagePtr img1;
+        if (sd_error_t err = get_input(inputs, "image1", img1); is_error(err)) {
+            return err;
+        }
+        ImagePtr img2;
+        if (sd_error_t err = get_input(inputs, "image2", img2); is_error(err)) {
+            return err;
+        }
+        float blend_factor = get_input_opt<float>(inputs, "blend_factor", 0.5f);
         std::string blend_mode =
-            inputs.count("blend_mode") ? std::any_cast<std::string>(inputs.at("blend_mode")) : "normal";
+            get_input_opt<std::string>(inputs, "blend_mode", "normal");
 
         if (!img1 || !img1->data || !img2 || !img2->data) {
             LOG_ERROR("[ERROR] ImageBlend: Missing input images\n");
@@ -131,12 +137,18 @@ class ImageCompositeMaskedNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr dst = std::any_cast<ImagePtr>(inputs.at("destination"));
-        ImagePtr src = std::any_cast<ImagePtr>(inputs.at("source"));
-        int offset_x = inputs.count("x") ? std::any_cast<int>(inputs.at("x")) : 0;
-        int offset_y = inputs.count("y") ? std::any_cast<int>(inputs.at("y")) : 0;
-        ImagePtr mask = inputs.count("mask") ? std::any_cast<ImagePtr>(inputs.at("mask")) : nullptr;
-        bool resize_source = inputs.count("resize_source") ? std::any_cast<bool>(inputs.at("resize_source")) : false;
+        ImagePtr dst;
+        if (sd_error_t err = get_input(inputs, "destination", dst); is_error(err)) {
+            return err;
+        }
+        ImagePtr src;
+        if (sd_error_t err = get_input(inputs, "source", src); is_error(err)) {
+            return err;
+        }
+        int offset_x = get_input_opt<int>(inputs, "x", 0);
+        int offset_y = get_input_opt<int>(inputs, "y", 0);
+        ImagePtr mask = get_input_opt<ImagePtr>(inputs, "mask", nullptr);
+        bool resize_source = get_input_opt<bool>(inputs, "resize_source", false);
 
         if (!dst || !dst->data || !src || !src->data) {
             LOG_ERROR("[ERROR] ImageCompositeMasked: Missing input images\n");
@@ -237,7 +249,10 @@ class ImageInvertNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
+        ImagePtr img;
+        if (sd_error_t err = get_input(inputs, "image", img); is_error(err)) {
+            return err;
+        }
         if (!img || !img->data) {
             LOG_ERROR("[ERROR] ImageInvert: Missing input image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -292,10 +307,13 @@ class ImageColorAdjustNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
-        float brightness = inputs.count("brightness") ? std::any_cast<float>(inputs.at("brightness")) : 1.0f;
-        float contrast = inputs.count("contrast") ? std::any_cast<float>(inputs.at("contrast")) : 1.0f;
-        float saturation = inputs.count("saturation") ? std::any_cast<float>(inputs.at("saturation")) : 1.0f;
+        ImagePtr img;
+        if (sd_error_t err = get_input(inputs, "image", img); is_error(err)) {
+            return err;
+        }
+        float brightness = get_input_opt<float>(inputs, "brightness", 1.0f);
+        float contrast = get_input_opt<float>(inputs, "contrast", 1.0f);
+        float saturation = get_input_opt<float>(inputs, "saturation", 1.0f);
 
         if (!img || !img->data) {
             LOG_ERROR("[ERROR] ImageColorAdjust: Missing input image\n");
@@ -371,8 +389,11 @@ class ImageBlurNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
-        int radius = inputs.count("radius") ? std::any_cast<int>(inputs.at("radius")) : 3;
+        ImagePtr img;
+        if (sd_error_t err = get_input(inputs, "image", img); is_error(err)) {
+            return err;
+        }
+        int radius = get_input_opt<int>(inputs, "radius", 3);
         if (radius < 1)
             radius = 1;
 
@@ -470,7 +491,10 @@ class ImageGrayscaleNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
+        ImagePtr img;
+        if (sd_error_t err = get_input(inputs, "image", img); is_error(err)) {
+            return err;
+        }
         if (!img || !img->data) {
             LOG_ERROR("[ERROR] ImageGrayscale: Missing input image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -524,8 +548,11 @@ class ImageThresholdNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
-        int threshold = inputs.count("threshold") ? std::any_cast<int>(inputs.at("threshold")) : 128;
+        ImagePtr img;
+        if (sd_error_t err = get_input(inputs, "image", img); is_error(err)) {
+            return err;
+        }
+        int threshold = get_input_opt<int>(inputs, "threshold", 128);
         threshold = std::clamp(threshold, 0, 255);
 
         if (!img || !img->data) {

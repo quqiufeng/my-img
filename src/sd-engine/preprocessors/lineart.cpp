@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
+#include "core/log.h"
 
 namespace sdengine {
 
@@ -65,7 +66,7 @@ std::vector<uint8_t> LineArtPreprocessor::resize_rgb(const uint8_t* src, int src
 LineArtResult LineArtPreprocessor::process(const uint8_t* rgb_data, int width, int height) {
     LineArtResult result;
     if (!session_) {
-        fprintf(stderr, "[ERROR] LineArtPreprocessor: Model not loaded\n");
+        LOG_ERROR("[ERROR] LineArtPreprocessor: Model not loaded\n");
         return result;
     }
 

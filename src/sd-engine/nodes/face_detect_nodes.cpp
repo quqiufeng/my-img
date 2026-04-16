@@ -34,10 +34,16 @@ class FaceDetectNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        auto detector = std::any_cast<std::shared_ptr<face::FaceDetector>>(inputs.at("model"));
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
+            return err;
+        }
+        std::shared_ptr<face::FaceDetector> detector;
+        if (sd_error_t err = get_input(inputs, "model", detector); is_error(err)) {
+            return err;
+        }
         float threshold =
-            inputs.count("confidence_threshold") ? std::any_cast<float>(inputs.at("confidence_threshold")) : 0.5f;
+            get_input_opt<float>(inputs, "confidence_threshold", 0.5f);
 
         if (!image || !image->data || !detector) {
             LOG_ERROR("[ERROR] FaceDetect: Missing inputs\n");

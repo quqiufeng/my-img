@@ -32,9 +32,12 @@ class CannyEdgePreprocessorNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr src = std::any_cast<ImagePtr>(inputs.at("image"));
-        int low_threshold = inputs.count("low_threshold") ? std::any_cast<int>(inputs.at("low_threshold")) : 100;
-        int high_threshold = inputs.count("high_threshold") ? std::any_cast<int>(inputs.at("high_threshold")) : 200;
+        ImagePtr src;
+        if (sd_error_t err = get_input(inputs, "image", src); is_error(err)) {
+            return err;
+        }
+        int low_threshold = get_input_opt<int>(inputs, "low_threshold", 100);
+        int high_threshold = get_input_opt<int>(inputs, "high_threshold", 200);
 
         if (!src || !src->data || src->channel != 3) {
             LOG_ERROR("[ERROR] CannyEdgePreprocessor: Requires RGB image\n");

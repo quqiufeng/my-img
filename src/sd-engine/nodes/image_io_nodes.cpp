@@ -30,7 +30,10 @@ class LoadImageNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        std::string image_path = std::any_cast<std::string>(inputs.at("image"));
+        std::string image_path;
+        if (sd_error_t err = get_input(inputs, "image", image_path); is_error(err)) {
+            return err;
+        }
 
         if (image_path.empty()) {
             LOG_ERROR("[ERROR] LoadImage: image path is required\n");
@@ -87,8 +90,11 @@ class LoadImageMaskNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        std::string image_path = std::any_cast<std::string>(inputs.at("image"));
-        std::string channel = inputs.count("channel") ? std::any_cast<std::string>(inputs.at("channel")) : "alpha";
+        std::string image_path;
+        if (sd_error_t err = get_input(inputs, "image", image_path); is_error(err)) {
+            return err;
+        }
+        std::string channel = get_input_opt<std::string>(inputs, "channel", "alpha");
 
         if (image_path.empty()) {
             LOG_ERROR("[ERROR] LoadImageMask: image path is required\n");
@@ -159,9 +165,12 @@ class SaveImageNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("images"));
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "images", image); is_error(err)) {
+            return err;
+        }
         std::string prefix =
-            inputs.count("filename_prefix") ? std::any_cast<std::string>(inputs.at("filename_prefix")) : "sd-engine";
+            get_input_opt<std::string>(inputs, "filename_prefix", "sd-engine");
 
         if (!image || !image->data) {
             LOG_ERROR("[ERROR] SaveImage: No image data\n");
@@ -206,7 +215,10 @@ class PreviewImageNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("images"));
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "images", image); is_error(err)) {
+            return err;
+        }
 
         if (!image || !image->data) {
             LOG_ERROR("[ERROR] PreviewImage: No image data\n");

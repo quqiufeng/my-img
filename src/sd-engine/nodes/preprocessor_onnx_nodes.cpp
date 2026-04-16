@@ -32,8 +32,14 @@ class ImageRemoveBackgroundNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        auto model = std::any_cast<std::shared_ptr<RemBGModel>>(inputs.at("model"));
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
+            return err;
+        }
+        std::shared_ptr<RemBGModel> model;
+        if (sd_error_t err = get_input(inputs, "model", model); is_error(err)) {
+            return err;
+        }
 
         if (!image || !image->data || !model || !model->session) {
             LOG_ERROR("[ERROR] ImageRemoveBackground: Missing inputs\n");
@@ -163,8 +169,14 @@ class LineArtPreprocessorNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr src = std::any_cast<ImagePtr>(inputs.at("image"));
-        auto preprocessor = std::any_cast<std::shared_ptr<LineArtPreprocessor>>(inputs.at("lineart_model"));
+        ImagePtr src;
+        if (sd_error_t err = get_input(inputs, "image", src); is_error(err)) {
+            return err;
+        }
+        std::shared_ptr<LineArtPreprocessor> preprocessor;
+        if (sd_error_t err = get_input(inputs, "lineart_model", preprocessor); is_error(err)) {
+            return err;
+        }
 
         if (!src || !src->data || src->channel != 3) {
             LOG_ERROR("[ERROR] LineArtPreprocessor: Requires RGB image\n");

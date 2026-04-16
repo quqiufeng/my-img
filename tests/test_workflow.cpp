@@ -519,17 +519,17 @@ TEST_CASE("ImageScale node resizes correctly", "[image_nodes]") {
     REQUIRE(loader != nullptr);
 
     // 创建一个 4x4 RGB 测试图像
-    uint8_t* data = (uint8_t*)malloc(4 * 4 * 3);
-    REQUIRE(data != nullptr);
+    auto buffer = make_malloc_buffer(4 * 4 * 3);
+    REQUIRE(buffer != nullptr);
     for (int i = 0; i < 4 * 4 * 3; i++) {
-        data[i] = (uint8_t)(i % 256);
+        buffer[i] = (uint8_t)(i % 256);
     }
     sd_image_t* img = acquire_image();
     REQUIRE(img != nullptr);
     img->width = 4;
     img->height = 4;
     img->channel = 3;
-    img->data = data;
+    img->data = buffer.release();
 
     NodeInputs load_inputs;
     load_inputs["image"] = std::string("dummy.png");
@@ -558,13 +558,13 @@ TEST_CASE("ImageScale node resizes correctly", "[image_nodes]") {
 }
 
 TEST_CASE("ImageCrop node crops correctly", "[image_nodes]") {
-    uint8_t* data = (uint8_t*)malloc(8 * 8 * 3);
-    REQUIRE(data != nullptr);
+    auto buffer = make_malloc_buffer(8 * 8 * 3);
+    REQUIRE(buffer != nullptr);
     for (int y = 0; y < 8; y++) {
         for (int x = 0; x < 8; x++) {
-            data[(y * 8 + x) * 3 + 0] = (uint8_t)x;
-            data[(y * 8 + x) * 3 + 1] = (uint8_t)y;
-            data[(y * 8 + x) * 3 + 2] = 0;
+            buffer[(y * 8 + x) * 3 + 0] = (uint8_t)x;
+            buffer[(y * 8 + x) * 3 + 1] = (uint8_t)y;
+            buffer[(y * 8 + x) * 3 + 2] = 0;
         }
     }
     sd_image_t* img = acquire_image();
@@ -572,7 +572,7 @@ TEST_CASE("ImageCrop node crops correctly", "[image_nodes]") {
     img->width = 8;
     img->height = 8;
     img->channel = 3;
-    img->data = data;
+    img->data = buffer.release();
 
     auto cropper = NodeRegistry::instance().create("ImageCrop");
     REQUIRE(cropper != nullptr);
@@ -600,15 +600,15 @@ TEST_CASE("ImageCrop node crops correctly", "[image_nodes]") {
 }
 
 TEST_CASE("ImageCrop node rejects invalid region", "[image_nodes]") {
-    uint8_t* data = (uint8_t*)malloc(4 * 4 * 3);
-    REQUIRE(data != nullptr);
-    memset(data, 0, 4 * 4 * 3);
+    auto buffer = make_malloc_buffer(4 * 4 * 3);
+    REQUIRE(buffer != nullptr);
+    memset(buffer.get(), 0, 4 * 4 * 3);
     sd_image_t* img = acquire_image();
     REQUIRE(img != nullptr);
     img->width = 4;
     img->height = 4;
     img->channel = 3;
-    img->data = data;
+    img->data = buffer.release();
 
     auto cropper = NodeRegistry::instance().create("ImageCrop");
     REQUIRE(cropper != nullptr);

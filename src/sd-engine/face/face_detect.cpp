@@ -8,6 +8,7 @@
 
 #include "face_detect.hpp"
 #include <cstring>
+#include "core/log.h"
 
 namespace sdengine {
 namespace face {
@@ -32,7 +33,7 @@ FaceDetectResult FaceDetector::detect(const uint8_t* rgb_data, int width, int he
     result.img_h = height;
 
     if (!session_) {
-        fprintf(stderr, "[ERROR] FaceDetector: Model not loaded\n");
+        LOG_ERROR("[ERROR] FaceDetector: Model not loaded\n");
         return result;
     }
 

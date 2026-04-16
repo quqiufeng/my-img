@@ -6,6 +6,7 @@
 // ============================================================================
 
 #include "core/node.h"
+#include "nodes/node_utils.h"
 #include <cstdio>
 #include <sstream>
 
@@ -30,7 +31,10 @@ class ConstantIntNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        int value = std::any_cast<int>(inputs.at("value"));
+        int value;
+        if (sd_error_t err = get_input(inputs, "value", value); is_error(err)) {
+            return err;
+        }
         outputs["value"] = value;
         return sd_error_t::OK;
     }
@@ -56,8 +60,14 @@ class AddIntNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        int a = std::any_cast<int>(inputs.at("a"));
-        int b = std::any_cast<int>(inputs.at("b"));
+        int a;
+        if (sd_error_t err = get_input(inputs, "a", a); is_error(err)) {
+            return err;
+        }
+        int b;
+        if (sd_error_t err = get_input(inputs, "b", b); is_error(err)) {
+            return err;
+        }
         outputs["result"] = a + b;
         return sd_error_t::OK;
     }
@@ -83,8 +93,14 @@ class MultiplyIntNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        int a = std::any_cast<int>(inputs.at("a"));
-        int b = std::any_cast<int>(inputs.at("b"));
+        int a;
+        if (sd_error_t err = get_input(inputs, "a", a); is_error(err)) {
+            return err;
+        }
+        int b;
+        if (sd_error_t err = get_input(inputs, "b", b); is_error(err)) {
+            return err;
+        }
         outputs["result"] = a * b;
         return sd_error_t::OK;
     }
@@ -111,8 +127,11 @@ class PrintIntNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
-        int value = std::any_cast<int>(inputs.at("value"));
-        printf("[PrintInt] Result: %d\n", value);
+        int value;
+        if (sd_error_t err = get_input(inputs, "value", value); is_error(err)) {
+            return err;
+        }
+        LOG_INFO("[PrintInt] Result: %d\n", value);
         return sd_error_t::OK;
     }
 };

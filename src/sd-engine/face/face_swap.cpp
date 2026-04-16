@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include "core/log.h"
 
 namespace sdengine {
 namespace face {
@@ -36,7 +37,7 @@ bool FaceSwapper::load(const std::string& inswapper_path, const std::string& arc
 std::vector<float> FaceSwapper::extract_embedding(const uint8_t* rgb_128) {
     std::vector<float> embedding;
     if (!arcface_session_) {
-        fprintf(stderr, "[ERROR] FaceSwapper::extract_embedding: ArcFace not loaded\n");
+        LOG_ERROR("[ERROR] FaceSwapper::extract_embedding: ArcFace not loaded\n");
         return embedding;
     }
 
@@ -104,13 +105,13 @@ std::vector<float> FaceSwapper::extract_embedding(const uint8_t* rgb_128) {
     }
 
     if (output_tensors.empty() || !output_tensors[0].IsTensor()) {
-        fprintf(stderr, "[ERROR] FaceSwapper::extract_embedding: Invalid output\n");
+        LOG_ERROR("[ERROR] FaceSwapper::extract_embedding: Invalid output\n");
         return embedding;
     }
 
     auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
     if (output_shape.size() != 2 || output_shape[0] != 1 || output_shape[1] != 512) {
-        fprintf(stderr, "[ERROR] FaceSwapper::extract_embedding: Unexpected output shape [%ld, %ld]\n",
+        LOG_ERROR("[ERROR] FaceSwapper::extract_embedding: Unexpected output shape [%ld, %ld]\n",
                 output_shape[0], output_shape[1]);
         return embedding;
     }
@@ -123,14 +124,14 @@ std::vector<float> FaceSwapper::extract_embedding(const uint8_t* rgb_128) {
 SwapResult FaceSwapper::swap(const uint8_t* target_rgb_128, const uint8_t* source_rgb_128) {
     SwapResult result;
     if (!inswapper_session_ || !arcface_session_) {
-        fprintf(stderr, "[ERROR] FaceSwapper::swap: Models not loaded\n");
+        LOG_ERROR("[ERROR] FaceSwapper::swap: Models not loaded\n");
         return result;
     }
 
     // 1. 提取 source 的 embedding
     std::vector<float> embedding = extract_embedding(source_rgb_128);
     if (embedding.empty()) {
-        fprintf(stderr, "[ERROR] FaceSwapper::swap: Failed to extract embedding\n");
+        LOG_ERROR("[ERROR] FaceSwapper::swap: Failed to extract embedding\n");
         return result;
     }
 
@@ -191,7 +192,7 @@ SwapResult FaceSwapper::swap(const uint8_t* target_rgb_128, const uint8_t* sourc
     }
 
     if (output_tensors.empty() || !output_tensors[0].IsTensor()) {
-        fprintf(stderr, "[ERROR] FaceSwapper::swap: Invalid output\n");
+        LOG_ERROR("[ERROR] FaceSwapper::swap: Invalid output\n");
         return result;
     }
 
@@ -199,7 +200,7 @@ SwapResult FaceSwapper::swap(const uint8_t* target_rgb_128, const uint8_t* sourc
     auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
     if (output_shape.size() != 4 || output_shape[0] != 1 || output_shape[1] != 3 ||
         output_shape[2] != 128 || output_shape[3] != 128) {
-        fprintf(stderr, "[ERROR] FaceSwapper::swap: Unexpected output shape [%ld, %ld, %ld, %ld]\n",
+        LOG_ERROR("[ERROR] FaceSwapper::swap: Unexpected output shape [%ld, %ld, %ld, %ld]\n",
                 output_shape[0], output_shape[1], output_shape[2], output_shape[3]);
         return result;
     }
@@ -219,7 +220,7 @@ SwapResult FaceSwapper::swap(const uint8_t* target_rgb_128, const uint8_t* sourc
     }
 
     result.success = true;
-    printf("[FaceSwapper] Swapped face successfully\n");
+    LOG_INFO("[FaceSwapper] Swapped face successfully\n");
     return result;
 }
 

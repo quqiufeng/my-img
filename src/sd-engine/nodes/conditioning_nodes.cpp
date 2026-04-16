@@ -31,7 +31,7 @@ class CLIPSetLastLayerNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "clip");
-        int clip_skip = inputs.count("stop_at_clip_layer") ? std::any_cast<int>(inputs.at("stop_at_clip_layer")) : -1;
+        int clip_skip = get_input_opt<int>(inputs, "stop_at_clip_layer", -1);
 
         if (!sd_ctx) {
             LOG_ERROR("[ERROR] CLIPSetLastLayer: Missing CLIP\n");
@@ -74,7 +74,10 @@ class CLIPVisionEncodeNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "clip");
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
+            return err;
+        }
 
         if (!sd_ctx || !image || !image->data) {
             LOG_ERROR("[ERROR] CLIPVisionEncode: Missing inputs\n");
@@ -117,8 +120,11 @@ class CLIPTextEncodeNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        std::string text = std::any_cast<std::string>(inputs.at("text"));
-        int clip_skip = inputs.count("clip_skip") ? std::any_cast<int>(inputs.at("clip_skip")) : -1;
+        std::string text;
+        if (sd_error_t err = get_input(inputs, "text", text); is_error(err)) {
+            return err;
+        }
+        int clip_skip = get_input_opt<int>(inputs, "clip_skip", -1);
 
         sd_ctx_t* sd_ctx = nullptr;
         const auto& clip_val = inputs.at("clip");
@@ -172,8 +178,14 @@ class ConditioningCombineNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ConditioningPtr cond1 = std::any_cast<ConditioningPtr>(inputs.at("conditioning_1"));
-        ConditioningPtr cond2 = std::any_cast<ConditioningPtr>(inputs.at("conditioning_2"));
+        ConditioningPtr cond1;
+        if (sd_error_t err = get_input(inputs, "conditioning_1", cond1); is_error(err)) {
+            return err;
+        }
+        ConditioningPtr cond2;
+        if (sd_error_t err = get_input(inputs, "conditioning_2", cond2); is_error(err)) {
+            return err;
+        }
 
         if (!cond1 || !cond2) {
             LOG_ERROR("[ERROR] ConditioningCombine: Missing inputs\n");
@@ -215,8 +227,14 @@ class ConditioningConcatNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ConditioningPtr cond_to = std::any_cast<ConditioningPtr>(inputs.at("conditioning_to"));
-        ConditioningPtr cond_from = std::any_cast<ConditioningPtr>(inputs.at("conditioning_from"));
+        ConditioningPtr cond_to;
+        if (sd_error_t err = get_input(inputs, "conditioning_to", cond_to); is_error(err)) {
+            return err;
+        }
+        ConditioningPtr cond_from;
+        if (sd_error_t err = get_input(inputs, "conditioning_from", cond_from); is_error(err)) {
+            return err;
+        }
 
         if (!cond_to || !cond_from) {
             LOG_ERROR("[ERROR] ConditioningConcat: Missing inputs\n");
@@ -259,11 +277,15 @@ class ConditioningAverageNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ConditioningPtr cond_to = std::any_cast<ConditioningPtr>(inputs.at("conditioning_to"));
-        ConditioningPtr cond_from = std::any_cast<ConditioningPtr>(inputs.at("conditioning_from"));
-        float strength = inputs.count("conditioning_to_strength")
-                             ? std::any_cast<float>(inputs.at("conditioning_to_strength"))
-                             : 1.0f;
+        ConditioningPtr cond_to;
+        if (sd_error_t err = get_input(inputs, "conditioning_to", cond_to); is_error(err)) {
+            return err;
+        }
+        ConditioningPtr cond_from;
+        if (sd_error_t err = get_input(inputs, "conditioning_from", cond_from); is_error(err)) {
+            return err;
+        }
+        float strength = get_input_opt<float>(inputs, "conditioning_to_strength", 1.0f);
 
         if (!cond_to || !cond_from) {
             LOG_ERROR("[ERROR] ConditioningAverage: Missing inputs\n");
@@ -307,9 +329,15 @@ class ControlNetApplyNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ConditioningPtr cond = std::any_cast<ConditioningPtr>(inputs.at("conditioning"));
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        float strength = inputs.count("strength") ? std::any_cast<float>(inputs.at("strength")) : 1.0f;
+        ConditioningPtr cond;
+        if (sd_error_t err = get_input(inputs, "conditioning", cond); is_error(err)) {
+            return err;
+        }
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
+            return err;
+        }
+        float strength = get_input_opt<float>(inputs, "strength", 1.0f);
 
         if (!cond) {
             LOG_ERROR("[ERROR] ControlNetApply: Missing conditioning\n");
@@ -351,10 +379,19 @@ class IPAdapterApplyNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ConditioningPtr cond = std::any_cast<ConditioningPtr>(inputs.at("conditioning"));
-        IPAdapterInfo info = std::any_cast<IPAdapterInfo>(inputs.at("ipadapter"));
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        float strength = inputs.count("strength") ? std::any_cast<float>(inputs.at("strength")) : 1.0f;
+        ConditioningPtr cond;
+        if (sd_error_t err = get_input(inputs, "conditioning", cond); is_error(err)) {
+            return err;
+        }
+        IPAdapterInfo info;
+        if (sd_error_t err = get_input(inputs, "ipadapter", info); is_error(err)) {
+            return err;
+        }
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
+            return err;
+        }
+        float strength = get_input_opt<float>(inputs, "strength", 1.0f);
 
         if (!cond) {
             LOG_ERROR("[ERROR] IPAdapterApply: Missing conditioning\n");

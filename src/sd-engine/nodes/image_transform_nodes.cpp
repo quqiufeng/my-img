@@ -33,10 +33,19 @@ class ImageScaleNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr src_image = std::any_cast<ImagePtr>(inputs.at("image"));
-        int target_width = std::any_cast<int>(inputs.at("width"));
-        int target_height = std::any_cast<int>(inputs.at("height"));
-        std::string method = inputs.count("method") ? std::any_cast<std::string>(inputs.at("method")) : "bilinear";
+        ImagePtr src_image;
+        if (sd_error_t err = get_input(inputs, "image", src_image); is_error(err)) {
+            return err;
+        }
+        int target_width;
+        if (sd_error_t err = get_input(inputs, "width", target_width); is_error(err)) {
+            return err;
+        }
+        int target_height;
+        if (sd_error_t err = get_input(inputs, "height", target_height); is_error(err)) {
+            return err;
+        }
+        std::string method = get_input_opt<std::string>(inputs, "method", "bilinear");
 
         if (!src_image || !src_image->data) {
             LOG_ERROR("[ERROR] ImageScale: No source image\n");
@@ -114,11 +123,26 @@ class ImageCropNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr src_image = std::any_cast<ImagePtr>(inputs.at("image"));
-        int crop_x = std::any_cast<int>(inputs.at("x"));
-        int crop_y = std::any_cast<int>(inputs.at("y"));
-        int crop_width = std::any_cast<int>(inputs.at("width"));
-        int crop_height = std::any_cast<int>(inputs.at("height"));
+        ImagePtr src_image;
+        if (sd_error_t err = get_input(inputs, "image", src_image); is_error(err)) {
+            return err;
+        }
+        int crop_x;
+        if (sd_error_t err = get_input(inputs, "x", crop_x); is_error(err)) {
+            return err;
+        }
+        int crop_y;
+        if (sd_error_t err = get_input(inputs, "y", crop_y); is_error(err)) {
+            return err;
+        }
+        int crop_width;
+        if (sd_error_t err = get_input(inputs, "width", crop_width); is_error(err)) {
+            return err;
+        }
+        int crop_height;
+        if (sd_error_t err = get_input(inputs, "height", crop_height); is_error(err)) {
+            return err;
+        }
 
         if (!src_image || !src_image->data) {
             LOG_ERROR("[ERROR] ImageCrop: No source image\n");
@@ -184,8 +208,14 @@ class ImageUpscaleWithModelNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        UpscalerPtr upscaler = std::any_cast<UpscalerPtr>(inputs.at("upscale_model"));
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
+            return err;
+        }
+        UpscalerPtr upscaler;
+        if (sd_error_t err = get_input(inputs, "upscale_model", upscaler); is_error(err)) {
+            return err;
+        }
 
         if (!image || !image->data) {
             LOG_ERROR("[ERROR] ImageUpscaleWithModel: No image data\n");

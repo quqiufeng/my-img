@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include "core/log.h"
 
 namespace sdengine {
 namespace face {
@@ -37,7 +38,7 @@ bool FaceRestorer::load(const std::string& model_path, RestoreModelType type) {
 RestoreResult FaceRestorer::restore(const uint8_t* rgb_512, float codeformer_fidelity) {
     RestoreResult result;
     if (!session_) {
-        fprintf(stderr, "[ERROR] FaceRestorer::restore: Model not loaded\n");
+        LOG_ERROR("[ERROR] FaceRestorer::restore: Model not loaded\n");
         return result;
     }
 
@@ -108,7 +109,7 @@ RestoreResult FaceRestorer::restore(const uint8_t* rgb_512, float codeformer_fid
     }
 
     if (output_tensors.empty() || !output_tensors[0].IsTensor()) {
-        fprintf(stderr, "[ERROR] FaceRestorer::restore: Invalid output\n");
+        LOG_ERROR("[ERROR] FaceRestorer::restore: Invalid output\n");
         return result;
     }
 
@@ -117,7 +118,7 @@ RestoreResult FaceRestorer::restore(const uint8_t* rgb_512, float codeformer_fid
     auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
     if (output_shape.size() != 4 || output_shape[0] != 1 || output_shape[1] != 3 ||
         output_shape[2] != 512 || output_shape[3] != 512) {
-        fprintf(stderr, "[ERROR] FaceRestorer::restore: Unexpected output shape [%ld, %ld, %ld, %ld]\n",
+        LOG_ERROR("[ERROR] FaceRestorer::restore: Unexpected output shape [%ld, %ld, %ld, %ld]\n",
                 output_shape[0], output_shape[1], output_shape[2], output_shape[3]);
         return result;
     }
@@ -137,7 +138,7 @@ RestoreResult FaceRestorer::restore(const uint8_t* rgb_512, float codeformer_fid
     }
 
     result.success = true;
-    printf("[FaceRestorer] Restored face successfully\n");
+    LOG_INFO("[FaceRestorer] Restored face successfully\n");
     return result;
 }
 

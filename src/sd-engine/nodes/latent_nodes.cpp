@@ -30,8 +30,14 @@ class EmptyLatentImageNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        int width = std::any_cast<int>(inputs.at("width"));
-        int height = std::any_cast<int>(inputs.at("height"));
+        int width;
+        if (sd_error_t err = get_input(inputs, "width", width); is_error(err)) {
+            return err;
+        }
+        int height;
+        if (sd_error_t err = get_input(inputs, "height", height); is_error(err)) {
+            return err;
+        }
 
         sd_latent_t* latent = sd_create_empty_latent(nullptr, width, height);
         if (!latent) {
@@ -66,7 +72,10 @@ class VAEEncodeNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_image_t image = std::any_cast<sd_image_t>(inputs.at("pixels"));
+        sd_image_t image;
+        if (sd_error_t err = get_input(inputs, "pixels", image); is_error(err)) {
+            return err;
+        }
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "vae");
 
         if (!image.data) {
@@ -108,7 +117,10 @@ class VAEDecodeNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        LatentPtr latent = std::any_cast<LatentPtr>(inputs.at("samples"));
+        LatentPtr latent;
+        if (sd_error_t err = get_input(inputs, "samples", latent); is_error(err)) {
+            return err;
+        }
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "vae");
 
         if (!latent) {
@@ -164,13 +176,13 @@ class KSamplerNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "model");
-        int64_t seed = inputs.count("seed") ? std::any_cast<int>(inputs.at("seed")) : 0;
-        int steps = inputs.count("steps") ? std::any_cast<int>(inputs.at("steps")) : 20;
-        float cfg = inputs.count("cfg") ? std::any_cast<float>(inputs.at("cfg")) : 8.0f;
+        int64_t seed = get_input_opt<int>(inputs, "seed", 0);
+        int steps = get_input_opt<int>(inputs, "steps", 20);
+        float cfg = get_input_opt<float>(inputs, "cfg", 8.0f);
         std::string sampler_name =
-            inputs.count("sampler_name") ? std::any_cast<std::string>(inputs.at("sampler_name")) : "euler";
+            get_input_opt<std::string>(inputs, "sampler_name", "euler");
         std::string scheduler_name =
-            inputs.count("scheduler") ? std::any_cast<std::string>(inputs.at("scheduler")) : "normal";
+            get_input_opt<std::string>(inputs, "scheduler", "normal");
 
         if (!sd_ctx) {
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -243,16 +255,16 @@ class KSamplerAdvancedNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "model");
-        int64_t seed = inputs.count("seed") ? std::any_cast<int>(inputs.at("seed")) : 0;
-        int steps = inputs.count("steps") ? std::any_cast<int>(inputs.at("steps")) : 20;
-        float cfg = inputs.count("cfg") ? std::any_cast<float>(inputs.at("cfg")) : 8.0f;
+        int64_t seed = get_input_opt<int>(inputs, "seed", 0);
+        int steps = get_input_opt<int>(inputs, "steps", 20);
+        float cfg = get_input_opt<float>(inputs, "cfg", 8.0f);
         std::string sampler_name =
-            inputs.count("sampler_name") ? std::any_cast<std::string>(inputs.at("sampler_name")) : "euler";
+            get_input_opt<std::string>(inputs, "sampler_name", "euler");
         std::string scheduler_name =
-            inputs.count("scheduler") ? std::any_cast<std::string>(inputs.at("scheduler")) : "normal";
-        int start_at_step = inputs.count("start_at_step") ? std::any_cast<int>(inputs.at("start_at_step")) : 0;
-        int end_at_step = inputs.count("end_at_step") ? std::any_cast<int>(inputs.at("end_at_step")) : 10000;
-        bool add_noise = inputs.count("add_noise") ? std::any_cast<bool>(inputs.at("add_noise")) : true;
+            get_input_opt<std::string>(inputs, "scheduler", "normal");
+        int start_at_step = get_input_opt<int>(inputs, "start_at_step", 0);
+        int end_at_step = get_input_opt<int>(inputs, "end_at_step", 10000);
+        bool add_noise = get_input_opt<bool>(inputs, "add_noise", true);
 
         if (!sd_ctx) {
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -327,20 +339,23 @@ class DeepHighResFixNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "model");
-        ConditioningPtr positive = std::any_cast<ConditioningPtr>(inputs.at("positive"));
+        ConditioningPtr positive;
+        if (sd_error_t err = get_input(inputs, "positive", positive); is_error(err)) {
+            return err;
+        }
         ConditioningPtr negative =
-            inputs.count("negative") ? std::any_cast<ConditioningPtr>(inputs.at("negative")) : nullptr;
+            get_input_opt<ConditioningPtr>(inputs, "negative", nullptr);
 
-        int64_t seed = inputs.count("seed") ? std::any_cast<int>(inputs.at("seed")) : 0;
-        int total_steps = inputs.count("steps") ? std::any_cast<int>(inputs.at("steps")) : 30;
-        float cfg = inputs.count("cfg") ? std::any_cast<float>(inputs.at("cfg")) : 7.0f;
-        int target_width = inputs.count("target_width") ? std::any_cast<int>(inputs.at("target_width")) : 1024;
-        int target_height = inputs.count("target_height") ? std::any_cast<int>(inputs.at("target_height")) : 1024;
-        float strength = inputs.count("strength") ? std::any_cast<float>(inputs.at("strength")) : 1.0f;
-        float phase1_cfg = inputs.count("phase1_cfg") ? std::any_cast<float>(inputs.at("phase1_cfg")) : 0.0f;
-        float phase2_cfg = inputs.count("phase2_cfg") ? std::any_cast<float>(inputs.at("phase2_cfg")) : 0.0f;
-        float phase3_cfg = inputs.count("phase3_cfg") ? std::any_cast<float>(inputs.at("phase3_cfg")) : 0.0f;
-        bool vae_tiling = inputs.count("vae_tiling") ? std::any_cast<bool>(inputs.at("vae_tiling")) : false;
+        int64_t seed = get_input_opt<int>(inputs, "seed", 0);
+        int total_steps = get_input_opt<int>(inputs, "steps", 30);
+        float cfg = get_input_opt<float>(inputs, "cfg", 7.0f);
+        int target_width = get_input_opt<int>(inputs, "target_width", 1024);
+        int target_height = get_input_opt<int>(inputs, "target_height", 1024);
+        float strength = get_input_opt<float>(inputs, "strength", 1.0f);
+        float phase1_cfg = get_input_opt<float>(inputs, "phase1_cfg", 0.0f);
+        float phase2_cfg = get_input_opt<float>(inputs, "phase2_cfg", 0.0f);
+        float phase3_cfg = get_input_opt<float>(inputs, "phase3_cfg", 0.0f);
+        bool vae_tiling = get_input_opt<bool>(inputs, "vae_tiling", false);
 
         if (!sd_ctx || !positive) {
             LOG_ERROR("[ERROR] DeepHighResFix: Missing required inputs\n");
@@ -387,9 +402,9 @@ class DeepHighResFixNode : public Node {
         sd_img_gen_params_init(&gen_params);
 
         std::string positive_text =
-            inputs.count("positive_text") ? std::any_cast<std::string>(inputs.at("positive_text")) : "";
+            get_input_opt<std::string>(inputs, "positive_text", "");
         std::string negative_text =
-            inputs.count("negative_text") ? std::any_cast<std::string>(inputs.at("negative_text")) : "";
+            get_input_opt<std::string>(inputs, "negative_text", "");
         gen_params.prompt = positive_text.c_str();
         gen_params.negative_prompt = negative_text.c_str();
         gen_params.width = phase1_w;
@@ -402,7 +417,10 @@ class DeepHighResFixNode : public Node {
         gen_params.sample_params.guidance.txt_cfg = cfg;
 
         if (inputs.count("init_image")) {
-            ImagePtr init_img = std::any_cast<ImagePtr>(inputs.at("init_image"));
+            ImagePtr init_img;
+            if (sd_error_t err = get_input(inputs, "init_image", init_img); is_error(err)) {
+                return err;
+            }
             if (init_img && init_img->data) {
                 gen_params.init_image = *init_img;
             }

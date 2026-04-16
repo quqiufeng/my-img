@@ -14,6 +14,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "core/log.h"
 
 using namespace sdengine;
 
@@ -237,7 +238,7 @@ int main(int argc, char** argv) {
                       (quick_process ? 1 : 0) + (quick_deep_hires ? 1 : 0);
     
     if (quick_modes > 1) {
-        printf("Error: Only one quick mode can be used at a time\n");
+        LOG_ERROR("[ERROR] Only one quick mode can be used at a time\n");
         return 1;
     }
     
@@ -247,7 +248,7 @@ int main(int argc, char** argv) {
     if (is_quick_mode) {
         if (quick_txt2img) {
             if (!model_path) {
-                printf("Error: --model is required for txt2img mode\n");
+                LOG_ERROR("[ERROR] --model is required for txt2img mode\n");
                 return 1;
             }
             json_str = Txt2ImgBuilder::build(model_path, prompt, negative_prompt,
@@ -255,7 +256,7 @@ int main(int argc, char** argv) {
             printf("Generated txt2img workflow\n");
         } else if (quick_img2img) {
             if (!model_path || !input_image) {
-                printf("Error: --model and --input are required for img2img mode\n");
+                LOG_ERROR("[ERROR] --model and --input are required for img2img mode\n");
                 return 1;
             }
             json_str = Img2ImgBuilder::build(model_path, input_image, prompt, negative_prompt,
@@ -263,7 +264,7 @@ int main(int argc, char** argv) {
             printf("Generated img2img workflow\n");
         } else if (quick_process) {
             if (!input_image) {
-                printf("Error: --input is required for process mode\n");
+                LOG_ERROR("[ERROR] --input is required for process mode\n");
                 return 1;
             }
             json_str = ImageProcessBuilder::build(input_image, scale_w, scale_h,
@@ -271,7 +272,7 @@ int main(int argc, char** argv) {
             printf("Generated image process workflow\n");
         } else if (quick_deep_hires) {
             if (!model_path) {
-                printf("Error: --model is required for deep-hires mode\n");
+                LOG_ERROR("[ERROR] --model is required for deep-hires mode\n");
                 return 1;
             }
             std::string img_input = input_image ? input_image : "";
@@ -292,14 +293,14 @@ int main(int argc, char** argv) {
                 fclose(f);
                 printf("Saved workflow to: %s\n", save_json);
             } else {
-                printf("Warning: Failed to save workflow to %s\n", save_json);
+                LOG_WARN("[WARN] Failed to save workflow to %s\n", save_json);
             }
         }
     } else if (workflow_file) {
         // Normal workflow file mode
         printf("Loading workflow: %s\n", workflow_file);
     } else {
-        printf("Error: Either --workflow or a quick mode (--txt2img/--img2img/--process) is required\n");
+        LOG_ERROR("[ERROR] Either --workflow or a quick mode (--txt2img/--img2img/--process) is required\n");
         print_usage(argv[0]);
         return 1;
     }
@@ -314,7 +315,7 @@ int main(int argc, char** argv) {
     }
     
     if (!loaded) {
-        printf("Error: Failed to load workflow\n");
+        LOG_ERROR("[ERROR] Failed to load workflow\n");
         return 1;
     }
     

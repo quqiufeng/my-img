@@ -37,10 +37,15 @@ class FaceRestoreWithModelNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        auto restorer = std::any_cast<std::shared_ptr<face::FaceRestorer>>(inputs.at("face_restore_model"));
-        float fidelity =
-            inputs.count("codeformer_fidelity") ? std::any_cast<float>(inputs.at("codeformer_fidelity")) : 0.5f;
+        ImagePtr image;
+        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
+            return err;
+        }
+        std::shared_ptr<face::FaceRestorer> restorer;
+        if (sd_error_t err = get_input(inputs, "face_restore_model", restorer); is_error(err)) {
+            return err;
+        }
+        float fidelity = get_input_opt<float>(inputs, "codeformer_fidelity", 0.5f);
 
         if (!image || !image->data || !restorer) {
             LOG_ERROR("[ERROR] FaceRestoreWithModel: Missing inputs\n");
@@ -55,7 +60,9 @@ class FaceRestoreWithModelNode : public Node {
 
         std::shared_ptr<face::FaceDetector> detector;
         if (inputs.count("face_detect_model")) {
-            detector = std::any_cast<std::shared_ptr<face::FaceDetector>>(inputs.at("face_detect_model"));
+            if (sd_error_t err = get_input(inputs, "face_detect_model", detector); is_error(err)) {
+                return err;
+            }
         }
 
         std::vector<uint8_t> rgb_data(image->width * image->height * 3);
