@@ -302,3 +302,132 @@ TEST_CASE("ImageBlend node blends two images", "[image_nodes]") {
     REQUIRE(result != nullptr);
     REQUIRE(result->data[0] == 128); // 255 * 0.5 + 0 * 0.5
 }
+
+TEST_CASE("ImageCompositeMasked basic composite", "[image_nodes]") {
+    auto dst_buf = make_malloc_buffer(4 * 4 * 3);
+    auto src_buf = make_malloc_buffer(2 * 2 * 3);
+    REQUIRE(dst_buf != nullptr);
+    REQUIRE(src_buf != nullptr);
+    memset(dst_buf.get(), 0, 4 * 4 * 3);
+    memset(src_buf.get(), 255, 2 * 2 * 3);
+
+    sd_image_t* dst = acquire_image();
+    sd_image_t* src = acquire_image();
+    REQUIRE(dst != nullptr);
+    REQUIRE(src != nullptr);
+    dst->width = 4;
+    dst->height = 4;
+    dst->channel = 3;
+    dst->data = dst_buf.release();
+    src->width = 2;
+    src->height = 2;
+    src->channel = 3;
+    src->data = src_buf.release();
+
+    auto node = NodeRegistry::instance().create("ImageCompositeMasked");
+    REQUIRE(node != nullptr);
+
+    NodeInputs inputs;
+    inputs["destination"] = make_image_ptr(dst);
+    inputs["source"] = make_image_ptr(src);
+    inputs["x"] = 1;
+    inputs["y"] = 1;
+
+    NodeOutputs outputs;
+    sd_error_t err = node->execute(inputs, outputs);
+    REQUIRE(is_ok(err));
+
+    ImagePtr result = std::any_cast<ImagePtr>(outputs["IMAGE"]);
+    REQUIRE(result != nullptr);
+    REQUIRE(result->width == 4);
+    REQUIRE(result->height == 4);
+    // Spot (1,1) should be blended with source (white)
+    REQUIRE(result->data[(1 * 4 + 1) * 3 + 0] == 255);
+}
+
+TEST_CASE("ImageCompositeMasked with mask", "[image_nodes]") {
+    auto dst_buf = make_malloc_buffer(2 * 2 * 3);
+    auto src_buf = make_malloc_buffer(2 * 2 * 3);
+    auto mask_buf = make_malloc_buffer(2 * 2 * 1);
+    REQUIRE(dst_buf != nullptr);
+    REQUIRE(src_buf != nullptr);
+    REQUIRE(mask_buf != nullptr);
+    memset(dst_buf.get(), 0, 2 * 2 * 3);
+    memset(src_buf.get(), 255, 2 * 2 * 3);
+    mask_buf[0] = 0;
+    mask_buf[1] = 255;
+    mask_buf[2] = 0;
+    mask_buf[3] = 255;
+
+    sd_image_t* dst = acquire_image();
+    sd_image_t* src = acquire_image();
+    sd_image_t* mask = acquire_image();
+    REQUIRE(dst != nullptr);
+    REQUIRE(src != nullptr);
+    REQUIRE(mask != nullptr);
+    dst->width = 2;
+    dst->height = 2;
+    dst->channel = 3;
+    dst->data = dst_buf.release();
+    src->width = 2;
+    src->height = 2;
+    src->channel = 3;
+    src->data = src_buf.release();
+    mask->width = 2;
+    mask->height = 2;
+    mask->channel = 1;
+    mask->data = mask_buf.release();
+
+    auto node = NodeRegistry::instance().create("ImageCompositeMasked");
+    REQUIRE(node != nullptr);
+
+    NodeInputs inputs;
+    inputs["destination"] = make_image_ptr(dst);
+    inputs["source"] = make_image_ptr(src);
+    inputs["x"] = 0;
+    inputs["y"] = 0;
+    inputs["mask"] = make_image_ptr(mask);
+
+    NodeOutputs outputs;
+    sd_error_t err = node->execute(inputs, outputs);
+    REQUIRE(is_ok(err));
+
+    ImagePtr result = std::any_cast<ImagePtr>(outputs["IMAGE"]);
+    REQUIRE(result != nullptr);
+    // Pixel with mask=0 stays dst (0), pixel with mask=255 becomes src (255)
+    REQUIRE(result->data[0] == 0);
+    REQUIRE(result->data[3] == 255);
+}
+
+TEST_CASE("ImageCompositeMasked rejects missing inputs", "[image_nodes]") {
+    auto node = NodeRegistry::instance().create("ImageCompositeMasked");
+    REQUIRE(node != nullptr);
+
+    NodeInputs inputs;
+    NodeOutputs outputs;
+    sd_error_t err = node->execute(inputs, outputs);
+    REQUIRE(is_error(err));
+}
+
+TEST_CASE("ImageUpscaleWithModel rejects missing inputs", "[image_nodes]") {
+    auto node = NodeRegistry::instance().create("ImageUpscaleWithModel");
+    REQUIRE(node != nullptr);
+
+    NodeInputs inputs;
+    NodeOutputs outputs;
+    sd_error_t err = node->execute(inputs, outputs);
+    REQUIRE(is_error(err));
+}
+
+TEST_CASE("ImageUpscaleWithModel rejects null image", "[image_nodes]") {
+    auto node = NodeRegistry::instance().create("ImageUpscaleWithModel");
+    REQUIRE(node != nullptr);
+
+    NodeInputs inputs;
+    inputs["image"] = ImagePtr{};            // null
+    inputs["upscale_model"] = UpscalerPtr{}; // null
+
+    NodeOutputs outputs;
+    sd_error_t err = node->execute(inputs, outputs);
+    REQUIRE(is_error(err));
+}
