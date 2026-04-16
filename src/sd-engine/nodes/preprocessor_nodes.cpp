@@ -89,21 +89,20 @@ class CannyEdgePreprocessorNode : public Node {
             dst_data[i * 3 + 2] = val;
         }
 
-        uint8_t* final_data = (uint8_t*)malloc(dst_data.size());
+        auto final_data = make_malloc_buffer(dst_data.size());
         if (!final_data) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data, dst_data.data(), dst_data.size());
+        memcpy(final_data.get(), dst_data.data(), dst_data.size());
 
         sd_image_t dst_image = {};
         dst_image.width = w;
         dst_image.height = h;
         dst_image.channel = 3;
-        dst_image.data = final_data;
+        dst_image.data = final_data.release();
 
         sd_image_t* result = acquire_image();
         if (!result) {
-            free(final_data);
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         *result = dst_image;
@@ -220,38 +219,36 @@ class ImageRemoveBackgroundNode : public Node {
             rgba_data[i * 4 + 3] = mask_resized[i];
         }
 
-        uint8_t* final_rgba = (uint8_t*)malloc(rgba_data.size());
+        auto final_rgba = make_malloc_buffer(rgba_data.size());
         if (!final_rgba) {
             LOG_ERROR("[ERROR] ImageRemoveBackground: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_rgba, rgba_data.data(), rgba_data.size());
+        memcpy(final_rgba.get(), rgba_data.data(), rgba_data.size());
 
         sd_image_t* result_img = acquire_image();
         if (!result_img) {
-            free(final_rgba);
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         result_img->width = src_w;
         result_img->height = src_h;
         result_img->channel = 4;
-        result_img->data = final_rgba;
+        result_img->data = final_rgba.release();
 
-        uint8_t* final_mask = (uint8_t*)malloc(src_w * src_h);
+        auto final_mask = make_malloc_buffer(src_w * src_h);
         if (!final_mask) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_mask, mask_resized.data(), src_w * src_h);
+        memcpy(final_mask.get(), mask_resized.data(), src_w * src_h);
 
         sd_image_t* mask_img = acquire_image();
         if (!mask_img) {
-            free(final_mask);
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         mask_img->width = src_w;
         mask_img->height = src_h;
         mask_img->channel = 1;
-        mask_img->data = final_mask;
+        mask_img->data = final_mask.release();
 
         outputs["IMAGE"] = make_image_ptr(result_img);
         outputs["MASK"] = make_image_ptr(mask_img);
@@ -303,21 +300,20 @@ class LineArtPreprocessorNode : public Node {
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        uint8_t* final_data = (uint8_t*)malloc(result.data.size());
+        auto final_data = make_malloc_buffer(result.data.size());
         if (!final_data) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data, result.data.data(), result.data.size());
+        memcpy(final_data.get(), result.data.data(), result.data.size());
 
         sd_image_t dst_image = {};
         dst_image.width = result.width;
         dst_image.height = result.height;
         dst_image.channel = 3;
-        dst_image.data = final_data;
+        dst_image.data = final_data.release();
 
         sd_image_t* image_result = acquire_image();
         if (!image_result) {
-            free(final_data);
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         *image_result = dst_image;

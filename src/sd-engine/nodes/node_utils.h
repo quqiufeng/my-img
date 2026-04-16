@@ -52,11 +52,10 @@ inline std::vector<uint8_t> convert_rgba_to_rgb(const uint8_t* src, int w, int h
     return dst;
 }
 
-/// 从已分配的 data 创建 ImagePtr（失败时释放 data 并返回错误）
-inline ImagePtr create_image_ptr(int w, int h, int c, uint8_t* data, sd_error_t* out_err = nullptr) {
+/// 从已分配的 data 创建 ImagePtr（失败时自动释放 data 并返回错误）
+inline ImagePtr create_image_ptr(int w, int h, int c, MallocBuffer&& buffer, sd_error_t* out_err = nullptr) {
     sd_image_t* img = acquire_image();
     if (!img) {
-        free(data);
         if (out_err)
             *out_err = sd_error_t::ERROR_MEMORY_ALLOCATION;
         return nullptr;
@@ -64,7 +63,7 @@ inline ImagePtr create_image_ptr(int w, int h, int c, uint8_t* data, sd_error_t*
     img->width = w;
     img->height = h;
     img->channel = c;
-    img->data = data;
+    img->data = buffer.release();
     return make_image_ptr(img);
 }
 

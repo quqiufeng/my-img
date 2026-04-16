@@ -13,9 +13,25 @@
 #include "object_pool.h"
 #include "stable-diffusion-ext.h"
 #include "stable-diffusion.h"
+#include <cstdlib>
 #include <memory>
 
 namespace sdengine {
+
+// ============================================================================
+// RAII wrapper for malloc-allocated pixel buffers
+// ============================================================================
+
+/// @brief std::unique_ptr wrapper for buffers allocated with std::malloc.
+///        Compatible with sd_image_t->data ownership model.
+using MallocBuffer = std::unique_ptr<uint8_t[], decltype(&std::free)>;
+
+/// @brief Allocate a pixel buffer of the given size.
+/// @return A MallocBuffer holding the allocation, or nullptr on failure.
+inline MallocBuffer make_malloc_buffer(size_t size) {
+    auto* p = static_cast<uint8_t*>(std::malloc(size));
+    return MallocBuffer{p, &std::free};
+}
 
 // ============================================================================
 // 全局对象池

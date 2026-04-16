@@ -67,10 +67,10 @@ class FaceDetectNode : public Node {
         face::FaceDetectResult detect_result =
             detector->detect(input_ptr, (int)image->width, (int)image->height, threshold);
 
-        uint8_t* out_data = (uint8_t*)malloc(image->width * image->height * channels);
+        auto out_data = make_malloc_buffer(image->width * image->height * channels);
         if (!out_data)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(out_data, image->data, image->width * image->height * channels);
+        memcpy(out_data.get(), image->data, image->width * image->height * channels);
 
         auto draw_rect = [&](int x1, int y1, int x2, int y2, uint8_t r, uint8_t g, uint8_t b) {
             x1 = std::max(0, x1);
@@ -114,13 +114,12 @@ class FaceDetectNode : public Node {
 
         sd_image_t* result_img = acquire_image();
         if (!result_img) {
-            free(out_data);
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         result_img->width = image->width;
         result_img->height = image->height;
         result_img->channel = channels;
-        result_img->data = out_data;
+        result_img->data = out_data.release();
 
         outputs["IMAGE"] = make_image_ptr(result_img);
         outputs["faces"] = detect_result;
@@ -191,22 +190,21 @@ class FaceRestoreWithModelNode : public Node {
             detect_result = detector->detect(rgb_data.data(), (int)image->width, (int)image->height, 0.5f);
         }
 
-        uint8_t* out_data = (uint8_t*)malloc(image->width * image->height * channels);
+        auto out_data = make_malloc_buffer(image->width * image->height * channels);
         if (!out_data)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(out_data, image->data, image->width * image->height * channels);
+        memcpy(out_data.get(), image->data, image->width * image->height * channels);
 
         if (detect_result.faces.empty()) {
             LOG_INFO("[FaceRestoreWithModel] No faces detected, returning original image\n");
             sd_image_t* result_img = acquire_image();
             if (!result_img) {
-                free(out_data);
                 return sd_error_t::ERROR_MEMORY_ALLOCATION;
             }
             result_img->width = image->width;
             result_img->height = image->height;
             result_img->channel = channels;
-            result_img->data = out_data;
+            result_img->data = out_data.release();
             outputs["IMAGE"] = make_image_ptr(result_img);
             return sd_error_t::OK;
         }
@@ -346,13 +344,12 @@ class FaceRestoreWithModelNode : public Node {
 
         sd_image_t* result_img = acquire_image();
         if (!result_img) {
-            free(out_data);
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         result_img->width = image->width;
         result_img->height = image->height;
         result_img->channel = channels;
-        result_img->data = out_data;
+        result_img->data = out_data.release();
 
         outputs["IMAGE"] = make_image_ptr(result_img);
         LOG_INFO("[FaceRestoreWithModel] Restored %zu faces\n", detect_result.faces.size());
@@ -426,10 +423,10 @@ class FaceSwapNode : public Node {
         convert_to_rgb(source_image->data, source_rgb.data(), source_channels,
                        source_image->width * source_image->height);
 
-        uint8_t* out_data = (uint8_t*)malloc(target_image->width * target_image->height * target_channels);
+        auto out_data = make_malloc_buffer(target_image->width * target_image->height * target_channels);
         if (!out_data)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(out_data, target_image->data, target_image->width * target_image->height * target_channels);
+        memcpy(out_data.get(), target_image->data, target_image->width * target_image->height * target_channels);
 
         face::FaceDetectResult target_detect, source_detect;
         if (detector) {
@@ -443,13 +440,12 @@ class FaceSwapNode : public Node {
             LOG_INFO("[FaceSwap] No faces detected in target or source, returning original target image\n");
             sd_image_t* result_img = acquire_image();
             if (!result_img) {
-                free(out_data);
                 return sd_error_t::ERROR_MEMORY_ALLOCATION;
             }
             result_img->width = target_image->width;
             result_img->height = target_image->height;
             result_img->channel = target_channels;
-            result_img->data = out_data;
+            result_img->data = out_data.release();
             outputs["IMAGE"] = make_image_ptr(result_img);
             return sd_error_t::OK;
         }
@@ -503,13 +499,12 @@ class FaceSwapNode : public Node {
             LOG_ERROR("[ERROR] FaceSwap: Swap failed\n");
             sd_image_t* result_img = acquire_image();
             if (!result_img) {
-                free(out_data);
                 return sd_error_t::ERROR_MEMORY_ALLOCATION;
             }
             result_img->width = target_image->width;
             result_img->height = target_image->height;
             result_img->channel = target_channels;
-            result_img->data = out_data;
+            result_img->data = out_data.release();
             outputs["IMAGE"] = make_image_ptr(result_img);
             return sd_error_t::OK;
         }
@@ -585,13 +580,12 @@ class FaceSwapNode : public Node {
 
         sd_image_t* result_img = acquire_image();
         if (!result_img) {
-            free(out_data);
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         result_img->width = target_image->width;
         result_img->height = target_image->height;
         result_img->channel = target_channels;
-        result_img->data = out_data;
+        result_img->data = out_data.release();
 
         outputs["IMAGE"] = make_image_ptr(result_img);
         LOG_INFO("[FaceSwap] Swapped face successfully\n");
