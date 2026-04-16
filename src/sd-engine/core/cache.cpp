@@ -44,7 +44,11 @@ void ExecutionCache::put(const std::string& node_id, const std::string& hash, co
         current_size_ += entry_size;
         touch(key);
     } else {
-        // 新条目
+        // 新条目：如果单个条目就超过上限，直接拒绝
+        if (entry_size > max_size_) {
+            return;
+        }
+
         while (current_size_ + entry_size > max_size_ && !cache_.empty()) {
             evict_one();
         }
@@ -80,7 +84,11 @@ void ExecutionCache::put(const std::string& node_id, const std::string& hash, No
         current_size_ += entry_size;
         touch(key);
     } else {
-        // 新条目
+        // 新条目：如果单个条目就超过上限，直接拒绝
+        if (entry_size > max_size_) {
+            return;
+        }
+
         while (current_size_ + entry_size > max_size_ && !cache_.empty()) {
             evict_one();
         }
