@@ -28,13 +28,15 @@
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "stable-diffusion.h"
 #include "stb_image.h"
-#include "stb_image_write.h"
 #include "stb_image_resize.h"
-#include <cstdio>
-#include <cstring>
-#include <cstdlib>
-#include <cmath>
+#include "stb_image_write.h"
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <vector>
 
 struct Args {
     // 模型路径
@@ -42,28 +44,28 @@ struct Args {
     const char* vae = nullptr;
     const char* llm = nullptr;
     const char* upscale_model = nullptr;
-    
+
     // 输入输出
     const char* input = nullptr;
     const char* output = "output.png";
     const char* prompt = "";
     const char* negative_prompt = "";
-    
+
     // 超分参数
     int scale = 2;
     int upscale_tile_size = 512;
-    
+
     // 生成参数
     float strength = 0.40f;
     int steps = 30;
     int64_t seed = 42;
     float cfg_scale = 7.0f;
-    
+
     // Deep HighRes Fix
-    bool deep_hires = true;  // 默认启用
+    bool deep_hires = true; // 默认启用
     int target_width = 0;
     int target_height = 0;
-    
+
     // 其他
     bool skip_upscale = false;
     bool vae_tiling = false;
@@ -164,7 +166,8 @@ static bool parse_args(int argc, char** argv, Args& args) {
 
 static void log_callback(enum sd_log_level_t level, const char* text, void* data) {
     Args* args = (Args*)data;
-    if (!args->verbose && level > SD_LOG_INFO) return;
+    if (!args->verbose && level > SD_LOG_INFO)
+        return;
     printf("%s", text);
 }
 
@@ -189,14 +192,11 @@ static bool save_image(const sd_image_t& image, const char* path) {
     return stbi_write_png(path, image.width, image.height, image.channel, image.data, 0) != 0;
 }
 
-static sd_image_t resize_image(const sd_image_t& src, int target_w, int target_h) {
-    uint8_t* dst_data = (uint8_t*)malloc(target_w * target_h * 3);
-    if (!dst_data) return {0, 0, 0, nullptr};
-    
-    stbir_resize_uint8(src.data, src.width, src.height, 0,
-                       dst_data, target_w, target_h, 0, 3);
-    
-    return {(uint32_t)target_w, (uint32_t)target_h, 3, dst_data};
+static void resize_image(const sd_image_t& src, int target_w, int target_h, std::vector<uint8_t>& dst_data,
+                         sd_image_t& out_image) {
+    dst_data.resize((size_t)target_w * target_h * 3);
+    stbir_resize_uint8(src.data, src.width, src.height, 0, dst_data.data(), target_w, target_h, 0, 3);
+    out_image = {(uint32_t)target_w, (uint32_t)target_h, 3, dst_data.data()};
 }
 
 static void free_image(sd_image_t& image) {
@@ -205,6 +205,17 @@ static void free_image(sd_image_t& image) {
         image.data = nullptr;
     }
 }
+
+struct SdImageDeleter {
+    void operator()(sd_image_t* p) const {
+        if (p) {
+            if (p->data)
+                std::free(p->data);
+            std::free(p);
+        }
+    }
+};
+using SdImagePtr = std::unique_ptr<sd_image_t, SdImageDeleter>;
 
 static sd_ctx_t* create_sd_context(const Args& args) {
     sd_ctx_params_t ctx_params;
@@ -219,20 +230,15 @@ static sd_ctx_t* create_sd_context(const Args& args) {
     ctx_params.flash_attn = args.use_gpu && args.flash_attn;
     ctx_params.diffusion_flash_attn = args.use_gpu && args.flash_attn;
     ctx_params.vae_decode_only = false;
-    
+
     return new_sd_ctx(&ctx_params);
 }
 
-static sd_image_t* generate_single(sd_ctx_t* ctx, 
-                                   const sd_image_t* init_image,
-                                   int width, int height,
-                                   const Args& args,
-                                   float strength,
-                                   int steps,
-                                   int64_t seed_offset) {
+static sd_image_t* generate_single(sd_ctx_t* ctx, const sd_image_t* init_image, int width, int height, const Args& args,
+                                   float strength, int steps, int64_t seed_offset) {
     sd_img_gen_params_t params;
     sd_img_gen_params_init(&params);
-    
+
     params.prompt = args.prompt;
     params.negative_prompt = args.negative_prompt;
     params.width = width;
@@ -243,185 +249,160 @@ static sd_image_t* generate_single(sd_ctx_t* ctx,
     params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
     params.sample_params.scheduler = KARRAS_SCHEDULER;
     params.sample_params.guidance.txt_cfg = args.cfg_scale;
-    
+
     if (init_image && init_image->data) {
         params.init_image = *init_image;
     }
-    
+
     if (args.vae_tiling) {
         params.vae_tiling_params.enabled = true;
         params.vae_tiling_params.tile_size_x = 512;
         params.vae_tiling_params.tile_size_y = 512;
         params.vae_tiling_params.target_overlap = 64;
     }
-    
+
     return generate_image(ctx, &params);
 }
 
 // Deep HighRes Fix 主流程
-static sd_image_t* deep_hires_generate(sd_ctx_t* ctx, 
-                                       const sd_image_t& input_image,
-                                       const Args& args) {
+static sd_image_t* deep_hires_generate(sd_ctx_t* ctx, const sd_image_t& input_image, const Args& args) {
     printf("\n[Deep HighRes Fix] Starting multi-phase generation...\n");
-    
+
     int target_w = args.target_width > 0 ? args.target_width : input_image.width;
     int target_h = args.target_height > 0 ? args.target_height : input_image.height;
     target_w = (target_w + 63) & ~63;
     target_h = (target_h + 63) & ~63;
-    
+
     printf("[Deep Hires] Target resolution: %dx%d\n", target_w, target_h);
-    
+
     int total_steps = args.steps;
     int phase1_steps = std::max(6, total_steps / 4);
     int phase3_steps = std::max(8, total_steps * 3 / 4);
     int phase2_steps = std::max(4, total_steps - phase1_steps - phase3_steps);
-    
+
     // Phase 1: 低分辨率生成
     int phase1_w = std::min(512, target_w / 2);
     int phase1_h = std::min(512, target_h / 2);
     phase1_w = (phase1_w + 63) & ~63;
     phase1_h = (phase1_h + 63) & ~63;
-    
-    printf("\n[Phase 1] Low-res composition: %dx%d, steps=%d, strength=1.0\n", 
-           phase1_w, phase1_h, phase1_steps);
-    
-    sd_image_t* phase1_result = generate_single(ctx, nullptr, phase1_w, phase1_h, 
-                                                args, 1.0f, phase1_steps, 0);
+
+    printf("\n[Phase 1] Low-res composition: %dx%d, steps=%d, strength=1.0\n", phase1_w, phase1_h, phase1_steps);
+
+    SdImagePtr phase1_result(generate_single(ctx, nullptr, phase1_w, phase1_h, args, 1.0f, phase1_steps, 0));
     if (!phase1_result || !phase1_result->data) {
         fprintf(stderr, "[ERROR] Phase 1 failed\n");
         return nullptr;
     }
     printf("[Phase 1] Completed\n");
-    
+
     // Phase 2: 中间分辨率
     int phase2_w = target_w * 3 / 4;
     int phase2_h = target_h * 3 / 4;
     phase2_w = (phase2_w + 63) & ~63;
     phase2_h = (phase2_h + 63) & ~63;
-    
-    printf("\n[Phase 2] Mid-res refinement: %dx%d, steps=%d, strength=0.55\n",
-           phase2_w, phase2_h, phase2_steps);
-    
-    sd_image_t phase1_resized = resize_image(*phase1_result, phase2_w, phase2_h);
-    free(phase1_result->data);
-    free(phase1_result);
-    
-    if (!phase1_resized.data) return nullptr;
-    
-    sd_image_t* phase2_result = generate_single(ctx, &phase1_resized, phase2_w, phase2_h,
-                                                args, 0.55f, phase2_steps, 100);
-    free_image(phase1_resized);
-    
+
+    printf("\n[Phase 2] Mid-res refinement: %dx%d, steps=%d, strength=0.55\n", phase2_w, phase2_h, phase2_steps);
+
+    std::vector<uint8_t> phase1_buffer;
+    sd_image_t phase1_resized = {};
+    resize_image(*phase1_result, phase2_w, phase2_h, phase1_buffer, phase1_resized);
+
+    SdImagePtr phase2_result(generate_single(ctx, &phase1_resized, phase2_w, phase2_h, args, 0.55f, phase2_steps, 100));
+
     if (!phase2_result || !phase2_result->data) {
         fprintf(stderr, "[ERROR] Phase 2 failed\n");
         return nullptr;
     }
     printf("[Phase 2] Completed\n");
-    
+
     // Phase 3: 最终分辨率
-    printf("\n[Phase 3] High-res detail: %dx%d, steps=%d, strength=0.35\n",
-           target_w, target_h, phase3_steps);
-    
-    sd_image_t phase2_resized = resize_image(*phase2_result, target_w, target_h);
-    free(phase2_result->data);
-    free(phase2_result);
-    
-    if (!phase2_resized.data) return nullptr;
-    
-    sd_image_t* phase3_result = generate_single(ctx, &phase2_resized, target_w, target_h,
-                                                args, 0.35f, phase3_steps, 200);
-    free_image(phase2_resized);
-    
+    printf("\n[Phase 3] High-res detail: %dx%d, steps=%d, strength=0.35\n", target_w, target_h, phase3_steps);
+
+    std::vector<uint8_t> phase2_buffer;
+    sd_image_t phase2_resized = {};
+    resize_image(*phase2_result, target_w, target_h, phase2_buffer, phase2_resized);
+
+    SdImagePtr phase3_result(generate_single(ctx, &phase2_resized, target_w, target_h, args, 0.35f, phase3_steps, 200));
+
     if (!phase3_result || !phase3_result->data) {
         fprintf(stderr, "[ERROR] Phase 3 failed\n");
         return nullptr;
     }
-    
+
     printf("[Phase 3] Completed\n");
     printf("\n[Deep HighRes Fix] All phases completed!\n");
-    
-    return phase3_result;
+
+    return phase3_result.release();
 }
 
 // 普通 img2img
-static sd_image_t* normal_img2img(sd_ctx_t* ctx, 
-                                  const sd_image_t& input_image,
-                                  const Args& args) {
+static sd_image_t* normal_img2img(sd_ctx_t* ctx, const sd_image_t& input_image, const Args& args) {
     printf("\n[Normal Img2Img] Generating...\n");
-    
+
     int target_w = args.target_width > 0 ? args.target_width : input_image.width;
     int target_h = args.target_height > 0 ? args.target_height : input_image.height;
     target_w = (target_w + 63) & ~63;
     target_h = (target_h + 63) & ~63;
-    
-    sd_image_t* init_image = nullptr;
-    sd_image_t resized;
-    
+
+    sd_image_t* init_image = const_cast<sd_image_t*>(&input_image);
+    std::vector<uint8_t> resized_buffer;
+    sd_image_t resized = {};
+
     if (target_w != (int)input_image.width || target_h != (int)input_image.height) {
-        printf("[Info] Resizing input from %dx%d to %dx%d\n", 
-               input_image.width, input_image.height, target_w, target_h);
-        resized = resize_image(input_image, target_w, target_h);
+        printf("[Info] Resizing input from %dx%d to %dx%d\n", input_image.width, input_image.height, target_w,
+               target_h);
+        resize_image(input_image, target_w, target_h, resized_buffer, resized);
         init_image = &resized;
-    } else {
-        init_image = const_cast<sd_image_t*>(&input_image);
     }
-    
-    sd_image_t* result = generate_single(ctx, init_image, target_w, target_h,
-                                         args, args.strength, args.steps, 0);
-    
-    if (init_image == &resized) {
-        free_image(resized);
-    }
-    
-    return result;
+
+    return generate_single(ctx, init_image, target_w, target_h, args, args.strength, args.steps, 0);
 }
 
 // ESRGAN 超分
 static sd_image_t esrgan_upscale(const sd_image_t& input_image, const Args& args) {
     printf("\n[ESRGAN] Upscaling %dx%d by %dx...\n", input_image.width, input_image.height, args.scale);
-    
-    upscaler_ctx_t* upscaler = new_upscaler_ctx(
-        args.upscale_model,
-        !args.use_gpu,
-        false,
-        4,
-        args.upscale_tile_size
-    );
-    
+
+    upscaler_ctx_t* upscaler = new_upscaler_ctx(args.upscale_model, !args.use_gpu, false, 4, args.upscale_tile_size);
+
     if (!upscaler) {
         fprintf(stderr, "[ERROR] Failed to create upscaler context\n");
         return {0, 0, 0, nullptr};
     }
-    
+
     int real_scale = get_upscale_factor(upscaler);
     printf("[ESRGAN] Model scale: %dx\n", real_scale);
-    
+
     int actual_scale = args.scale;
     if (actual_scale != real_scale) {
         printf("[ESRGAN] Adjusting scale from %dx to %dx\n", args.scale, real_scale);
         actual_scale = real_scale;
     }
-    
+
     sd_image_t result = upscale(upscaler, input_image, actual_scale);
-    
+
     if (!result.data) {
         fprintf(stderr, "[ERROR] ESRGAN upscale failed\n");
         free_upscaler_ctx(upscaler);
         return {0, 0, 0, nullptr};
     }
-    
+
     printf("[ESRGAN] Upscaled to %dx%d\n", result.width, result.height);
-    
+
     // 复制数据（因为 free_upscaler_ctx 后原数据可能失效）
     size_t data_size = result.width * result.height * result.channel;
-    uint8_t* copied_data = (uint8_t*)malloc(data_size);
-    if (copied_data) {
-        memcpy(copied_data, result.data, data_size);
-        free(result.data);
-        result.data = copied_data;
-    }
-    
+    std::vector<uint8_t> copied_data(data_size);
+    memcpy(copied_data.data(), result.data, data_size);
+    std::free(result.data);
+    result.data = copied_data.data();
+
     free_upscaler_ctx(upscaler);
+
+    // 将数据所有权转移给调用方（通过复制到 malloc 缓冲区保持兼容）
+    uint8_t* final_data = (uint8_t*)std::malloc(data_size);
+    if (final_data) {
+        memcpy(final_data, copied_data.data(), data_size);
+        result.data = final_data;
+    }
     return result;
 }
 
@@ -444,7 +425,7 @@ int main(int argc, char** argv) {
     // Step 1: ESRGAN 超分
     sd_image_t upscaled_image = {0, 0, 0, nullptr};
     sd_image_t* img_for_hires = &input_image;
-    
+
     if (!args.skip_upscale) {
         upscaled_image = esrgan_upscale(input_image, args);
         if (!upscaled_image.data) {
@@ -459,18 +440,18 @@ int main(int argc, char** argv) {
     sd_ctx_t* ctx = create_sd_context(args);
     if (!ctx) {
         fprintf(stderr, "[ERROR] Failed to create SD context\n");
-        if (upscaled_image.data) free_image(upscaled_image);
+        if (upscaled_image.data)
+            free_image(upscaled_image);
         free_image(input_image);
         return 1;
     }
     printf("[INFO] Model loaded successfully\n");
 
-    sd_image_t* result = nullptr;
-    
+    SdImagePtr result;
     if (args.deep_hires) {
-        result = deep_hires_generate(ctx, *img_for_hires, args);
+        result.reset(deep_hires_generate(ctx, *img_for_hires, args));
     } else {
-        result = normal_img2img(ctx, *img_for_hires, args);
+        result.reset(normal_img2img(ctx, *img_for_hires, args));
     }
 
     printf("\n");
@@ -478,7 +459,8 @@ int main(int argc, char** argv) {
     if (!result || !result->data) {
         fprintf(stderr, "[ERROR] Image generation failed\n");
         free_sd_ctx(ctx);
-        if (upscaled_image.data) free_image(upscaled_image);
+        if (upscaled_image.data)
+            free_image(upscaled_image);
         free_image(input_image);
         return 1;
     }
@@ -490,9 +472,8 @@ int main(int argc, char** argv) {
         printf("[SUCCESS] Image saved to: %s\n", args.output);
     }
 
-    free(result->data);
-    free(result);
-    if (upscaled_image.data) free_image(upscaled_image);
+    if (upscaled_image.data)
+        free_image(upscaled_image);
     free_image(input_image);
     free_sd_ctx(ctx);
 

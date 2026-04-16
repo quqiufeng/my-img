@@ -4,16 +4,26 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 #include <cstdio>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <vector>
 
 void log_callback(enum sd_log_level_t level, const char* text, void* data) {
     const char* prefix = "";
     switch (level) {
-        case SD_LOG_DEBUG: prefix = "[DEBUG]"; break;
-        case SD_LOG_INFO: prefix = "[INFO]"; break;
-        case SD_LOG_WARN: prefix = "[WARN]"; break;
-        case SD_LOG_ERROR: prefix = "[ERROR]"; break;
+    case SD_LOG_DEBUG:
+        prefix = "[DEBUG]";
+        break;
+    case SD_LOG_INFO:
+        prefix = "[INFO]";
+        break;
+    case SD_LOG_WARN:
+        prefix = "[WARN]";
+        break;
+    case SD_LOG_ERROR:
+        prefix = "[ERROR]";
+        break;
     }
     printf("%s %s\n", prefix, text);
 }
@@ -31,14 +41,46 @@ void print_help() {
     printf("  --help                Show this help\n");
 }
 
-sd_image_t load_image(const char* path) {
+struct RaiiImage {
+    sd_image_t img = {0, 0, 0, nullptr};
+    RaiiImage() = default;
+    explicit RaiiImage(sd_image_t i) : img(i) {}
+    ~RaiiImage() {
+        if (img.data) {
+            stbi_image_free(img.data);
+            img.data = nullptr;
+        }
+    }
+    RaiiImage(const RaiiImage&) = delete;
+    RaiiImage& operator=(const RaiiImage&) = delete;
+    RaiiImage(RaiiImage&& other) noexcept : img(other.img) {
+        other.img = {0, 0, 0, nullptr};
+    }
+    RaiiImage& operator=(RaiiImage&& other) noexcept {
+        if (this != &other) {
+            if (img.data)
+                stbi_image_free(img.data);
+            img = other.img;
+            other.img = {0, 0, 0, nullptr};
+        }
+        return *this;
+    }
+    sd_image_t* ptr() {
+        return &img;
+    }
+    const sd_image_t* ptr() const {
+        return &img;
+    }
+};
+
+RaiiImage load_image(const char* path) {
     int w, h, c;
     uint8_t* data = stbi_load(path, &w, &h, &c, 3);
     if (!data) {
         fprintf(stderr, "Failed to load image: %s\n", path);
-        return {0, 0, 0, nullptr};
+        return RaiiImage();
     }
-    return {(uint32_t)w, (uint32_t)h, 3, data};
+    return RaiiImage({(uint32_t)w, (uint32_t)h, 3, data});
 }
 
 void save_image(const sd_image_t& image, const char* path) {
@@ -94,24 +136,17 @@ int main(int argc, char** argv) {
 
     sd_set_log_callback(log_callback, nullptr);
 
-    sd_image_t input_image = load_image(input_path);
-    if (!input_image.data) {
+    RaiiImage input_image = load_image(input_path);
+    if (!input_image.ptr()->data) {
         return 1;
     }
 
-    printf("Input image: %dx%d\n", input_image.width, input_image.height);
+    printf("Input image: %dx%d\n", input_image.ptr()->width, input_image.ptr()->height);
 
-    upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(
-        model_path,
-        !use_gpu,
-        false,
-        4,
-        tile_size
-    );
+    upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(model_path, !use_gpu, false, 4, tile_size);
 
     if (!upscaler_ctx) {
         fprintf(stderr, "Failed to create upscaler context\n");
-        free(input_image.data);
         return 1;
     }
 
@@ -125,19 +160,18 @@ int main(int argc, char** argv) {
 
     printf("Upscaling...\n");
 
-    sd_image_t result = upscale(upscaler_ctx, input_image, scale);
+    sd_image_t result = upscale(upscaler_ctx, input_image.img, scale);
 
     if (result.data) {
         save_image(result, output_path);
         printf("Output image: %dx%d\n", result.width, result.height);
         printf("Image saved to: %s\n", output_path);
-        free(result.data);
+        std::free(result.data);
     } else {
         fprintf(stderr, "Upscale failed\n");
     }
 
     free_upscaler_ctx(upscaler_ctx);
-    free(input_image.data);
 
     return result.data ? 0 : 1;
 }
