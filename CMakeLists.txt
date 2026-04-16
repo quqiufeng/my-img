@@ -191,8 +191,13 @@ if(EXISTS ${SD_ENGINE_SRC})
     message(STATUS "[my-img] Created library: sd-engine")
 endif()
 
-# 收集所有源文件
-file(GLOB_RECURSE SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+# 显式列出需要编译为可执行文件的源文件（避免 GLOB_RECURSE 反模式）
+set(SRC_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/tools/sd-workflow.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-hires/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-img2img/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-upscale/main.cpp"
+)
 
 # 其他目录编译为可执行文件
 foreach(src ${SRC_FILES})
