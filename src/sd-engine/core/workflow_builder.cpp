@@ -325,6 +325,9 @@ std::string WorkflowBuilder::add_ksampler_advanced(
 }
 
 std::string WorkflowBuilder::to_json_string() const {
+    if (workflow_.empty()) {
+        return "{}";
+    }
     return workflow_.dump(4);
 }
 

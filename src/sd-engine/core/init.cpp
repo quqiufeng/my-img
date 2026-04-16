@@ -19,7 +19,9 @@ extern void init_latent_nodes();
 extern void init_preprocessor_cpu_nodes();
 extern void init_preprocessor_onnx_nodes();
 extern void init_preprocessor_nodes();
-extern void init_face_nodes();
+extern void init_face_detect_nodes();
+extern void init_face_restore_nodes();
+extern void init_face_swap_nodes();
 
 void init_builtin_nodes() {
     init_test_nodes();
@@ -34,7 +36,9 @@ void init_builtin_nodes() {
     init_preprocessor_cpu_nodes();
     init_preprocessor_onnx_nodes();
     init_preprocessor_nodes();
-    init_face_nodes();
+    init_face_detect_nodes();
+    init_face_restore_nodes();
+    init_face_swap_nodes();
 }
 
 } // namespace sdengine
