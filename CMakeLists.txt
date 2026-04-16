@@ -5,6 +5,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ============================================================
+# Sanitizer 支持（Debug/RelWithDebInfo 可选）
+# ============================================================
+option(ENABLE_SANITIZERS "Enable AddressSanitizer and UBSan" OFF)
+if(ENABLE_SANITIZERS AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(STATUS "[my-img] Sanitizers enabled: address, undefined")
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
+# ============================================================
 # 1. 读取 .env 配置文件
 # ============================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.env)
@@ -210,6 +220,7 @@ foreach(src ${SRC_FILES})
     endif()
 
     add_executable(${final_name} ${src})
+    list(APPEND ALL_TARGETS ${final_name})
     
     # 链接 sd-engine 库（必须在 SD_LIB 之前，因为 sd-engine 依赖 SD_LIB）
     if(TARGET sd-engine)
@@ -291,6 +302,7 @@ if(EXISTS ${CATCH2_SRC} AND TEST_SRC_FILES)
         )
     endif()
     add_test(NAME sd-engine-tests COMMAND sd-engine-tests)
+    list(APPEND ALL_TARGETS sd-engine-tests)
     message(STATUS "[my-img] Created target: sd-engine-tests")
 else()
     message(STATUS "[my-img] Tests disabled: Catch2 or test sources not found")

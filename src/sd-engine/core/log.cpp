@@ -95,7 +95,7 @@ void Logger::write(LogLevel level, const char* file, int line, const char* msg) 
         fflush(out);
     }
 
-    if (file_) {
+    if (file_ && level_ <= level) {
         fprintf(file_, "%s%s\n", buf, msg);
         fflush(file_);
     }
