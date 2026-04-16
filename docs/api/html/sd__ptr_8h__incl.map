@@ -1,0 +1,20 @@
+<map id="src/sd&#45;engine/core/sd_ptr.h" name="src/sd&#45;engine/core/sd_ptr.h">
+<area shape="rect" id="Node000001" title="stable&#45;diffusion.cpp C API 的智能指针封装 + 对象池" alt="" coords="254,5,395,45"/>
+<area shape="rect" id="Node000002" title=" " alt="" coords="5,93,140,119"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="265,48,123,92,122,87,264,43"/>
+<area shape="rect" id="Node000003" title=" " alt="" coords="164,93,325,119"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="307,47,268,85,265,82,303,44"/>
+<area shape="rect" id="Node000004" href="$object__pool_8h.html" title="通用线程安全对象池模板" alt="" coords="350,93,459,119"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="346,44,385,82,381,85,342,47"/>
+<area shape="rect" id="Node000007" title=" " alt="" coords="526,167,603,192"/>
+<area shape="poly" id="edge9_Node000001_Node000007" title=" " alt="" coords="377,43,425,64,473,91,514,123,547,155,543,158,510,127,470,96,422,69,375,48"/>
+<area shape="rect" id="Node000005" title=" " alt="" coords="129,167,192,192"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="366,121,206,168,205,162,365,116"/>
+<area shape="rect" id="Node000006" title=" " alt="" coords="217,167,281,192"/>
+<area shape="poly" id="edge5_Node000004_Node000006" title=" " alt="" coords="381,121,288,163,286,158,379,116"/>
+<area shape="poly" id="edge6_Node000004_Node000007" title=" " alt="" coords="431,116,527,159,525,163,429,121"/>
+<area shape="rect" id="Node000008" title=" " alt="" coords="305,167,392,192"/>
+<area shape="poly" id="edge7_Node000004_Node000008" title=" " alt="" coords="398,121,368,157,364,154,393,117"/>
+<area shape="rect" id="Node000009" title=" " alt="" coords="417,167,502,192"/>
+<area shape="poly" id="edge8_Node000004_Node000009" title=" " alt="" coords="416,117,444,154,440,157,412,121"/>
+</map>

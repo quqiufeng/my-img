@@ -1,0 +1,24 @@
+<map id="src/sd&#45;engine/core/workflow.h" name="src/sd&#45;engine/core/workflow.h">
+<area shape="rect" id="Node000001" title="工作流定义和解析" alt="" coords="176,5,317,45"/>
+<area shape="rect" id="Node000002" href="$node_8h.html" title="节点基类定义和节点注册表" alt="" coords="269,93,336,119"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="262,44,289,80,284,84,258,47"/>
+<area shape="rect" id="Node000003" title=" " alt="" coords="5,167,64,192"/>
+<area shape="poly" id="edge12_Node000001_Node000003" title=" " alt="" coords="222,48,64,161,61,156,219,43"/>
+<area shape="rect" id="Node000004" title=" " alt="" coords="89,167,151,192"/>
+<area shape="poly" id="edge11_Node000001_Node000004" title=" " alt="" coords="233,48,141,158,137,154,229,44"/>
+<area shape="rect" id="Node000005" title=" " alt="" coords="176,167,227,192"/>
+<area shape="poly" id="edge9_Node000001_Node000005" title=" " alt="" coords="243,47,211,154,206,153,238,45"/>
+<area shape="rect" id="Node000006" title=" " alt="" coords="511,167,588,192"/>
+<area shape="poly" id="edge10_Node000001_Node000006" title=" " alt="" coords="286,43,516,158,513,163,283,48"/>
+<area shape="rect" id="Node000007" title=" " alt="" coords="613,167,659,192"/>
+<area shape="poly" id="edge13_Node000001_Node000007" title=" " alt="" coords="299,43,428,91,601,160,599,165,426,96,297,48"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="270,119,78,169,77,164,269,113"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="274,121,164,164,162,159,272,116"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="288,121,231,161,228,156,285,116"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="337,114,498,161,497,166,336,120"/>
+<area shape="poly" id="edge6_Node000002_Node000007" title=" " alt="" coords="337,110,450,131,600,164,599,169,449,136,336,115"/>
+<area shape="rect" id="Node000008" title=" " alt="" coords="399,167,486,192"/>
+<area shape="poly" id="edge7_Node000002_Node000008" title=" " alt="" coords="326,116,409,158,407,163,324,121"/>
+<area shape="rect" id="Node000009" title=" " alt="" coords="251,167,375,192"/>
+<area shape="poly" id="edge8_Node000002_Node000009" title=" " alt="" coords="307,119,312,153,307,154,302,119"/>
+</map>

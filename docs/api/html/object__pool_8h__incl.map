@@ -1,0 +1,13 @@
+<map id="src/sd&#45;engine/core/object_pool.h" name="src/sd&#45;engine/core/object_pool.h">
+<area shape="rect" id="Node000001" title="通用线程安全对象池模板" alt="" coords="149,5,290,45"/>
+<area shape="rect" id="Node000002" title=" " alt="" coords="5,93,68,119"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="177,48,77,90,75,85,175,43"/>
+<area shape="rect" id="Node000003" title=" " alt="" coords="93,93,157,119"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="198,48,151,86,148,82,195,43"/>
+<area shape="rect" id="Node000004" title=" " alt="" coords="181,93,258,119"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="222,46,222,79,217,79,217,46"/>
+<area shape="rect" id="Node000005" title=" " alt="" coords="283,93,369,119"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="247,43,300,83,297,87,244,48"/>
+<area shape="rect" id="Node000006" title=" " alt="" coords="394,93,479,119"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="272,43,393,86,391,91,270,48"/>
+</map>
