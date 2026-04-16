@@ -32,9 +32,7 @@ class ConstantIntNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int value;
-        if (sd_error_t err = get_input(inputs, "value", value); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "value", value));
         outputs["value"] = value;
         return sd_error_t::OK;
     }
@@ -61,13 +59,9 @@ class AddIntNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int a;
-        if (sd_error_t err = get_input(inputs, "a", a); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "a", a));
         int b;
-        if (sd_error_t err = get_input(inputs, "b", b); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "b", b));
         outputs["result"] = a + b;
         return sd_error_t::OK;
     }
@@ -94,13 +88,9 @@ class MultiplyIntNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int a;
-        if (sd_error_t err = get_input(inputs, "a", a); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "a", a));
         int b;
-        if (sd_error_t err = get_input(inputs, "b", b); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "b", b));
         outputs["result"] = a * b;
         return sd_error_t::OK;
     }
@@ -128,9 +118,7 @@ class PrintIntNode : public Node {
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
         int value;
-        if (sd_error_t err = get_input(inputs, "value", value); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "value", value));
         LOG_INFO("[PrintInt] Result: %d\n", value);
         return sd_error_t::OK;
     }

@@ -75,9 +75,7 @@ class CLIPVisionEncodeNode : public Node {
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "clip");
         ImagePtr image;
-        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", image));
 
         if (!sd_ctx || !image || !image->data) {
             LOG_ERROR("[ERROR] CLIPVisionEncode: Missing inputs\n");
@@ -121,9 +119,7 @@ class CLIPTextEncodeNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string text;
-        if (sd_error_t err = get_input(inputs, "text", text); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "text", text));
         int clip_skip = get_input_opt<int>(inputs, "clip_skip", -1);
 
         sd_ctx_t* sd_ctx = nullptr;
@@ -179,13 +175,9 @@ class ConditioningCombineNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ConditioningPtr cond1;
-        if (sd_error_t err = get_input(inputs, "conditioning_1", cond1); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning_1", cond1));
         ConditioningPtr cond2;
-        if (sd_error_t err = get_input(inputs, "conditioning_2", cond2); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning_2", cond2));
 
         if (!cond1 || !cond2) {
             LOG_ERROR("[ERROR] ConditioningCombine: Missing inputs\n");
@@ -228,13 +220,9 @@ class ConditioningConcatNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ConditioningPtr cond_to;
-        if (sd_error_t err = get_input(inputs, "conditioning_to", cond_to); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning_to", cond_to));
         ConditioningPtr cond_from;
-        if (sd_error_t err = get_input(inputs, "conditioning_from", cond_from); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning_from", cond_from));
 
         if (!cond_to || !cond_from) {
             LOG_ERROR("[ERROR] ConditioningConcat: Missing inputs\n");
@@ -278,13 +266,9 @@ class ConditioningAverageNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ConditioningPtr cond_to;
-        if (sd_error_t err = get_input(inputs, "conditioning_to", cond_to); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning_to", cond_to));
         ConditioningPtr cond_from;
-        if (sd_error_t err = get_input(inputs, "conditioning_from", cond_from); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning_from", cond_from));
         float strength = get_input_opt<float>(inputs, "conditioning_to_strength", 1.0f);
 
         if (!cond_to || !cond_from) {
@@ -330,13 +314,9 @@ class ControlNetApplyNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ConditioningPtr cond;
-        if (sd_error_t err = get_input(inputs, "conditioning", cond); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning", cond));
         ImagePtr image;
-        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", image));
         float strength = get_input_opt<float>(inputs, "strength", 1.0f);
 
         if (!cond) {
@@ -380,17 +360,11 @@ class IPAdapterApplyNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ConditioningPtr cond;
-        if (sd_error_t err = get_input(inputs, "conditioning", cond); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "conditioning", cond));
         IPAdapterInfo info;
-        if (sd_error_t err = get_input(inputs, "ipadapter", info); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "ipadapter", info));
         ImagePtr image;
-        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", image));
         float strength = get_input_opt<float>(inputs, "strength", 1.0f);
 
         if (!cond) {

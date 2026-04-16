@@ -35,9 +35,7 @@ class CheckpointLoaderSimpleNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string ckpt_path;
-        if (sd_error_t err = get_input(inputs, "ckpt_name", ckpt_path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "ckpt_name", ckpt_path));
         std::string vae_path = get_input_opt<std::string>(inputs, "vae_name", "");
         std::string clip_path = get_input_opt<std::string>(inputs, "clip_name", "");
         std::string control_net_path = get_input_opt<std::string>(inputs, "control_net_path", "");

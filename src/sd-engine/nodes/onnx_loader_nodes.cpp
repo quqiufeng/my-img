@@ -31,9 +31,7 @@ class RemBGModelLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string path;
-        if (sd_error_t err = get_input(inputs, "model_path", path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "model_path", path));
         if (path.empty()) {
             LOG_ERROR("[ERROR] RemBGModelLoader: model_path is required\n");
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -81,9 +79,7 @@ class LineArtLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string path;
-        if (sd_error_t err = get_input(inputs, "model_name", path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "model_name", path));
         if (path.empty()) {
             LOG_ERROR("[ERROR] LineArtLoader: model_name is required\n");
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -125,9 +121,7 @@ class FaceDetectModelLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string path;
-        if (sd_error_t err = get_input(inputs, "model_path", path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "model_path", path));
         if (path.empty()) {
             LOG_ERROR("[ERROR] FaceDetectModelLoader: model_path is required\n");
             return sd_error_t::ERROR_INVALID_INPUT;
@@ -169,9 +163,7 @@ class FaceRestoreModelLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string path;
-        if (sd_error_t err = get_input(inputs, "model_path", path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "model_path", path));
         std::string type_str = get_input_opt<std::string>(inputs, "model_type", "gfpgan");
 
         if (path.empty()) {
@@ -216,13 +208,9 @@ class FaceSwapModelLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string inswapper_path;
-        if (sd_error_t err = get_input(inputs, "inswapper_path", inswapper_path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "inswapper_path", inswapper_path));
         std::string arcface_path;
-        if (sd_error_t err = get_input(inputs, "arcface_path", arcface_path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "arcface_path", arcface_path));
 
         if (inswapper_path.empty() || arcface_path.empty()) {
             LOG_ERROR("[ERROR] FaceSwapModelLoader: Both inswapper_path and arcface_path are required\n");

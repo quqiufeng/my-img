@@ -36,17 +36,11 @@ class FaceSwapNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr target_image;
-        if (sd_error_t err = get_input(inputs, "target_image", target_image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "target_image", target_image));
         ImagePtr source_image;
-        if (sd_error_t err = get_input(inputs, "source_image", source_image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "source_image", source_image));
         std::shared_ptr<face::FaceSwapper> swapper;
-        if (sd_error_t err = get_input(inputs, "face_swap_model", swapper); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "face_swap_model", swapper));
 
         if (!target_image || !target_image->data || !source_image || !source_image->data || !swapper) {
             LOG_ERROR("[ERROR] FaceSwap: Missing inputs\n");
@@ -62,9 +56,7 @@ class FaceSwapNode : public Node {
 
         std::shared_ptr<face::FaceDetector> detector;
         if (inputs.count("face_detect_model")) {
-            if (sd_error_t err = get_input(inputs, "face_detect_model", detector); is_error(err)) {
-                return err;
-            }
+            SD_RETURN_IF_ERROR(get_input(inputs, "face_detect_model", detector));
         }
 
         std::vector<uint8_t> target_rgb(target_image->width * target_image->height * 3);

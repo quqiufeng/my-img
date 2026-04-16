@@ -33,9 +33,7 @@ class CannyEdgePreprocessorNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr src;
-        if (sd_error_t err = get_input(inputs, "image", src); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", src));
         int low_threshold = get_input_opt<int>(inputs, "low_threshold", 100);
         int high_threshold = get_input_opt<int>(inputs, "high_threshold", 200);
 

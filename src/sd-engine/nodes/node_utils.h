@@ -263,4 +263,20 @@ void init_face_nodes();
         }                                                                                                              \
     };
 
+/// 错误处理宏：表达式返回错误时直接返回
+#define SD_RETURN_IF_ERROR(expr)                                                                                       \
+    do {                                                                                                               \
+        if (sd_error_t err = (expr); is_error(err)) {                                                                  \
+            return err;                                                                                                \
+        }                                                                                                              \
+    } while (0)
+
+/// 空指针检查宏：指针为空时返回指定错误码
+#define SD_RETURN_IF_NULL(ptr, err_code)                                                                               \
+    do {                                                                                                               \
+        if (!(ptr)) {                                                                                                  \
+            return (err_code);                                                                                         \
+        }                                                                                                              \
+    } while (0)
+
 } // namespace sdengine

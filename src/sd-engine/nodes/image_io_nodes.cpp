@@ -31,9 +31,7 @@ class LoadImageNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string image_path;
-        if (sd_error_t err = get_input(inputs, "image", image_path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", image_path));
 
         if (image_path.empty()) {
             LOG_ERROR("[ERROR] LoadImage: image path is required\n");
@@ -91,9 +89,7 @@ class LoadImageMaskNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string image_path;
-        if (sd_error_t err = get_input(inputs, "image", image_path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", image_path));
         std::string channel = get_input_opt<std::string>(inputs, "channel", "alpha");
 
         if (image_path.empty()) {
@@ -166,9 +162,7 @@ class SaveImageNode : public Node {
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
         ImagePtr image;
-        if (sd_error_t err = get_input(inputs, "images", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "images", image));
         std::string prefix =
             get_input_opt<std::string>(inputs, "filename_prefix", "sd-engine");
 
@@ -216,9 +210,7 @@ class PreviewImageNode : public Node {
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
         ImagePtr image;
-        if (sd_error_t err = get_input(inputs, "images", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "images", image));
 
         if (!image || !image->data) {
             LOG_ERROR("[ERROR] PreviewImage: No image data\n");

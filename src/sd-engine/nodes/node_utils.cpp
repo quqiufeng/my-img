@@ -130,9 +130,7 @@ sd_error_t run_sampler_common(sd_ctx_t* sd_ctx, const NodeInputs& inputs, sd_nod
     std::vector<sd_lora_t> loras;
     if (inputs.count("lora_stack")) {
         std::vector<LoRAInfo> lora_stack;
-        if (sd_error_t err = get_input(inputs, "lora_stack", lora_stack); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "lora_stack", lora_stack));
         for (const auto& info : lora_stack) {
             sd_lora_t lora;
             lora.path = info.path.c_str();
@@ -152,9 +150,7 @@ sd_error_t run_sampler_common(sd_ctx_t* sd_ctx, const NodeInputs& inputs, sd_nod
     // 处理 ControlNet 输入
     if (inputs.count("_control_image")) {
         ImagePtr ctrl_img;
-        if (sd_error_t err = get_input(inputs, "_control_image", ctrl_img); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "_control_image", ctrl_img));
         if (ctrl_img && ctrl_img->data) {
             sample_params.control_image = *ctrl_img;
             sample_params.control_strength =
@@ -164,9 +160,7 @@ sd_error_t run_sampler_common(sd_ctx_t* sd_ctx, const NodeInputs& inputs, sd_nod
         }
     } else if (inputs.count("control_image")) {
         ImagePtr ctrl_img;
-        if (sd_error_t err = get_input(inputs, "control_image", ctrl_img); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "control_image", ctrl_img));
         if (ctrl_img && ctrl_img->data) {
             sample_params.control_image = *ctrl_img;
             sample_params.control_strength =
@@ -179,9 +173,7 @@ sd_error_t run_sampler_common(sd_ctx_t* sd_ctx, const NodeInputs& inputs, sd_nod
     // 处理 Inpaint mask 输入
     if (inputs.count("mask")) {
         ImagePtr mask;
-        if (sd_error_t err = get_input(inputs, "mask", mask); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "mask", mask));
         if (mask && mask->data) {
             sample_params.mask_image = *mask;
             LOG_INFO("[KSampler] Using Inpaint mask: %dx%d\n", mask->width, mask->height);
@@ -191,13 +183,9 @@ sd_error_t run_sampler_common(sd_ctx_t* sd_ctx, const NodeInputs& inputs, sd_nod
     // 处理 IPAdapter 输入
     if (inputs.count("_ipadapter_info")) {
         IPAdapterInfo info;
-        if (sd_error_t err = get_input(inputs, "_ipadapter_info", info); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "_ipadapter_info", info));
         ImagePtr ip_image;
-        if (sd_error_t err = get_input(inputs, "_ipadapter_image", ip_image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "_ipadapter_image", ip_image));
         if (!info.path.empty() && ip_image && ip_image->data) {
             LOG_INFO("[KSampler] Loading IPAdapter: %s\n", info.path.c_str());
             bool loaded = sd_load_ipadapter(sd_ctx, info.path.c_str(), info.cross_attention_dim, info.num_tokens,
@@ -215,15 +203,11 @@ sd_error_t run_sampler_common(sd_ctx_t* sd_ctx, const NodeInputs& inputs, sd_nod
     }
 
     ConditioningPtr positive;
-    if (sd_error_t err = get_input(inputs, "positive", positive); is_error(err)) {
-        return err;
-    }
+    SD_RETURN_IF_ERROR(get_input(inputs, "positive", positive));
     ConditioningPtr negative =
         get_input_opt<ConditioningPtr>(inputs, "negative", nullptr);
     LatentPtr init_latent;
-    if (sd_error_t err = get_input(inputs, "latent_image", init_latent); is_error(err)) {
-        return err;
-    }
+    SD_RETURN_IF_ERROR(get_input(inputs, "latent_image", init_latent));
     float denoise = get_input_opt<float>(inputs, "denoise", 1.0f);
 
     *out_result = sd_sampler_run(sd_ctx, init_latent.get(), positive.get(), negative.get(), &sample_params, denoise);

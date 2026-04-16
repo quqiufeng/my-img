@@ -35,13 +35,9 @@ class FaceDetectNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr image;
-        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", image));
         std::shared_ptr<face::FaceDetector> detector;
-        if (sd_error_t err = get_input(inputs, "model", detector); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "model", detector));
         float threshold =
             get_input_opt<float>(inputs, "confidence_threshold", 0.5f);
 

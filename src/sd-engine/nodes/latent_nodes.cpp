@@ -31,13 +31,9 @@ class EmptyLatentImageNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int width;
-        if (sd_error_t err = get_input(inputs, "width", width); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "width", width));
         int height;
-        if (sd_error_t err = get_input(inputs, "height", height); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "height", height));
 
         sd_latent_t* latent = sd_create_empty_latent(nullptr, width, height);
         if (!latent) {
@@ -73,9 +69,7 @@ class VAEEncodeNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_image_t image;
-        if (sd_error_t err = get_input(inputs, "pixels", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "pixels", image));
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "vae");
 
         if (!image.data) {
@@ -118,9 +112,7 @@ class VAEDecodeNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         LatentPtr latent;
-        if (sd_error_t err = get_input(inputs, "samples", latent); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "samples", latent));
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "vae");
 
         if (!latent) {
@@ -340,9 +332,7 @@ class DeepHighResFixNode : public Node {
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "model");
         ConditioningPtr positive;
-        if (sd_error_t err = get_input(inputs, "positive", positive); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "positive", positive));
         ConditioningPtr negative =
             get_input_opt<ConditioningPtr>(inputs, "negative", nullptr);
 
@@ -418,9 +408,7 @@ class DeepHighResFixNode : public Node {
 
         if (inputs.count("init_image")) {
             ImagePtr init_img;
-            if (sd_error_t err = get_input(inputs, "init_image", init_img); is_error(err)) {
-                return err;
-            }
+            SD_RETURN_IF_ERROR(get_input(inputs, "init_image", init_img));
             if (init_img && init_img->data) {
                 gen_params.init_image = *init_img;
             }

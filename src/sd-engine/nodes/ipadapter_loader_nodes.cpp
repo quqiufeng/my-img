@@ -32,9 +32,7 @@ class IPAdapterLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string path;
-        if (sd_error_t err = get_input(inputs, "ipadapter_file", path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "ipadapter_file", path));
         int cross_attention_dim = get_input_opt<int>(inputs, "cross_attention_dim", 768);
         int num_tokens = get_input_opt<int>(inputs, "num_tokens", 4);
         int clip_embeddings_dim = get_input_opt<int>(inputs, "clip_embeddings_dim", 1024);

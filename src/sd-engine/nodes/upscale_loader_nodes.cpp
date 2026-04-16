@@ -31,9 +31,7 @@ class UpscaleModelLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string model_path;
-        if (sd_error_t err = get_input(inputs, "model_name", model_path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "model_name", model_path));
         bool use_gpu = get_input_opt<bool>(inputs, "use_gpu", true);
         int tile_size = get_input_opt<int>(inputs, "tile_size", 512);
 

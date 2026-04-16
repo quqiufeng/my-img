@@ -38,13 +38,9 @@ class FaceRestoreWithModelNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr image;
-        if (sd_error_t err = get_input(inputs, "image", image); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", image));
         std::shared_ptr<face::FaceRestorer> restorer;
-        if (sd_error_t err = get_input(inputs, "face_restore_model", restorer); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "face_restore_model", restorer));
         float fidelity = get_input_opt<float>(inputs, "codeformer_fidelity", 0.5f);
 
         if (!image || !image->data || !restorer) {
@@ -60,9 +56,7 @@ class FaceRestoreWithModelNode : public Node {
 
         std::shared_ptr<face::FaceDetector> detector;
         if (inputs.count("face_detect_model")) {
-            if (sd_error_t err = get_input(inputs, "face_detect_model", detector); is_error(err)) {
-                return err;
-            }
+            SD_RETURN_IF_ERROR(get_input(inputs, "face_detect_model", detector));
         }
 
         std::vector<uint8_t> rgb_data(image->width * image->height * 3);

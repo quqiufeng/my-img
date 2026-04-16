@@ -31,9 +31,7 @@ class LoRALoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string lora_path;
-        if (sd_error_t err = get_input(inputs, "lora_name", lora_path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "lora_name", lora_path));
         float strength_model = get_input_opt<float>(inputs, "strength_model", 1.0f);
         float strength_clip = get_input_opt<float>(inputs, "strength_clip", 1.0f);
 
@@ -115,9 +113,7 @@ class ControlNetLoaderNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string path;
-        if (sd_error_t err = get_input(inputs, "control_net_name", path); is_error(err)) {
-            return err;
-        }
+        SD_RETURN_IF_ERROR(get_input(inputs, "control_net_name", path));
         if (path.empty()) {
             LOG_ERROR("[ERROR] ControlNetLoader: control_net_name is required\n");
             return sd_error_t::ERROR_INVALID_INPUT;
