@@ -50,7 +50,10 @@ class CannyEdgePreprocessorNode : public Node {
 
         std::vector<uint8_t> gray(pixel_count);
         std::vector<uint8_t> edges(pixel_count, 0);
-        std::vector<uint8_t> dst_data(pixel_count * 3);
+        auto dst_data = make_malloc_buffer(pixel_count * 3);
+        if (!dst_data) {
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
 
         for (size_t i = 0; i < pixel_count; i++) {
             uint8_t r = src->data[i * 3 + 0];
@@ -198,7 +201,11 @@ class ImageRemoveBackgroundNode : public Node {
                          STBIR_COLORSPACE_LINEAR, nullptr);
         }
 
-        std::vector<uint8_t> rgba_data(src_w * src_h * 4);
+        auto rgba_data = make_malloc_buffer(src_w * src_h * 4);
+        if (!rgba_data) {
+            LOG_ERROR("[ERROR] ImageRemoveBackground: Out of memory\n");
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
         for (int i = 0; i < src_w * src_h; i++) {
             rgba_data[i * 4 + 0] = image->data[i * src_c + 0];
             rgba_data[i * 4 + 1] = image->data[i * src_c + 1];
@@ -212,7 +219,12 @@ class ImageRemoveBackgroundNode : public Node {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
 
-        auto mask_img = create_image_ptr(src_w, src_h, 1, std::move(mask_resized));
+        auto mask_mb = make_malloc_buffer(mask_resized.size());
+        if (!mask_mb) {
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
+        memcpy(mask_mb.get(), mask_resized.data(), mask_resized.size());
+        auto mask_img = create_image_ptr(src_w, src_h, 1, std::move(mask_mb));
         if (!mask_img) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }

@@ -232,7 +232,11 @@ class ImageScaleNode : public Node {
                  target_width, target_height, method.c_str());
 
         size_t dst_size = target_width * target_height * src_image->channel;
-        std::vector<uint8_t> dst_data(dst_size);
+        auto dst_data = make_malloc_buffer(dst_size);
+        if (!dst_data) {
+            LOG_ERROR("[ERROR] ImageScale: Out of memory\n");
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
 
         stbir_filter filter = STBIR_FILTER_DEFAULT;
         if (method == "nearest") {
@@ -243,7 +247,7 @@ class ImageScaleNode : public Node {
             filter = STBIR_FILTER_CATMULLROM;
         }
 
-        stbir_resize(src_image->data, src_image->width, src_image->height, 0, dst_data.data(), target_width,
+        stbir_resize(src_image->data, src_image->width, src_image->height, 0, dst_data.get(), target_width,
                      target_height, 0, STBIR_TYPE_UINT8, src_image->channel, -1, 0, STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP,
                      filter, filter, STBIR_COLORSPACE_LINEAR, nullptr);
 
@@ -305,7 +309,11 @@ class ImageCropNode : public Node {
 
         LOG_INFO("[ImageCrop] Cropping to (%d,%d) size %dx%d\n", crop_x, crop_y, crop_width, crop_height);
 
-        std::vector<uint8_t> dst_data(crop_width * crop_height * src_image->channel);
+        auto dst_data = make_malloc_buffer(crop_width * crop_height * src_image->channel);
+        if (!dst_data) {
+            LOG_ERROR("[ERROR] ImageCrop: Out of memory\n");
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
 
         int src_stride = src_image->width * src_image->channel;
         int dst_stride = crop_width * src_image->channel;
@@ -313,7 +321,7 @@ class ImageCropNode : public Node {
 
         for (int y = 0; y < crop_height; y++) {
             uint8_t* src_row = src_image->data + (crop_y + y) * src_stride + crop_x * src_image->channel;
-            uint8_t* dst_row = dst_data.data() + y * dst_stride;
+            uint8_t* dst_row = dst_data.get() + y * dst_stride;
             memcpy(dst_row, src_row, row_bytes);
         }
 
@@ -485,7 +493,10 @@ class ImageBlendNode : public Node {
         int ch2 = (int)img2->channel;
         int out_channels = std::max(channels, ch2);
 
-        std::vector<uint8_t> dst_data(width * height * out_channels);
+        auto dst_data = make_malloc_buffer(width * height * out_channels);
+        if (!dst_data) {
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -589,8 +600,12 @@ class ImageCompositeMaskedNode : public Node {
             src_stride_h = dst_h;
         }
 
-        std::vector<uint8_t> out_data(dst_w * dst_h * dst_c);
-        memcpy(out_data.data(), dst->data, dst_w * dst_h * dst_c);
+        auto out_data = make_malloc_buffer(dst_w * dst_h * dst_c);
+        if (!out_data) {
+            LOG_ERROR("[ERROR] ImageCompositeMasked: Out of memory\n");
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
+        memcpy(out_data.get(), dst->data, dst_w * dst_h * dst_c);
 
         for (int y = 0; y < src_stride_h; y++) {
             int dst_y = offset_y + y;
@@ -669,7 +684,9 @@ class ImageInvertNode : public Node {
         int c = (int)img->channel;
         size_t pixels = w * h * c;
 
-        std::vector<uint8_t> dst(pixels);
+        auto dst = make_malloc_buffer(pixels);
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
             for (int ch = 0; ch < c; ch++) {
@@ -729,7 +746,9 @@ class ImageColorAdjustNode : public Node {
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        std::vector<uint8_t> dst(w * h * c);
+        auto dst = make_malloc_buffer(w * h * c);
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
             float r = img->data[i * c + 0] / 255.0f;
@@ -802,7 +821,9 @@ class ImageBlurNode : public Node {
         int h = (int)img->height;
         int c = (int)img->channel;
 
-        std::vector<uint8_t> dst(w * h * c);
+        auto dst = make_malloc_buffer(w * h * c);
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         // 使用分离核优化：先水平模糊，再垂直模糊
         // 复杂度从 O(w*h*r^2) 降到 O(w*h*r)
@@ -899,7 +920,9 @@ class ImageGrayscaleNode : public Node {
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        std::vector<uint8_t> dst(w * h);
+        auto dst = make_malloc_buffer(w * h);
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
             dst[i] = (uint8_t)(0.299f * img->data[i * c + 0] + 0.587f * img->data[i * c + 1] +
@@ -950,7 +973,9 @@ class ImageThresholdNode : public Node {
         int h = (int)img->height;
         int c = (int)img->channel;
 
-        std::vector<uint8_t> dst(w * h * c);
+        auto dst = make_malloc_buffer(w * h * c);
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
             for (int ch = 0; ch < c; ch++) {
