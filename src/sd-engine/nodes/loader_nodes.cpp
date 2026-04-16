@@ -600,13 +600,14 @@ class UnloadModelNode : public Node {
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
-        try {
-            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("model"));
+        const auto& model_val = inputs.at("model");
+        if (model_val.type() == typeid(SDContextPtr)) {
+            auto ctx_ptr = std::any_cast<SDContextPtr>(model_val);
             if (ctx_ptr) {
                 LOG_INFO("[UnloadModel] Releasing model context (ref_count=%ld)\n", ctx_ptr.use_count());
             }
-        } catch (const std::bad_any_cast&) {
-            sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("model"));
+        } else if (model_val.type() == typeid(sd_ctx_t*)) {
+            sd_ctx_t* sd_ctx = std::any_cast<sd_ctx_t*>(model_val);
             if (sd_ctx) {
                 LOG_INFO("[UnloadModel] Releasing raw model context\n");
                 free_sd_ctx(sd_ctx);

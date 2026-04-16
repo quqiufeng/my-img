@@ -30,13 +30,7 @@ class CLIPSetLastLayerNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_ctx_t* sd_ctx = nullptr;
-        try {
-            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
-            sd_ctx = ctx_ptr.get();
-        } catch (const std::bad_any_cast&) {
-            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
-        }
+        sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "clip");
         int clip_skip = inputs.count("stop_at_clip_layer") ? std::any_cast<int>(inputs.at("stop_at_clip_layer")) : -1;
 
         if (!sd_ctx) {
@@ -46,10 +40,9 @@ class CLIPSetLastLayerNode : public Node {
 
         CLIPWrapper wrapper;
         wrapper.sd_ctx = sd_ctx;
-        try {
-            wrapper.sd_ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
-        } catch (...) {
-        }
+        const auto& clip_val = inputs.at("clip");
+        if (clip_val.type() == typeid(SDContextPtr))
+            wrapper.sd_ctx_ptr = std::any_cast<SDContextPtr>(clip_val);
         wrapper.clip_skip = clip_skip;
 
         outputs["CLIP"] = wrapper;
@@ -80,13 +73,7 @@ class CLIPVisionEncodeNode : public Node {
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
-        sd_ctx_t* sd_ctx = nullptr;
-        try {
-            auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
-            sd_ctx = ctx_ptr.get();
-        } catch (const std::bad_any_cast&) {
-            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
-        }
+        sd_ctx_t* sd_ctx = extract_sd_ctx(inputs, "clip");
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
 
         if (!sd_ctx || !image || !image->data) {
@@ -134,21 +121,16 @@ class CLIPTextEncodeNode : public Node {
         int clip_skip = inputs.count("clip_skip") ? std::any_cast<int>(inputs.at("clip_skip")) : -1;
 
         sd_ctx_t* sd_ctx = nullptr;
-        try {
-            // Try CLIPWrapper first (from CLIPSetLastLayer)
-            CLIPWrapper wrapper = std::any_cast<CLIPWrapper>(inputs.at("clip"));
+        const auto& clip_val = inputs.at("clip");
+        if (clip_val.type() == typeid(CLIPWrapper)) {
+            const auto& wrapper = std::any_cast<CLIPWrapper>(clip_val);
             sd_ctx = wrapper.sd_ctx;
-            if (clip_skip == -1) {
+            if (clip_skip == -1)
                 clip_skip = wrapper.clip_skip;
-            }
-        } catch (const std::bad_any_cast&) {
-            // Fallback to SDContextPtr or raw sd_ctx_t*
-            try {
-                auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
-                sd_ctx = ctx_ptr.get();
-            } catch (const std::bad_any_cast&) {
-                sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
-            }
+        } else if (clip_val.type() == typeid(SDContextPtr)) {
+            sd_ctx = std::any_cast<SDContextPtr>(clip_val).get();
+        } else if (clip_val.type() == typeid(sd_ctx_t*)) {
+            sd_ctx = std::any_cast<sd_ctx_t*>(clip_val);
         }
 
         if (!sd_ctx) {

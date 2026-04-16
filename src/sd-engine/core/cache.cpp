@@ -64,6 +64,42 @@ void ExecutionCache::put(const std::string& node_id, const std::string& hash, co
     }
 }
 
+void ExecutionCache::put(const std::string& node_id, const std::string& hash, NodeOutputs&& outputs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::string key = make_key(node_id, hash);
+    size_t entry_size = estimate_size(outputs);
+
+    auto it = cache_.find(key);
+    if (it != cache_.end()) {
+        // 更新已有条目
+        current_size_ -= it->second.entry.memory_size;
+        it->second.entry.outputs = std::move(outputs);
+        it->second.entry.last_access = std::chrono::steady_clock::now();
+        it->second.entry.memory_size = entry_size;
+        current_size_ += entry_size;
+        touch(key);
+    } else {
+        // 新条目
+        while (current_size_ + entry_size > max_size_ && !cache_.empty()) {
+            evict_one();
+        }
+
+        lru_list_.push_back(key);
+        CacheEntry entry;
+        entry.hash = hash;
+        entry.outputs = std::move(outputs);
+        entry.last_access = std::chrono::steady_clock::now();
+        entry.memory_size = entry_size;
+
+        CacheItem item;
+        item.entry = std::move(entry);
+        item.lru_iter = std::prev(lru_list_.end());
+        cache_[key] = std::move(item);
+        current_size_ += entry_size;
+    }
+}
+
 void ExecutionCache::touch(const std::string& key) const {
     auto it = cache_.find(key);
     if (it == cache_.end())

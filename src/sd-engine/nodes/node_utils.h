@@ -67,19 +67,29 @@ inline ImagePtr create_image_ptr(int w, int h, int c, MallocBuffer&& buffer, sd_
     return make_image_ptr(img);
 }
 
-/// 获取 sd_ctx_t*，兼容 SDContextPtr 和裸指针
-inline sd_ctx_t* extract_sd_ctx(const NodeInputs& inputs, const std::string& key) {
-    sd_ctx_t* sd_ctx = nullptr;
-    try {
-        auto ctx_ptr = std::any_cast<SDContextPtr>(inputs.at(key));
-        sd_ctx = ctx_ptr.get();
-    } catch (const std::bad_any_cast&) {
-        try {
-            sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at(key));
-        } catch (...) {
-        }
+/// 从 vector 创建 ImagePtr（内部自动转换为 MallocBuffer）
+inline ImagePtr create_image_ptr(int w, int h, int c, std::vector<uint8_t>&& buffer, sd_error_t* out_err = nullptr) {
+    auto mb = make_malloc_buffer(buffer.size());
+    if (!mb) {
+        if (out_err)
+            *out_err = sd_error_t::ERROR_MEMORY_ALLOCATION;
+        return nullptr;
     }
-    return sd_ctx;
+    memcpy(mb.get(), buffer.data(), buffer.size());
+    return create_image_ptr(w, h, c, std::move(mb), out_err);
+}
+
+/// 获取 sd_ctx_t*，兼容 SDContextPtr 和裸指针（无异常控制流）
+inline sd_ctx_t* extract_sd_ctx(const NodeInputs& inputs, const std::string& key) {
+    auto it = inputs.find(key);
+    if (it == inputs.end())
+        return nullptr;
+    const auto& val = it->second;
+    if (val.type() == typeid(SDContextPtr))
+        return std::any_cast<SDContextPtr>(val).get();
+    if (val.type() == typeid(sd_ctx_t*))
+        return std::any_cast<sd_ctx_t*>(val);
+    return nullptr;
 }
 
 // ============================================================================

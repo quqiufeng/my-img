@@ -344,10 +344,11 @@ sd_error_t DAGExecutor::execute_node(Node* node, const NodeInputs& inputs, NodeO
     // 实际执行
     sd_error_t err = node->execute(inputs, outputs);
 
-    // 存入缓存
+    // 存入缓存（移动存入后重新取出，保证 outputs 仍有效供调用方使用）
     if (is_ok(err) && config.use_cache && cache_) {
         std::string hash = node->compute_hash(inputs);
-        cache_->put(node->get_id(), hash, outputs);
+        cache_->put(node->get_id(), hash, std::move(outputs));
+        outputs = cache_->get(node->get_id(), hash);
     }
 
     return err;

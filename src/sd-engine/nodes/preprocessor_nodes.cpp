@@ -89,25 +89,12 @@ class CannyEdgePreprocessorNode : public Node {
             dst_data[i * 3 + 2] = val;
         }
 
-        auto final_data = make_malloc_buffer(dst_data.size());
-        if (!final_data) {
+        auto out_img = create_image_ptr(w, h, 3, std::move(dst_data));
+        if (!out_img) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data.get(), dst_data.data(), dst_data.size());
 
-        sd_image_t dst_image = {};
-        dst_image.width = w;
-        dst_image.height = h;
-        dst_image.channel = 3;
-        dst_image.data = final_data.release();
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        *result = dst_image;
-
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[CannyEdgePreprocessor] Done\n");
         return sd_error_t::OK;
     }
@@ -219,39 +206,19 @@ class ImageRemoveBackgroundNode : public Node {
             rgba_data[i * 4 + 3] = mask_resized[i];
         }
 
-        auto final_rgba = make_malloc_buffer(rgba_data.size());
-        if (!final_rgba) {
+        auto result_img = create_image_ptr(src_w, src_h, 4, std::move(rgba_data));
+        if (!result_img) {
             LOG_ERROR("[ERROR] ImageRemoveBackground: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_rgba.get(), rgba_data.data(), rgba_data.size());
 
-        sd_image_t* result_img = acquire_image();
-        if (!result_img) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result_img->width = src_w;
-        result_img->height = src_h;
-        result_img->channel = 4;
-        result_img->data = final_rgba.release();
-
-        auto final_mask = make_malloc_buffer(src_w * src_h);
-        if (!final_mask) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        memcpy(final_mask.get(), mask_resized.data(), src_w * src_h);
-
-        sd_image_t* mask_img = acquire_image();
+        auto mask_img = create_image_ptr(src_w, src_h, 1, std::move(mask_resized));
         if (!mask_img) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        mask_img->width = src_w;
-        mask_img->height = src_h;
-        mask_img->channel = 1;
-        mask_img->data = final_mask.release();
 
-        outputs["IMAGE"] = make_image_ptr(result_img);
-        outputs["MASK"] = make_image_ptr(mask_img);
+        outputs["IMAGE"] = result_img;
+        outputs["MASK"] = mask_img;
         LOG_INFO("[ImageRemoveBackground] Removed background: %dx%d -> RGBA + Mask\n", src_w, src_h);
         return sd_error_t::OK;
     }
@@ -300,25 +267,12 @@ class LineArtPreprocessorNode : public Node {
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        auto final_data = make_malloc_buffer(result.data.size());
-        if (!final_data) {
+        auto out_img = create_image_ptr(result.width, result.height, 3, std::move(result.data));
+        if (!out_img) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data.get(), result.data.data(), result.data.size());
 
-        sd_image_t dst_image = {};
-        dst_image.width = result.width;
-        dst_image.height = result.height;
-        dst_image.channel = 3;
-        dst_image.data = final_data.release();
-
-        sd_image_t* image_result = acquire_image();
-        if (!image_result) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        *image_result = dst_image;
-
-        outputs["IMAGE"] = make_image_ptr(image_result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[LineArtPreprocessor] Done\n");
         return sd_error_t::OK;
     }

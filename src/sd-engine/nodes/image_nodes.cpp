@@ -125,22 +125,12 @@ class LoadImageMaskNode : public Node {
         }
         stbi_image_free(data);
 
-        auto final_data = make_malloc_buffer(mask_data.size());
-        if (!final_data) {
+        auto mask_img = create_image_ptr(w, h, 3, std::move(mask_data));
+        if (!mask_img) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data.get(), mask_data.data(), mask_data.size());
 
-        sd_image_t* mask = acquire_image();
-        if (!mask) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        mask->width = w;
-        mask->height = h;
-        mask->channel = 3;
-        mask->data = final_data.release();
-
-        outputs["MASK"] = make_image_ptr(mask);
+        outputs["MASK"] = mask_img;
         LOG_INFO("[LoadImageMask] Loaded mask: %dx%d\n", w, h);
         return sd_error_t::OK;
     }
@@ -257,27 +247,13 @@ class ImageScaleNode : public Node {
                      target_height, 0, STBIR_TYPE_UINT8, src_image->channel, -1, 0, STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP,
                      filter, filter, STBIR_COLORSPACE_LINEAR, nullptr);
 
-        auto final_data = make_malloc_buffer(dst_data.size());
-        if (!final_data) {
+        auto out_img = create_image_ptr(target_width, target_height, src_image->channel, std::move(dst_data));
+        if (!out_img) {
             LOG_ERROR("[ERROR] ImageScale: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data.get(), dst_data.data(), dst_data.size());
 
-        sd_image_t dst_image = {};
-        dst_image.width = target_width;
-        dst_image.height = target_height;
-        dst_image.channel = src_image->channel;
-        dst_image.data = final_data.release();
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            LOG_ERROR("[ERROR] ImageScale: Out of memory\n");
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        *result = dst_image;
-
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageScale] Resized successfully\n");
         return sd_error_t::OK;
     }
@@ -341,27 +317,13 @@ class ImageCropNode : public Node {
             memcpy(dst_row, src_row, row_bytes);
         }
 
-        auto final_data = make_malloc_buffer(dst_data.size());
-        if (!final_data) {
+        auto out_img = create_image_ptr(crop_width, crop_height, src_image->channel, std::move(dst_data));
+        if (!out_img) {
             LOG_ERROR("[ERROR] ImageCrop: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data.get(), dst_data.data(), dst_data.size());
 
-        sd_image_t dst_image = {};
-        dst_image.width = crop_width;
-        dst_image.height = crop_height;
-        dst_image.channel = src_image->channel;
-        dst_image.data = final_data.release();
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            LOG_ERROR("[ERROR] ImageCrop: Out of memory\n");
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        *result = dst_image;
-
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageCrop] Cropped successfully\n");
         return sd_error_t::OK;
     }
@@ -555,22 +517,12 @@ class ImageBlendNode : public Node {
             }
         }
 
-        auto final_data = make_malloc_buffer(dst_data.size());
-        if (!final_data) {
+        auto out_img = create_image_ptr(width, height, out_channels, std::move(dst_data));
+        if (!out_img) {
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data.get(), dst_data.data(), dst_data.size());
 
-        sd_image_t* result_img = acquire_image();
-        if (!result_img) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result_img->width = width;
-        result_img->height = height;
-        result_img->channel = out_channels;
-        result_img->data = final_data.release();
-
-        outputs["IMAGE"] = make_image_ptr(result_img);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageBlend] Blended %dx%dx%d (mode=%s, factor=%.2f)\n", width, height, out_channels,
                  blend_mode.c_str(), blend_factor);
         return sd_error_t::OK;
@@ -672,24 +624,13 @@ class ImageCompositeMaskedNode : public Node {
             }
         }
 
-        auto final_data = make_malloc_buffer(out_data.size());
-        if (!final_data) {
+        auto out_img = create_image_ptr(dst_w, dst_h, dst_c, std::move(out_data));
+        if (!out_img) {
             LOG_ERROR("[ERROR] ImageCompositeMasked: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
-        memcpy(final_data.get(), out_data.data(), out_data.size());
 
-        sd_image_t* result_img = acquire_image();
-        if (!result_img) {
-            LOG_ERROR("[ERROR] ImageCompositeMasked: Out of memory\n");
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result_img->width = dst_w;
-        result_img->height = dst_h;
-        result_img->channel = dst_c;
-        result_img->data = final_data.release();
-
-        outputs["IMAGE"] = make_image_ptr(result_img);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageCompositeMasked] Composited source onto destination at (%d,%d)\n", offset_x, offset_y);
         return sd_error_t::OK;
     }
@@ -736,20 +677,10 @@ class ImageInvertNode : public Node {
             }
         }
 
-        auto final_data = make_malloc_buffer(dst.size());
-        if (!final_data)
+        auto out_img = create_image_ptr(w, h, c, std::move(dst));
+        if (!out_img)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(final_data.get(), dst.data(), dst.size());
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result->width = w;
-        result->height = h;
-        result->channel = c;
-        result->data = final_data.release();
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageInvert] Inverted %dx%dx%d\n", w, h, c);
         return sd_error_t::OK;
     }
@@ -825,20 +756,10 @@ class ImageColorAdjustNode : public Node {
                 dst[i * c + 3] = img->data[i * c + 3];
         }
 
-        auto final_data = make_malloc_buffer(dst.size());
-        if (!final_data)
+        auto out_img = create_image_ptr(w, h, c, std::move(dst));
+        if (!out_img)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(final_data.get(), dst.data(), dst.size());
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result->width = w;
-        result->height = h;
-        result->channel = c;
-        result->data = final_data.release();
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageColorAdjust] Adjusted %dx%dx%d (b=%.2f, c=%.2f, s=%.2f)\n", w, h, c, brightness, contrast,
                  saturation);
         return sd_error_t::OK;
@@ -933,20 +854,10 @@ class ImageBlurNode : public Node {
             }
         }
 
-        auto final_data = make_malloc_buffer(dst.size());
-        if (!final_data)
+        auto out_img = create_image_ptr(w, h, c, std::move(dst));
+        if (!out_img)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(final_data.get(), dst.data(), dst.size());
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result->width = w;
-        result->height = h;
-        result->channel = c;
-        result->data = final_data.release();
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageBlur] Blurred %dx%dx%d (radius=%d)\n", w, h, c, radius);
         return sd_error_t::OK;
     }
@@ -995,20 +906,10 @@ class ImageGrayscaleNode : public Node {
                                0.114f * img->data[i * c + 2] + 0.5f);
         }
 
-        auto final_data = make_malloc_buffer(dst.size());
-        if (!final_data)
+        auto out_img = create_image_ptr(w, h, 1, std::move(dst));
+        if (!out_img)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(final_data.get(), dst.data(), dst.size());
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result->width = w;
-        result->height = h;
-        result->channel = c;
-        result->data = final_data.release();
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageGrayscale] Converted %dx%d to grayscale\n", w, h);
         return sd_error_t::OK;
     }
@@ -1057,20 +958,10 @@ class ImageThresholdNode : public Node {
             }
         }
 
-        auto final_data = make_malloc_buffer(dst.size());
-        if (!final_data)
+        auto out_img = create_image_ptr(w, h, c, std::move(dst));
+        if (!out_img)
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        memcpy(final_data.get(), dst.data(), dst.size());
-
-        sd_image_t* result = acquire_image();
-        if (!result) {
-            return sd_error_t::ERROR_MEMORY_ALLOCATION;
-        }
-        result->width = w;
-        result->height = h;
-        result->channel = c;
-        result->data = final_data.release();
-        outputs["IMAGE"] = make_image_ptr(result);
+        outputs["IMAGE"] = out_img;
         LOG_INFO("[ImageThreshold] Thresholded %dx%dx%d (threshold=%d)\n", w, h, c, threshold);
         return sd_error_t::OK;
     }

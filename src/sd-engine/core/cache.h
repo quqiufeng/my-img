@@ -44,8 +44,11 @@ class ExecutionCache {
     /// @brief 从缓存中获取条目（同时更新访问时间）
     NodeOutputs get(const std::string& node_id, const std::string& hash);
 
-    /// @brief 将条目存入缓存
+    /// @brief 将条目存入缓存（拷贝版本）
     void put(const std::string& node_id, const std::string& hash, const NodeOutputs& outputs);
+
+    /// @brief 将条目存入缓存（移动版本，优先使用以避免不必要的拷贝）
+    void put(const std::string& node_id, const std::string& hash, NodeOutputs&& outputs);
 
     /// @brief 垃圾回收：清理过期或超量的缓存条目
     void gc();
