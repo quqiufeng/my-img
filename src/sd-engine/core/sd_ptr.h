@@ -10,9 +10,9 @@
 
 #pragma once
 
-#include "stable-diffusion.h"
-#include "stable-diffusion-ext.h"
 #include "object_pool.h"
+#include "stable-diffusion-ext.h"
+#include "stable-diffusion.h"
 #include <memory>
 
 namespace sdengine {
@@ -26,21 +26,19 @@ namespace sdengine {
 /// 注意：sd_latent_t 和 sd_conditioning_t 在 stable-diffusion-ext.h 中是前向声明
 /// （不完整类型），无法直接池化。只有 sd_image_t 有完整定义，可以池化。
 inline ObjectPool<sd_image_t>& get_image_pool() {
-    static ObjectPool<sd_image_t> pool(
-        []() { return new sd_image_t(); },
-        [](sd_image_t* p) {
-            if (p) {
-                if (p->data) {
-                    free(p->data);
-                    p->data = nullptr;
-                }
-                p->width = 0;
-                p->height = 0;
-                p->channel = 0;
-            }
-        },
-        16
-    );
+    static ObjectPool<sd_image_t> pool([]() { return new sd_image_t(); },
+                                       [](sd_image_t* p) {
+                                           if (p) {
+                                               if (p->data) {
+                                                   free(p->data);
+                                                   p->data = nullptr;
+                                               }
+                                               p->width = 0;
+                                               p->height = 0;
+                                               p->channel = 0;
+                                           }
+                                       },
+                                       16);
     return pool;
 }
 
@@ -75,23 +73,25 @@ struct ImageDeleter {
 /// @brief upscaler_ctx_t 自定义删除器
 struct UpscalerDeleter {
     void operator()(upscaler_ctx_t* p) const {
-        if (p) free_upscaler_ctx(p);
+        if (p)
+            free_upscaler_ctx(p);
     }
 };
 
 /// @brief sd_ctx_t 自定义删除器
 struct SDContextDeleter {
     void operator()(sd_ctx_t* p) const {
-        if (p) free_sd_ctx(p);
+        if (p)
+            free_sd_ctx(p);
     }
 };
 
-using LatentPtr           = std::shared_ptr<sd_latent_t>;                ///< latent 智能指针
-using ConditioningPtr     = std::shared_ptr<sd_conditioning_t>;          ///< conditioning 智能指针
-using ImagePtr            = std::shared_ptr<sd_image_t>;                 ///< image 智能指针
-using UpscalerPtr         = std::shared_ptr<upscaler_ctx_t>;             ///< upscaler 智能指针
-using CLIPVisionOutputPtr = std::shared_ptr<sd_clip_vision_output_t>;    ///< CLIP Vision 输出智能指针
-using SDContextPtr        = std::shared_ptr<sd_ctx_t>;                   ///< SD 上下文智能指针
+using LatentPtr = std::shared_ptr<sd_latent_t>;                       ///< latent 智能指针
+using ConditioningPtr = std::shared_ptr<sd_conditioning_t>;           ///< conditioning 智能指针
+using ImagePtr = std::shared_ptr<sd_image_t>;                         ///< image 智能指针
+using UpscalerPtr = std::shared_ptr<upscaler_ctx_t>;                  ///< upscaler 智能指针
+using CLIPVisionOutputPtr = std::shared_ptr<sd_clip_vision_output_t>; ///< CLIP Vision 输出智能指针
+using SDContextPtr = std::shared_ptr<sd_ctx_t>;                       ///< SD 上下文智能指针
 
 /// @brief 创建 sd_ctx_t 智能指针
 inline SDContextPtr make_sd_context_ptr(sd_ctx_t* p) {

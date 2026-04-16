@@ -6,23 +6,17 @@
 
 #pragma once
 
-#include <cstdio>
 #include <cstdarg>
-#include <string>
+#include <cstdio>
 #include <mutex>
+#include <string>
 
 namespace sdengine {
 
-enum class LogLevel {
-    DEBUG = 0,
-    INFO = 1,
-    WARNING = 2,
-    ERROR = 3,
-    SILENT = 4
-};
+enum class LogLevel { DEBUG = 0, INFO = 1, WARNING = 2, ERROR = 3, SILENT = 4 };
 
 class Logger {
-public:
+  public:
     static Logger& instance();
 
     void set_level(LogLevel level);
@@ -33,7 +27,7 @@ public:
 
     void log(LogLevel level, const char* file, int line, const char* fmt, ...);
 
-private:
+  private:
     Logger() = default;
     ~Logger();
 
@@ -47,8 +41,8 @@ private:
 
 // 宏接口
 #define LOG_DEBUG(...) ::sdengine::Logger::instance().log(::sdengine::LogLevel::DEBUG, __FILE__, __LINE__, __VA_ARGS__)
-#define LOG_INFO(...)  ::sdengine::Logger::instance().log(::sdengine::LogLevel::INFO,  __FILE__, __LINE__, __VA_ARGS__)
-#define LOG_WARN(...)  ::sdengine::Logger::instance().log(::sdengine::LogLevel::WARNING,__FILE__, __LINE__, __VA_ARGS__)
+#define LOG_INFO(...) ::sdengine::Logger::instance().log(::sdengine::LogLevel::INFO, __FILE__, __LINE__, __VA_ARGS__)
+#define LOG_WARN(...) ::sdengine::Logger::instance().log(::sdengine::LogLevel::WARNING, __FILE__, __LINE__, __VA_ARGS__)
 #define LOG_ERROR(...) ::sdengine::Logger::instance().log(::sdengine::LogLevel::ERROR, __FILE__, __LINE__, __VA_ARGS__)
 
 } // namespace sdengine

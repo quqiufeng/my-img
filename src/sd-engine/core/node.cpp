@@ -4,8 +4,9 @@
 
 #include "node.h"
 #include "sd_ptr.h"
-#include <sstream>
+#include <cstring>
 #include <iomanip>
+#include <sstream>
 
 namespace sdengine {
 
@@ -22,14 +23,22 @@ std::string Node::compute_hash(const NodeInputs& inputs) const {
         } else if (value.type() == typeid(int64_t)) {
             ss << std::any_cast<int64_t>(value);
         } else if (value.type() == typeid(float)) {
-            // 避免 -0.0f 和 0.0f 哈希不同
+            // 使用 IEEE-754 二进制表示，避免平台字符串化差异和精度问题
             float f = std::any_cast<float>(value);
-            if (f == 0.0f) f = 0.0f;
-            ss << std::fixed << std::setprecision(6) << f;
+            if (f == 0.0f)
+                f = 0.0f; // 统一 -0.0f 和 0.0f
+            uint32_t bits;
+            static_assert(sizeof(bits) == sizeof(f), "float size mismatch");
+            std::memcpy(&bits, &f, sizeof(f));
+            ss << "[f:" << bits << "]";
         } else if (value.type() == typeid(double)) {
             double d = std::any_cast<double>(value);
-            if (d == 0.0) d = 0.0;
-            ss << std::fixed << std::setprecision(6) << d;
+            if (d == 0.0)
+                d = 0.0; // 统一 -0.0 和 0.0
+            uint64_t bits;
+            static_assert(sizeof(bits) == sizeof(d), "double size mismatch");
+            std::memcpy(&bits, &d, sizeof(d));
+            ss << "[d:" << bits << "]";
         } else if (value.type() == typeid(std::string)) {
             ss << std::any_cast<std::string>(value);
         } else if (value.type() == typeid(bool)) {

@@ -4,6 +4,7 @@
 // Conditioning / CLIP 相关节点实现
 // ============================================================================
 
+#include "core/log.h"
 #include "nodes/node_utils.h"
 
 namespace sdengine {
@@ -12,15 +13,16 @@ namespace sdengine {
 // CLIPSetLastLayer - 设置 CLIP 跳过层
 // ============================================================================
 class CLIPSetLastLayerNode : public Node {
-public:
-    std::string get_class_type() const override { return "CLIPSetLastLayer"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "CLIPSetLastLayer";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"clip", "CLIP", true, nullptr},
-            {"stop_at_clip_layer", "INT", false, -1}
-        };
+        return {{"clip", "CLIP", true, nullptr}, {"stop_at_clip_layer", "INT", false, -1}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -35,11 +37,10 @@ public:
         } catch (const std::bad_any_cast&) {
             sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at("clip"));
         }
-        int clip_skip = inputs.count("stop_at_clip_layer") ?
-            std::any_cast<int>(inputs.at("stop_at_clip_layer")) : -1;
+        int clip_skip = inputs.count("stop_at_clip_layer") ? std::any_cast<int>(inputs.at("stop_at_clip_layer")) : -1;
 
         if (!sd_ctx) {
-            fprintf(stderr, "[ERROR] CLIPSetLastLayer: Missing CLIP\n");
+            LOG_ERROR("[ERROR] CLIPSetLastLayer: Missing CLIP\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -47,11 +48,12 @@ public:
         wrapper.sd_ctx = sd_ctx;
         try {
             wrapper.sd_ctx_ptr = std::any_cast<SDContextPtr>(inputs.at("clip"));
-        } catch (...) {}
+        } catch (...) {
+        }
         wrapper.clip_skip = clip_skip;
 
         outputs["CLIP"] = wrapper;
-        printf("[CLIPSetLastLayer] clip_skip set to %d\n", clip_skip);
+        LOG_INFO("[CLIPSetLastLayer] clip_skip set to %d\n", clip_skip);
         return sd_error_t::OK;
     }
 };
@@ -61,15 +63,16 @@ REGISTER_NODE("CLIPSetLastLayer", CLIPSetLastLayerNode);
 // CLIPVisionEncode - CLIP Vision 图像编码
 // ============================================================================
 class CLIPVisionEncodeNode : public Node {
-public:
-    std::string get_class_type() const override { return "CLIPVisionEncode"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "CLIPVisionEncode";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"clip", "CLIP", true, nullptr},
-            {"image", "IMAGE", true, nullptr}
-        };
+        return {{"clip", "CLIP", true, nullptr}, {"image", "IMAGE", true, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -87,18 +90,18 @@ public:
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
 
         if (!sd_ctx || !image || !image->data) {
-            fprintf(stderr, "[ERROR] CLIPVisionEncode: Missing inputs\n");
+            LOG_ERROR("[ERROR] CLIPVisionEncode: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         sd_clip_vision_output_t* output = sd_clip_vision_encode_image(sd_ctx, image.get(), true);
         if (!output) {
-            fprintf(stderr, "[ERROR] CLIPVisionEncode: Failed to encode image\n");
+            LOG_ERROR("[ERROR] CLIPVisionEncode: Failed to encode image\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
         outputs["CLIP_VISION_OUTPUT"] = make_clip_vision_output_ptr(output);
-        printf("[CLIPVisionEncode] Encoded image to CLIP Vision output (numel=%d)\n", output->numel);
+        LOG_INFO("[CLIPVisionEncode] Encoded image to CLIP Vision output (numel=%d)\n", output->numel);
         return sd_error_t::OK;
     }
 };
@@ -108,29 +111,27 @@ REGISTER_NODE("CLIPVisionEncode", CLIPVisionEncodeNode);
 // CLIPTextEncode - 真正的文本编码
 // ============================================================================
 class CLIPTextEncodeNode : public Node {
-public:
-    std::string get_class_type() const override { return "CLIPTextEncode"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "CLIPTextEncode";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"text", "STRING", true, std::string("")},
-            {"clip", "CLIP", true, nullptr},
-            {"clip_skip", "INT", false, -1}
-        };
+        return {{"text", "STRING", true, std::string("")},
+                {"clip", "CLIP", true, nullptr},
+                {"clip_skip", "INT", false, -1}};
     }
 
     std::vector<PortDef> get_outputs() const override {
-        return {
-            {"CONDITIONING", "CONDITIONING"},
-            {"text", "STRING"}
-        };
+        return {{"CONDITIONING", "CONDITIONING"}, {"text", "STRING"}};
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string text = std::any_cast<std::string>(inputs.at("text"));
-        int clip_skip = inputs.count("clip_skip") ?
-            std::any_cast<int>(inputs.at("clip_skip")) : -1;
+        int clip_skip = inputs.count("clip_skip") ? std::any_cast<int>(inputs.at("clip_skip")) : -1;
 
         sd_ctx_t* sd_ctx = nullptr;
         try {
@@ -151,13 +152,13 @@ public:
         }
 
         if (!sd_ctx) {
-            fprintf(stderr, "[ERROR] CLIPTextEncode: Missing CLIP\n");
+            LOG_ERROR("[ERROR] CLIPTextEncode: Missing CLIP\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         sd_conditioning_t* cond = sd_encode_prompt(sd_ctx, text.c_str(), clip_skip);
         if (!cond) {
-            fprintf(stderr, "[ERROR] CLIPTextEncode: Failed to encode prompt\n");
+            LOG_ERROR("[ERROR] CLIPTextEncode: Failed to encode prompt\n");
             return sd_error_t::ERROR_ENCODING_FAILED;
         }
 
@@ -172,15 +173,16 @@ REGISTER_NODE("CLIPTextEncode", CLIPTextEncodeNode);
 // ConditioningCombine - 条件合并
 // ============================================================================
 class ConditioningCombineNode : public Node {
-public:
-    std::string get_class_type() const override { return "ConditioningCombine"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "ConditioningCombine";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"conditioning_1", "CONDITIONING", true, nullptr},
-            {"conditioning_2", "CONDITIONING", true, nullptr}
-        };
+        return {{"conditioning_1", "CONDITIONING", true, nullptr}, {"conditioning_2", "CONDITIONING", true, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -192,18 +194,18 @@ public:
         ConditioningPtr cond2 = std::any_cast<ConditioningPtr>(inputs.at("conditioning_2"));
 
         if (!cond1 || !cond2) {
-            fprintf(stderr, "[ERROR] ConditioningCombine: Missing inputs\n");
+            LOG_ERROR("[ERROR] ConditioningCombine: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         sd_conditioning_t* combined = sd_conditioning_concat(cond1.get(), cond2.get());
         if (!combined) {
-            fprintf(stderr, "[ERROR] ConditioningCombine: Failed to combine conditionings\n");
+            LOG_ERROR("[ERROR] ConditioningCombine: Failed to combine conditionings\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
         outputs["CONDITIONING"] = make_conditioning_ptr(combined);
-        printf("[ConditioningCombine] Combined two conditionings\n");
+        LOG_INFO("[ConditioningCombine] Combined two conditionings\n");
         return sd_error_t::OK;
     }
 };
@@ -213,15 +215,17 @@ REGISTER_NODE("ConditioningCombine", ConditioningCombineNode);
 // ConditioningConcat - 条件拼接（与 Combine 行为相同，对齐 ComfyUI 命名）
 // ============================================================================
 class ConditioningConcatNode : public Node {
-public:
-    std::string get_class_type() const override { return "ConditioningConcat"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "ConditioningConcat";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"conditioning_to", "CONDITIONING", true, nullptr},
-            {"conditioning_from", "CONDITIONING", true, nullptr}
-        };
+        return {{"conditioning_to", "CONDITIONING", true, nullptr},
+                {"conditioning_from", "CONDITIONING", true, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -233,18 +237,18 @@ public:
         ConditioningPtr cond_from = std::any_cast<ConditioningPtr>(inputs.at("conditioning_from"));
 
         if (!cond_to || !cond_from) {
-            fprintf(stderr, "[ERROR] ConditioningConcat: Missing inputs\n");
+            LOG_ERROR("[ERROR] ConditioningConcat: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         sd_conditioning_t* concat = sd_conditioning_concat(cond_to.get(), cond_from.get());
         if (!concat) {
-            fprintf(stderr, "[ERROR] ConditioningConcat: Failed to concat conditionings\n");
+            LOG_ERROR("[ERROR] ConditioningConcat: Failed to concat conditionings\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
         outputs["CONDITIONING"] = make_conditioning_ptr(concat);
-        printf("[ConditioningConcat] Concatenated two conditionings\n");
+        LOG_INFO("[ConditioningConcat] Concatenated two conditionings\n");
         return sd_error_t::OK;
     }
 };
@@ -254,16 +258,18 @@ REGISTER_NODE("ConditioningConcat", ConditioningConcatNode);
 // ConditioningAverage - 条件加权平均
 // ============================================================================
 class ConditioningAverageNode : public Node {
-public:
-    std::string get_class_type() const override { return "ConditioningAverage"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "ConditioningAverage";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"conditioning_to", "CONDITIONING", true, nullptr},
-            {"conditioning_from", "CONDITIONING", true, nullptr},
-            {"conditioning_to_strength", "FLOAT", false, 1.0f}
-        };
+        return {{"conditioning_to", "CONDITIONING", true, nullptr},
+                {"conditioning_from", "CONDITIONING", true, nullptr},
+                {"conditioning_to_strength", "FLOAT", false, 1.0f}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -273,22 +279,23 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ConditioningPtr cond_to = std::any_cast<ConditioningPtr>(inputs.at("conditioning_to"));
         ConditioningPtr cond_from = std::any_cast<ConditioningPtr>(inputs.at("conditioning_from"));
-        float strength = inputs.count("conditioning_to_strength") ?
-            std::any_cast<float>(inputs.at("conditioning_to_strength")) : 1.0f;
+        float strength = inputs.count("conditioning_to_strength")
+                             ? std::any_cast<float>(inputs.at("conditioning_to_strength"))
+                             : 1.0f;
 
         if (!cond_to || !cond_from) {
-            fprintf(stderr, "[ERROR] ConditioningAverage: Missing inputs\n");
+            LOG_ERROR("[ERROR] ConditioningAverage: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         sd_conditioning_t* averaged = sd_conditioning_average(cond_to.get(), cond_from.get(), strength);
         if (!averaged) {
-            fprintf(stderr, "[ERROR] ConditioningAverage: Failed to average conditionings\n");
+            LOG_ERROR("[ERROR] ConditioningAverage: Failed to average conditionings\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
         outputs["CONDITIONING"] = make_conditioning_ptr(averaged);
-        printf("[ConditioningAverage] Averaged conditionings (strength=%.2f)\n", strength);
+        LOG_INFO("[ConditioningAverage] Averaged conditionings (strength=%.2f)\n", strength);
         return sd_error_t::OK;
     }
 };
@@ -298,17 +305,19 @@ REGISTER_NODE("ConditioningAverage", ConditioningAverageNode);
 // ControlNetApply - 应用 ControlNet 条件
 // ============================================================================
 class ControlNetApplyNode : public Node {
-public:
-    std::string get_class_type() const override { return "ControlNetApply"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "ControlNetApply";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"conditioning", "CONDITIONING", true, nullptr},
-            {"control_net", "CONTROL_NET", true, nullptr},
-            {"image", "IMAGE", true, nullptr},
-            {"strength", "FLOAT", false, 1.0f}
-        };
+        return {{"conditioning", "CONDITIONING", true, nullptr},
+                {"control_net", "CONTROL_NET", true, nullptr},
+                {"image", "IMAGE", true, nullptr},
+                {"strength", "FLOAT", false, 1.0f}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -321,12 +330,12 @@ public:
         float strength = inputs.count("strength") ? std::any_cast<float>(inputs.at("strength")) : 1.0f;
 
         if (!cond) {
-            fprintf(stderr, "[ERROR] ControlNetApply: Missing conditioning\n");
+            LOG_ERROR("[ERROR] ControlNetApply: Missing conditioning\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        printf("[ControlNetApply] Applying ControlNet with strength=%.2f, image=%dx%d\n",
-               strength, image ? image->width : 0, image ? image->height : 0);
+        LOG_INFO("[ControlNetApply] Applying ControlNet with strength=%.2f, image=%dx%d\n", strength,
+                 image ? image->width : 0, image ? image->height : 0);
 
         outputs["CONDITIONING"] = cond;
         outputs["_control_image"] = image;
@@ -340,42 +349,39 @@ REGISTER_NODE("ControlNetApply", ControlNetApplyNode);
 // IPAdapterApply - 应用 IPAdapter 到 conditioning
 // ============================================================================
 class IPAdapterApplyNode : public Node {
-public:
-    std::string get_class_type() const override { return "IPAdapterApply"; }
-    std::string get_category() const override { return "conditioning"; }
+  public:
+    std::string get_class_type() const override {
+        return "IPAdapterApply";
+    }
+    std::string get_category() const override {
+        return "conditioning";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"conditioning", "CONDITIONING", true, nullptr},
-            {"ipadapter", "IPADAPTER", true, nullptr},
-            {"image", "IMAGE", true, nullptr},
-            {"strength", "FLOAT", false, 1.0f}
-        };
+        return {{"conditioning", "CONDITIONING", true, nullptr},
+                {"ipadapter", "IPADAPTER", true, nullptr},
+                {"image", "IMAGE", true, nullptr},
+                {"strength", "FLOAT", false, 1.0f}};
     }
 
     std::vector<PortDef> get_outputs() const override {
-        return {
-            {"CONDITIONING", "CONDITIONING"},
-            {"IPADAPTER", "IPADAPTER"},
-            {"IMAGE", "IMAGE"}
-        };
+        return {{"CONDITIONING", "CONDITIONING"}, {"IPADAPTER", "IPADAPTER"}, {"IMAGE", "IMAGE"}};
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ConditioningPtr cond = std::any_cast<ConditioningPtr>(inputs.at("conditioning"));
         IPAdapterInfo info = std::any_cast<IPAdapterInfo>(inputs.at("ipadapter"));
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        float strength = inputs.count("strength") ?
-            std::any_cast<float>(inputs.at("strength")) : 1.0f;
+        float strength = inputs.count("strength") ? std::any_cast<float>(inputs.at("strength")) : 1.0f;
 
         if (!cond) {
-            fprintf(stderr, "[ERROR] IPAdapterApply: Missing conditioning\n");
+            LOG_ERROR("[ERROR] IPAdapterApply: Missing conditioning\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         info.strength = strength;
-        printf("[IPAdapterApply] Applying IPAdapter strength=%.2f, image=%dx%d\n",
-               strength, image ? image->width : 0, image ? image->height : 0);
+        LOG_INFO("[IPAdapterApply] Applying IPAdapter strength=%.2f, image=%dx%d\n", strength, image ? image->width : 0,
+                 image ? image->height : 0);
 
         outputs["CONDITIONING"] = cond;
         outputs["IPADAPTER"] = info;

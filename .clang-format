@@ -1,0 +1,53 @@
+# my-img C++ Code Style
+# Based on LLVM style with modifications
+
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+
+# Braces
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+# Namespaces
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+# Includes
+SortIncludes: true
+IncludeBlocks: Preserve
+
+# Pointers and references
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Alignment
+AlignTrailingComments: true
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: true
+AlignAfterOpenBracket: Align
+
+# Line breaks
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# Comments
+ReflowComments: false
+
+# Constructor initializers
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+
+# Templates
+AlwaysBreakTemplateDeclarations: Yes
+
+# Penalties
+PenaltyBreakComment: 300
+PenaltyBreakString: 1000
+PenaltyExcessCharacter: 1000000

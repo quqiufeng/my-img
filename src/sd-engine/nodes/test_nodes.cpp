@@ -1,7 +1,7 @@
 // ============================================================================
 // sd-engine/nodes/test_nodes.cpp
 // ============================================================================
-// 
+//
 // 测试用节点，用于验证 sd-engine 核心功能
 // ============================================================================
 
@@ -13,18 +13,22 @@ namespace sdengine {
 
 // 常量输出节点
 class ConstantIntNode : public Node {
-public:
-    std::string get_class_type() const override { return "ConstantInt"; }
-    std::string get_category() const override { return "test"; }
-    
+  public:
+    std::string get_class_type() const override {
+        return "ConstantInt";
+    }
+    std::string get_category() const override {
+        return "test";
+    }
+
     std::vector<PortDef> get_inputs() const override {
         return {{"value", "INT", false, 42}};
     }
-    
+
     std::vector<PortDef> get_outputs() const override {
         return {{"value", "INT"}};
     }
-    
+
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int value = std::any_cast<int>(inputs.at("value"));
         outputs["value"] = value;
@@ -35,21 +39,22 @@ REGISTER_NODE("ConstantInt", ConstantIntNode);
 
 // 加法节点
 class AddIntNode : public Node {
-public:
-    std::string get_class_type() const override { return "AddInt"; }
-    std::string get_category() const override { return "test"; }
-    
-    std::vector<PortDef> get_inputs() const override {
-        return {
-            {"a", "INT", true, 0},
-            {"b", "INT", true, 0}
-        };
+  public:
+    std::string get_class_type() const override {
+        return "AddInt";
     }
-    
+    std::string get_category() const override {
+        return "test";
+    }
+
+    std::vector<PortDef> get_inputs() const override {
+        return {{"a", "INT", true, 0}, {"b", "INT", true, 0}};
+    }
+
     std::vector<PortDef> get_outputs() const override {
         return {{"result", "INT"}};
     }
-    
+
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int a = std::any_cast<int>(inputs.at("a"));
         int b = std::any_cast<int>(inputs.at("b"));
@@ -61,21 +66,22 @@ REGISTER_NODE("AddInt", AddIntNode);
 
 // 乘法节点
 class MultiplyIntNode : public Node {
-public:
-    std::string get_class_type() const override { return "MultiplyInt"; }
-    std::string get_category() const override { return "test"; }
-    
-    std::vector<PortDef> get_inputs() const override {
-        return {
-            {"a", "INT", true, 0},
-            {"b", "INT", true, 0}
-        };
+  public:
+    std::string get_class_type() const override {
+        return "MultiplyInt";
     }
-    
+    std::string get_category() const override {
+        return "test";
+    }
+
+    std::vector<PortDef> get_inputs() const override {
+        return {{"a", "INT", true, 0}, {"b", "INT", true, 0}};
+    }
+
     std::vector<PortDef> get_outputs() const override {
         return {{"result", "INT"}};
     }
-    
+
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         int a = std::any_cast<int>(inputs.at("a"));
         int b = std::any_cast<int>(inputs.at("b"));
@@ -87,18 +93,22 @@ REGISTER_NODE("MultiplyInt", MultiplyIntNode);
 
 // 打印输出节点
 class PrintIntNode : public Node {
-public:
-    std::string get_class_type() const override { return "PrintInt"; }
-    std::string get_category() const override { return "test"; }
-    
+  public:
+    std::string get_class_type() const override {
+        return "PrintInt";
+    }
+    std::string get_category() const override {
+        return "test";
+    }
+
     std::vector<PortDef> get_inputs() const override {
         return {{"value", "INT", true, 0}};
     }
-    
+
     std::vector<PortDef> get_outputs() const override {
         return {};
     }
-    
+
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
         int value = std::any_cast<int>(inputs.at("value"));

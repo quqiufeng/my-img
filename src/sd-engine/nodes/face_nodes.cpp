@@ -4,6 +4,7 @@
 // 人脸检测/修复/换脸节点实现
 // ============================================================================
 
+#include "core/log.h"
 #include "nodes/node_utils.h"
 #include <future>
 #include <mutex>
@@ -16,39 +17,38 @@ namespace sdengine {
 // FaceDetect - 人脸检测
 // ============================================================================
 class FaceDetectNode : public Node {
-public:
-    std::string get_class_type() const override { return "FaceDetect"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "FaceDetect";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"model", "FACE_DETECT_MODEL", true, nullptr},
-            {"confidence_threshold", "FLOAT", false, 0.5f}
-        };
+        return {{"image", "IMAGE", true, nullptr},
+                {"model", "FACE_DETECT_MODEL", true, nullptr},
+                {"confidence_threshold", "FLOAT", false, 0.5f}};
     }
 
     std::vector<PortDef> get_outputs() const override {
-        return {
-            {"IMAGE", "IMAGE"},
-            {"faces", "FACE_BBOX_LIST"}
-        };
+        return {{"IMAGE", "IMAGE"}, {"faces", "FACE_BBOX_LIST"}};
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
-        auto detector = std::any_cast<std::shared_ptr<face::FaceDetector> >(inputs.at("model"));
-        float threshold = inputs.count("confidence_threshold") ?
-            std::any_cast<float>(inputs.at("confidence_threshold")) : 0.5f;
+        auto detector = std::any_cast<std::shared_ptr<face::FaceDetector>>(inputs.at("model"));
+        float threshold =
+            inputs.count("confidence_threshold") ? std::any_cast<float>(inputs.at("confidence_threshold")) : 0.5f;
 
         if (!image || !image->data || !detector) {
-            fprintf(stderr, "[ERROR] FaceDetect: Missing inputs\n");
+            LOG_ERROR("[ERROR] FaceDetect: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         int channels = (int)image->channel;
         if (channels != 3 && channels != 4) {
-            fprintf(stderr, "[ERROR] FaceDetect: Only 3 or 4 channel images supported\n");
+            LOG_ERROR("[ERROR] FaceDetect: Only 3 or 4 channel images supported\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -64,15 +64,17 @@ public:
             input_ptr = rgb_data.data();
         }
 
-        face::FaceDetectResult detect_result = detector->detect(
-            input_ptr, (int)image->width, (int)image->height, threshold);
+        face::FaceDetectResult detect_result =
+            detector->detect(input_ptr, (int)image->width, (int)image->height, threshold);
 
         uint8_t* out_data = (uint8_t*)malloc(image->width * image->height * channels);
-        if (!out_data) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!out_data)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
         memcpy(out_data, image->data, image->width * image->height * channels);
 
         auto draw_rect = [&](int x1, int y1, int x2, int y2, uint8_t r, uint8_t g, uint8_t b) {
-            x1 = std::max(0, x1); y1 = std::max(0, y1);
+            x1 = std::max(0, x1);
+            y1 = std::max(0, y1);
             x2 = std::min((int)image->width - 1, x2);
             y2 = std::min((int)image->height - 1, y2);
             for (int x = x1; x <= x2; x++) {
@@ -111,7 +113,10 @@ public:
         }
 
         sd_image_t* result_img = acquire_image();
-        if (!result_img) { free(out_data); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
+        if (!result_img) {
+            free(out_data);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
         result_img->width = image->width;
         result_img->height = image->height;
         result_img->channel = channels;
@@ -119,7 +124,7 @@ public:
 
         outputs["IMAGE"] = make_image_ptr(result_img);
         outputs["faces"] = detect_result;
-        printf("[FaceDetect] Detected %zu faces\n", detect_result.faces.size());
+        LOG_INFO("[FaceDetect] Detected %zu faces\n", detect_result.faces.size());
         return sd_error_t::OK;
     }
 };
@@ -129,17 +134,19 @@ REGISTER_NODE("FaceDetect", FaceDetectNode);
 // FaceRestoreWithModel - 人脸修复（一键版）
 // ============================================================================
 class FaceRestoreWithModelNode : public Node {
-public:
-    std::string get_class_type() const override { return "FaceRestoreWithModel"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "FaceRestoreWithModel";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"face_restore_model", "FACE_RESTORE_MODEL", true, nullptr},
-            {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr},
-            {"codeformer_fidelity", "FLOAT", false, 0.5f}
-        };
+        return {{"image", "IMAGE", true, nullptr},
+                {"face_restore_model", "FACE_RESTORE_MODEL", true, nullptr},
+                {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr},
+                {"codeformer_fidelity", "FLOAT", false, 0.5f}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -149,17 +156,17 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("image"));
         auto restorer = std::any_cast<std::shared_ptr<face::FaceRestorer>>(inputs.at("face_restore_model"));
-        float fidelity = inputs.count("codeformer_fidelity") ?
-            std::any_cast<float>(inputs.at("codeformer_fidelity")) : 0.5f;
+        float fidelity =
+            inputs.count("codeformer_fidelity") ? std::any_cast<float>(inputs.at("codeformer_fidelity")) : 0.5f;
 
         if (!image || !image->data || !restorer) {
-            fprintf(stderr, "[ERROR] FaceRestoreWithModel: Missing inputs\n");
+            LOG_ERROR("[ERROR] FaceRestoreWithModel: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         int channels = (int)image->channel;
         if (channels != 3 && channels != 4) {
-            fprintf(stderr, "[ERROR] FaceRestoreWithModel: Only 3 or 4 channel images supported\n");
+            LOG_ERROR("[ERROR] FaceRestoreWithModel: Only 3 or 4 channel images supported\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -185,13 +192,17 @@ public:
         }
 
         uint8_t* out_data = (uint8_t*)malloc(image->width * image->height * channels);
-        if (!out_data) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!out_data)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
         memcpy(out_data, image->data, image->width * image->height * channels);
 
         if (detect_result.faces.empty()) {
-            printf("[FaceRestoreWithModel] No faces detected, returning original image\n");
+            LOG_INFO("[FaceRestoreWithModel] No faces detected, returning original image\n");
             sd_image_t* result_img = acquire_image();
-            if (!result_img) { free(out_data); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
+            if (!result_img) {
+                free(out_data);
+                return sd_error_t::ERROR_MEMORY_ALLOCATION;
+            }
             result_img->width = image->width;
             result_img->height = image->height;
             result_img->channel = channels;
@@ -224,7 +235,8 @@ public:
                 int crop_w = crop_x2 - crop_x1;
                 int crop_h = crop_y2 - crop_y1;
 
-                if (crop_w <= 0 || crop_h <= 0) return;
+                if (crop_w <= 0 || crop_h <= 0)
+                    return;
 
                 std::vector<uint8_t> cropped(crop_w * crop_h * 3);
                 for (int y = 0; y < crop_h; y++) {
@@ -248,12 +260,12 @@ public:
                     return;
                 }
 
-                std::vector<uint8_t> aligned_face = face::crop_face(
-                    cropped.data(), crop_w, crop_h, 3, f.landmarks, 512);
+                std::vector<uint8_t> aligned_face =
+                    face::crop_face(cropped.data(), crop_w, crop_h, 3, f.landmarks, 512);
 
                 auto restore_result = restorer->restore(aligned_face.data(), fidelity);
                 if (!restore_result.success) {
-                    fprintf(stderr, "[ERROR] FaceRestoreWithModel: Restore failed for one face\n");
+                    LOG_ERROR("[ERROR] FaceRestoreWithModel: Restore failed for one face\n");
                     return;
                 }
 
@@ -278,7 +290,8 @@ public:
         }
 
         for (const auto& job : jobs) {
-            if (!job.success) continue;
+            if (!job.success)
+                continue;
 
             std::vector<uint8_t> mask(512 * 512);
             face::generate_feather_mask(mask.data(), 512, 32);
@@ -303,22 +316,21 @@ public:
                     uint8_t m01 = mask[ay * 512 + std::min(511, ax + 1)];
                     uint8_t m10 = mask[std::min(511, ay + 1) * 512 + ax];
                     uint8_t m11 = mask[std::min(511, ay + 1) * 512 + std::min(511, ax + 1)];
-                    float mask_val = (m00 * (1 - fx) * (1 - fy) +
-                                      m01 * fx * (1 - fy) +
-                                      m10 * (1 - fx) * fy +
-                                      m11 * fx * fy) / 255.0f;
+                    float mask_val =
+                        (m00 * (1 - fx) * (1 - fy) + m01 * fx * (1 - fy) + m10 * (1 - fx) * fy + m11 * fx * fy) /
+                        255.0f;
 
-                    if (mask_val <= 0.01f) continue;
+                    if (mask_val <= 0.01f)
+                        continue;
 
                     for (int c = 0; c < 3; c++) {
                         uint8_t p00 = job.restore_result.restored_rgb[(ay * 512 + ax) * 3 + c];
                         uint8_t p01 = job.restore_result.restored_rgb[(ay * 512 + std::min(511, ax + 1)) * 3 + c];
                         uint8_t p10 = job.restore_result.restored_rgb[(std::min(511, ay + 1) * 512 + ax) * 3 + c];
-                        uint8_t p11 = job.restore_result.restored_rgb[(std::min(511, ay + 1) * 512 + std::min(511, ax + 1)) * 3 + c];
-                        float restored_val = (p00 * (1 - fx) * (1 - fy) +
-                                              p01 * fx * (1 - fy) +
-                                              p10 * (1 - fx) * fy +
-                                              p11 * fx * fy);
+                        uint8_t p11 = job.restore_result
+                                          .restored_rgb[(std::min(511, ay + 1) * 512 + std::min(511, ax + 1)) * 3 + c];
+                        float restored_val =
+                            (p00 * (1 - fx) * (1 - fy) + p01 * fx * (1 - fy) + p10 * (1 - fx) * fy + p11 * fx * fy);
 
                         int px = job.crop_x1 + x;
                         int py = job.crop_y1 + y;
@@ -333,14 +345,17 @@ public:
         }
 
         sd_image_t* result_img = acquire_image();
-        if (!result_img) { free(out_data); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
+        if (!result_img) {
+            free(out_data);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
         result_img->width = image->width;
         result_img->height = image->height;
         result_img->channel = channels;
         result_img->data = out_data;
 
         outputs["IMAGE"] = make_image_ptr(result_img);
-        printf("[FaceRestoreWithModel] Restored %zu faces\n", detect_result.faces.size());
+        LOG_INFO("[FaceRestoreWithModel] Restored %zu faces\n", detect_result.faces.size());
         return sd_error_t::OK;
     }
 };
@@ -350,17 +365,19 @@ REGISTER_NODE("FaceRestoreWithModel", FaceRestoreWithModelNode);
 // FaceSwap - 人脸换脸
 // ============================================================================
 class FaceSwapNode : public Node {
-public:
-    std::string get_class_type() const override { return "FaceSwap"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "FaceSwap";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"target_image", "IMAGE", true, nullptr},
-            {"source_image", "IMAGE", true, nullptr},
-            {"face_swap_model", "FACE_SWAP_MODEL", true, nullptr},
-            {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr}
-        };
+        return {{"target_image", "IMAGE", true, nullptr},
+                {"source_image", "IMAGE", true, nullptr},
+                {"face_swap_model", "FACE_SWAP_MODEL", true, nullptr},
+                {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -373,14 +390,14 @@ public:
         auto swapper = std::any_cast<std::shared_ptr<face::FaceSwapper>>(inputs.at("face_swap_model"));
 
         if (!target_image || !target_image->data || !source_image || !source_image->data || !swapper) {
-            fprintf(stderr, "[ERROR] FaceSwap: Missing inputs\n");
+            LOG_ERROR("[ERROR] FaceSwap: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         int target_channels = (int)target_image->channel;
         int source_channels = (int)source_image->channel;
         if ((target_channels != 3 && target_channels != 4) || (source_channels != 3 && source_channels != 4)) {
-            fprintf(stderr, "[ERROR] FaceSwap: Only 3 or 4 channel images supported\n");
+            LOG_ERROR("[ERROR] FaceSwap: Only 3 or 4 channel images supported\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -404,23 +421,31 @@ public:
             }
         };
 
-        convert_to_rgb(target_image->data, target_rgb.data(), target_channels, target_image->width * target_image->height);
-        convert_to_rgb(source_image->data, source_rgb.data(), source_channels, source_image->width * source_image->height);
+        convert_to_rgb(target_image->data, target_rgb.data(), target_channels,
+                       target_image->width * target_image->height);
+        convert_to_rgb(source_image->data, source_rgb.data(), source_channels,
+                       source_image->width * source_image->height);
 
         uint8_t* out_data = (uint8_t*)malloc(target_image->width * target_image->height * target_channels);
-        if (!out_data) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!out_data)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
         memcpy(out_data, target_image->data, target_image->width * target_image->height * target_channels);
 
         face::FaceDetectResult target_detect, source_detect;
         if (detector) {
-            target_detect = detector->detect(target_rgb.data(), (int)target_image->width, (int)target_image->height, 0.5f);
-            source_detect = detector->detect(source_rgb.data(), (int)source_image->width, (int)source_image->height, 0.5f);
+            target_detect =
+                detector->detect(target_rgb.data(), (int)target_image->width, (int)target_image->height, 0.5f);
+            source_detect =
+                detector->detect(source_rgb.data(), (int)source_image->width, (int)source_image->height, 0.5f);
         }
 
         if (target_detect.faces.empty() || source_detect.faces.empty()) {
-            printf("[FaceSwap] No faces detected in target or source, returning original target image\n");
+            LOG_INFO("[FaceSwap] No faces detected in target or source, returning original target image\n");
             sd_image_t* result_img = acquire_image();
-            if (!result_img) { free(out_data); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
+            if (!result_img) {
+                free(out_data);
+                return sd_error_t::ERROR_MEMORY_ALLOCATION;
+            }
             result_img->width = target_image->width;
             result_img->height = target_image->height;
             result_img->channel = target_channels;
@@ -468,14 +493,19 @@ public:
             return face::crop_face(cropped.data(), crop_w, crop_h, 3, face.landmarks, 128);
         };
 
-        std::vector<uint8_t> target_aligned = align_face(target_rgb, (int)target_image->width, (int)target_image->height, target_face);
-        std::vector<uint8_t> source_aligned = align_face(source_rgb, (int)source_image->width, (int)source_image->height, source_face);
+        std::vector<uint8_t> target_aligned =
+            align_face(target_rgb, (int)target_image->width, (int)target_image->height, target_face);
+        std::vector<uint8_t> source_aligned =
+            align_face(source_rgb, (int)source_image->width, (int)source_image->height, source_face);
 
         auto swap_result = swapper->swap(target_aligned.data(), source_aligned.data());
         if (!swap_result.success) {
-            fprintf(stderr, "[ERROR] FaceSwap: Swap failed\n");
+            LOG_ERROR("[ERROR] FaceSwap: Swap failed\n");
             sd_image_t* result_img = acquire_image();
-            if (!result_img) { free(out_data); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
+            if (!result_img) {
+                free(out_data);
+                return sd_error_t::ERROR_MEMORY_ALLOCATION;
+            }
             result_img->width = target_image->width;
             result_img->height = target_image->height;
             result_img->channel = target_channels;
@@ -527,22 +557,20 @@ public:
                 uint8_t m01 = mask[ay * 128 + std::min(127, ax + 1)];
                 uint8_t m10 = mask[std::min(127, ay + 1) * 128 + ax];
                 uint8_t m11 = mask[std::min(127, ay + 1) * 128 + std::min(127, ax + 1)];
-                float mask_val = (m00 * (1 - fx) * (1 - fy) +
-                                  m01 * fx * (1 - fy) +
-                                  m10 * (1 - fx) * fy +
-                                  m11 * fx * fy) / 255.0f;
+                float mask_val =
+                    (m00 * (1 - fx) * (1 - fy) + m01 * fx * (1 - fy) + m10 * (1 - fx) * fy + m11 * fx * fy) / 255.0f;
 
-                if (mask_val <= 0.01f) continue;
+                if (mask_val <= 0.01f)
+                    continue;
 
                 for (int c = 0; c < 3; c++) {
                     uint8_t p00 = swap_result.swapped_rgb[(ay * 128 + ax) * 3 + c];
                     uint8_t p01 = swap_result.swapped_rgb[(ay * 128 + std::min(127, ax + 1)) * 3 + c];
                     uint8_t p10 = swap_result.swapped_rgb[(std::min(127, ay + 1) * 128 + ax) * 3 + c];
-                    uint8_t p11 = swap_result.swapped_rgb[(std::min(127, ay + 1) * 128 + std::min(127, ax + 1)) * 3 + c];
-                    float swapped_val = (p00 * (1 - fx) * (1 - fy) +
-                                         p01 * fx * (1 - fy) +
-                                         p10 * (1 - fx) * fy +
-                                         p11 * fx * fy);
+                    uint8_t p11 =
+                        swap_result.swapped_rgb[(std::min(127, ay + 1) * 128 + std::min(127, ax + 1)) * 3 + c];
+                    float swapped_val =
+                        (p00 * (1 - fx) * (1 - fy) + p01 * fx * (1 - fy) + p10 * (1 - fx) * fy + p11 * fx * fy);
 
                     int px = crop_x1 + x;
                     int py = crop_y1 + y;
@@ -556,14 +584,17 @@ public:
         }
 
         sd_image_t* result_img = acquire_image();
-        if (!result_img) { free(out_data); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
+        if (!result_img) {
+            free(out_data);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
         result_img->width = target_image->width;
         result_img->height = target_image->height;
         result_img->channel = target_channels;
         result_img->data = out_data;
 
         outputs["IMAGE"] = make_image_ptr(result_img);
-        printf("[FaceSwap] Swapped face successfully\n");
+        LOG_INFO("[FaceSwap] Swapped face successfully\n");
         return sd_error_t::OK;
     }
 };
@@ -572,47 +603,41 @@ REGISTER_NODE("FaceSwap", FaceSwapNode);
 #else // !HAS_ONNXRUNTIME
 
 static std::vector<PortDef> face_detect_inputs() {
-    return {
-        {"image", "IMAGE", true, nullptr},
-        {"model", "FACE_DETECT_MODEL", true, nullptr},
-        {"confidence_threshold", "FLOAT", false, 0.5f}
-    };
+    return {{"image", "IMAGE", true, nullptr},
+            {"model", "FACE_DETECT_MODEL", true, nullptr},
+            {"confidence_threshold", "FLOAT", false, 0.5f}};
 }
 static std::vector<PortDef> face_detect_outputs() {
     return {{"IMAGE", "IMAGE"}, {"faces", "FACE_BBOX_LIST"}};
 }
-DEFINE_ONNX_PLACEHOLDER_NODE(FaceDetectNode, "FaceDetect", "image",
-    face_detect_inputs, face_detect_outputs, sd_error_t::ERROR_EXECUTION_FAILED)
+DEFINE_ONNX_PLACEHOLDER_NODE(FaceDetectNode, "FaceDetect", "image", face_detect_inputs, face_detect_outputs,
+                             sd_error_t::ERROR_EXECUTION_FAILED)
 REGISTER_NODE("FaceDetect", FaceDetectNode);
 
 static std::vector<PortDef> face_restore_inputs() {
-    return {
-        {"image", "IMAGE", true, nullptr},
-        {"face_restore_model", "FACE_RESTORE_MODEL", true, nullptr},
-        {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr},
-        {"codeformer_fidelity", "FLOAT", false, 0.5f}
-    };
+    return {{"image", "IMAGE", true, nullptr},
+            {"face_restore_model", "FACE_RESTORE_MODEL", true, nullptr},
+            {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr},
+            {"codeformer_fidelity", "FLOAT", false, 0.5f}};
 }
 static std::vector<PortDef> face_restore_outputs() {
     return {{"IMAGE", "IMAGE"}};
 }
-DEFINE_ONNX_PLACEHOLDER_NODE(FaceRestoreWithModelNode, "FaceRestoreWithModel", "image",
-    face_restore_inputs, face_restore_outputs, sd_error_t::ERROR_EXECUTION_FAILED)
+DEFINE_ONNX_PLACEHOLDER_NODE(FaceRestoreWithModelNode, "FaceRestoreWithModel", "image", face_restore_inputs,
+                             face_restore_outputs, sd_error_t::ERROR_EXECUTION_FAILED)
 REGISTER_NODE("FaceRestoreWithModel", FaceRestoreWithModelNode);
 
 static std::vector<PortDef> face_swap_inputs() {
-    return {
-        {"target_image", "IMAGE", true, nullptr},
-        {"source_image", "IMAGE", true, nullptr},
-        {"face_swap_model", "FACE_SWAP_MODEL", true, nullptr},
-        {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr}
-    };
+    return {{"target_image", "IMAGE", true, nullptr},
+            {"source_image", "IMAGE", true, nullptr},
+            {"face_swap_model", "FACE_SWAP_MODEL", true, nullptr},
+            {"face_detect_model", "FACE_DETECT_MODEL", false, nullptr}};
 }
 static std::vector<PortDef> face_swap_outputs() {
     return {{"IMAGE", "IMAGE"}};
 }
-DEFINE_ONNX_PLACEHOLDER_NODE(FaceSwapNode, "FaceSwap", "image",
-    face_swap_inputs, face_swap_outputs, sd_error_t::ERROR_EXECUTION_FAILED)
+DEFINE_ONNX_PLACEHOLDER_NODE(FaceSwapNode, "FaceSwap", "image", face_swap_inputs, face_swap_outputs,
+                             sd_error_t::ERROR_EXECUTION_FAILED)
 REGISTER_NODE("FaceSwap", FaceSwapNode);
 
 #endif // HAS_ONNXRUNTIME

@@ -8,31 +8,31 @@
 
 #include "core/node.h"
 #include "core/sd_ptr.h"
-#include "stable-diffusion.h"
 #include "stable-diffusion-ext.h"
+#include "stable-diffusion.h"
 #include "tensor.hpp"
-#include <cstdio>
-#include <cstring>
-#include <vector>
-#include <map>
+#include <any>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <map>
 #include <memory>
-#include <any>
+#include <vector>
 
 // stb_image for LoadImage/SaveImage (declare only, implementation in core_nodes.cpp or main)
 #include "stb_image.h"
-#include "stb_image_write.h"
 #include "stb_image_resize.h"
+#include "stb_image_write.h"
 
 #ifdef HAS_ONNXRUNTIME
-#include <onnxruntime_cxx_api.h>
+#include "face/face_align.hpp"
 #include "face/face_detect.hpp"
 #include "face/face_restore.hpp"
 #include "face/face_swap.hpp"
-#include "face/face_align.hpp"
 #include "face/face_utils.hpp"
 #include "preprocessors/lineart.hpp"
+#include <onnxruntime_cxx_api.h>
 #endif
 
 namespace sdengine {
@@ -57,7 +57,8 @@ inline ImagePtr create_image_ptr(int w, int h, int c, uint8_t* data, sd_error_t*
     sd_image_t* img = acquire_image();
     if (!img) {
         free(data);
-        if (out_err) *out_err = sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (out_err)
+            *out_err = sd_error_t::ERROR_MEMORY_ALLOCATION;
         return nullptr;
     }
     img->width = w;
@@ -76,7 +77,8 @@ inline sd_ctx_t* extract_sd_ctx(const NodeInputs& inputs, const std::string& key
     } catch (const std::bad_any_cast&) {
         try {
             sd_ctx = std::any_cast<sd_ctx_t*>(inputs.at(key));
-        } catch (...) {}
+        } catch (...) {
+        }
     }
     return sd_ctx;
 }
@@ -88,7 +90,7 @@ inline sd_ctx_t* extract_sd_ctx(const NodeInputs& inputs, const std::string& key
 /// CLIP 包装器（供 CLIPSetLastLayer / CLIPTextEncode 共享）
 struct CLIPWrapper {
     sd_ctx_t* sd_ctx = nullptr;
-    SDContextPtr sd_ctx_ptr;  // keep shared_ptr alive if needed
+    SDContextPtr sd_ctx_ptr; // keep shared_ptr alive if needed
     int clip_skip = -1;
 };
 
@@ -121,7 +123,9 @@ struct RemBGModel {
     Ort::MemoryInfo memory_info;
     std::string path;
 
-    RemBGModel() : env(ORT_LOGGING_LEVEL_WARNING, "rembg"), memory_info(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {}
+    RemBGModel()
+        : env(ORT_LOGGING_LEVEL_WARNING, "rembg"),
+          memory_info(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)) {}
 };
 #endif
 
@@ -146,35 +150,20 @@ struct DeepHiresNodeState {
 // DeepHighResFix 辅助函数
 // ============================================================================
 
-sd::Tensor<float> upscale_latent_bilinear_node(
-    const sd::Tensor<float>& latent,
-    int target_w,
-    int target_h,
-    int channels);
+sd::Tensor<float> upscale_latent_bilinear_node(const sd::Tensor<float>& latent, int target_w, int target_h,
+                                               int channels);
 
-sd::Tensor<float> deep_hires_node_latent_hook(
-    sd::Tensor<float>& latent,
-    int step,
-    int total_steps,
-    void* user_data);
+sd::Tensor<float> deep_hires_node_latent_hook(sd::Tensor<float>& latent, int step, int total_steps, void* user_data);
 
-void deep_hires_node_guidance_hook(
-    float* txt_cfg,
-    float* img_cfg,
-    float* distilled_guidance,
-    int step,
-    int total_steps,
-    void* user_data);
+void deep_hires_node_guidance_hook(float* txt_cfg, float* img_cfg, float* distilled_guidance, int step, int total_steps,
+                                   void* user_data);
 
 // ============================================================================
 // KSampler 通用执行逻辑
 // ============================================================================
 
-sd_error_t run_sampler_common(
-    sd_ctx_t* sd_ctx,
-    const NodeInputs& inputs,
-    sd_node_sample_params_t& sample_params,
-    sd_latent_t** out_result);
+sd_error_t run_sampler_common(sd_ctx_t* sd_ctx, const NodeInputs& inputs, sd_node_sample_params_t& sample_params,
+                              sd_latent_t** out_result);
 
 // ============================================================================
 // 节点初始化函数（确保各翻译单元被链接）
@@ -191,17 +180,26 @@ void init_face_nodes();
 // ONNX 占位符宏（用于 !HAS_ONNXRUNTIME 时生成占位节点）
 // ============================================================================
 
-#define DEFINE_ONNX_PLACEHOLDER_NODE(class_name, type_name, category, input_defs_fn, output_defs_fn, err_code) \
-class class_name : public Node { \
-public: \
-    std::string get_class_type() const override { return type_name; } \
-    std::string get_category() const override { return category; } \
-    std::vector<PortDef> get_inputs() const override { return input_defs_fn(); } \
-    std::vector<PortDef> get_outputs() const override { return output_defs_fn(); } \
-    sd_error_t execute(const NodeInputs&, NodeOutputs&) override { \
-        fprintf(stderr, "[ERROR] " type_name ": ONNX Runtime not available. Build with HAS_ONNXRUNTIME to enable.\n"); \
-        return err_code; \
-    } \
-};
+#define DEFINE_ONNX_PLACEHOLDER_NODE(class_name, type_name, category, input_defs_fn, output_defs_fn, err_code)         \
+    class class_name : public Node {                                                                                   \
+      public:                                                                                                          \
+        std::string get_class_type() const override {                                                                  \
+            return type_name;                                                                                          \
+        }                                                                                                              \
+        std::string get_category() const override {                                                                    \
+            return category;                                                                                           \
+        }                                                                                                              \
+        std::vector<PortDef> get_inputs() const override {                                                             \
+            return input_defs_fn();                                                                                    \
+        }                                                                                                              \
+        std::vector<PortDef> get_outputs() const override {                                                            \
+            return output_defs_fn();                                                                                   \
+        }                                                                                                              \
+        sd_error_t execute(const NodeInputs&, NodeOutputs&) override {                                                 \
+            fprintf(stderr,                                                                                            \
+                    "[ERROR] " type_name ": ONNX Runtime not available. Build with HAS_ONNXRUNTIME to enable.\n");     \
+            return err_code;                                                                                           \
+        }                                                                                                              \
+    };
 
 } // namespace sdengine

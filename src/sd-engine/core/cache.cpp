@@ -8,8 +8,7 @@
 
 namespace sdengine {
 
-ExecutionCache::ExecutionCache(size_t max_size_bytes)
-    : max_size_(max_size_bytes) {}
+ExecutionCache::ExecutionCache(size_t max_size_bytes) : max_size_(max_size_bytes) {}
 
 bool ExecutionCache::has(const std::string& node_id, const std::string& hash) const {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -29,8 +28,7 @@ NodeOutputs ExecutionCache::get(const std::string& node_id, const std::string& h
     return {};
 }
 
-void ExecutionCache::put(const std::string& node_id, const std::string& hash,
-                         const NodeOutputs& outputs) {
+void ExecutionCache::put(const std::string& node_id, const std::string& hash, const NodeOutputs& outputs) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     std::string key = make_key(node_id, hash);
@@ -68,14 +66,16 @@ void ExecutionCache::put(const std::string& node_id, const std::string& hash,
 
 void ExecutionCache::touch(const std::string& key) const {
     auto it = cache_.find(key);
-    if (it == cache_.end()) return;
+    if (it == cache_.end())
+        return;
 
     // 移动到 LRU 链表尾部（最近使用）
     lru_list_.splice(lru_list_.end(), lru_list_, it->second.lru_iter);
 }
 
 void ExecutionCache::evict_one() {
-    if (lru_list_.empty()) return;
+    if (lru_list_.empty())
+        return;
 
     std::string key = lru_list_.front();
     lru_list_.pop_front();
@@ -89,7 +89,8 @@ void ExecutionCache::evict_one() {
 
 void ExecutionCache::gc() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (cache_.empty()) return;
+    if (cache_.empty())
+        return;
     evict_one();
 }
 
@@ -105,8 +106,7 @@ size_t ExecutionCache::size() const {
     return cache_.size();
 }
 
-std::string ExecutionCache::make_key(const std::string& node_id,
-                                     const std::string& hash) const {
+std::string ExecutionCache::make_key(const std::string& node_id, const std::string& hash) const {
     return node_id + "::" + hash;
 }
 
@@ -124,7 +124,8 @@ size_t ExecutionCache::estimate_size(const NodeOutputs& outputs) const {
             }
         } else if (value.type() == typeid(ConditioningPtr)) {
             auto ptr = std::any_cast<ConditioningPtr>(value);
-            if (ptr) size += 512 * 1024;  // conditioning 约 512KB
+            if (ptr)
+                size += 512 * 1024; // conditioning 约 512KB
         } else if (value.type() == typeid(ImagePtr)) {
             auto ptr = std::any_cast<ImagePtr>(value);
             if (ptr) {
@@ -134,10 +135,10 @@ size_t ExecutionCache::estimate_size(const NodeOutputs& outputs) const {
             auto img = std::any_cast<sd_image_t>(value);
             size += img.width * img.height * img.channel;
         } else if (value.type() == typeid(UpscalerPtr)) {
-            size += 1024 * 1024;  // upscaler model ~1MB
+            size += 1024 * 1024; // upscaler model ~1MB
         }
     }
-    return std::max(size, (size_t)1024);  // 最小 1KB
+    return std::max(size, (size_t)1024); // 最小 1KB
 }
 
 } // namespace sdengine

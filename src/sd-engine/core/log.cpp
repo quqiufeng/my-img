@@ -6,11 +6,11 @@
 
 #include "log.h"
 #include <chrono>
-#include <iomanip>
-#include <sstream>
-#include <ctime>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 namespace sdengine {
 
@@ -51,11 +51,16 @@ void Logger::close_file() {
 
 const char* Logger::level_to_string(LogLevel level) const {
     switch (level) {
-        case LogLevel::DEBUG:   return "DEBUG";
-        case LogLevel::INFO:    return "INFO";
-        case LogLevel::WARNING: return "WARN";
-        case LogLevel::ERROR:   return "ERROR";
-        default:                return "UNKNOWN";
+    case LogLevel::DEBUG:
+        return "DEBUG";
+    case LogLevel::INFO:
+        return "INFO";
+    case LogLevel::WARNING:
+        return "WARN";
+    case LogLevel::ERROR:
+        return "ERROR";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -74,19 +79,15 @@ void Logger::write(LogLevel level, const char* file, int line, const char* msg) 
 
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()) % 1000;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
     std::tm tm_now;
     localtime_r(&time_t_now, &tm_now);
 
     char buf[256];
-    snprintf(buf, sizeof(buf), "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%5s] [%s:%d] ",
-             tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday,
-             tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec,
-             (int)ms.count(),
-             level_to_string(level),
-             filename, line);
+    snprintf(buf, sizeof(buf), "[%04d-%02d-%02d %02d:%02d:%02d.%03d] [%5s] [%s:%d] ", tm_now.tm_year + 1900,
+             tm_now.tm_mon + 1, tm_now.tm_mday, tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec, (int)ms.count(),
+             level_to_string(level), filename, line);
 
     if (level_ <= level) {
         FILE* out = (level >= LogLevel::ERROR) ? stderr : stdout;

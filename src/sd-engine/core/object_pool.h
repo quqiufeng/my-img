@@ -12,11 +12,11 @@
 
 #pragma once
 
-#include <vector>
-#include <mutex>
-#include <memory>
-#include <functional>
 #include <algorithm>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 namespace sdengine {
 
@@ -27,8 +27,8 @@ namespace sdengine {
 /// 支持自定义创建器和重置器，以及最大池容量限制。
 template <typename T>
 class ObjectPool {
-public:
-    using Creator = std::function<T*()>;   ///< 对象创建函数类型
+  public:
+    using Creator = std::function<T*()>;      ///< 对象创建函数类型
     using Resetter = std::function<void(T*)>; ///< 对象重置函数类型
 
     /// @brief 构造函数
@@ -61,7 +61,8 @@ public:
     /// @brief 归还一个对象到池中
     /// @param obj 要归还的对象指针
     void release(T* obj) {
-        if (!obj) return;
+        if (!obj)
+            return;
         if (resetter_) {
             resetter_(obj);
         }
@@ -113,7 +114,7 @@ public:
         pool_.clear();
     }
 
-private:
+  private:
     Creator creator_;
     Resetter resetter_;
     size_t max_size_;

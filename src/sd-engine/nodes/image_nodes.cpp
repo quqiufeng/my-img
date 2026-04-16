@@ -4,6 +4,7 @@
 // 图像处理节点实现
 // ============================================================================
 
+#include "core/log.h"
 #include "nodes/node_utils.h"
 
 namespace sdengine {
@@ -12,37 +13,36 @@ namespace sdengine {
 // LoadImage - 加载图像
 // ============================================================================
 class LoadImageNode : public Node {
-public:
-    std::string get_class_type() const override { return "LoadImage"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "LoadImage";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "STRING", true, std::string("")}
-        };
+        return {{"image", "STRING", true, std::string("")}};
     }
 
     std::vector<PortDef> get_outputs() const override {
-        return {
-            {"IMAGE", "IMAGE"},
-            {"MASK", "MASK"}
-        };
+        return {{"IMAGE", "IMAGE"}, {"MASK", "MASK"}};
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string image_path = std::any_cast<std::string>(inputs.at("image"));
 
         if (image_path.empty()) {
-            fprintf(stderr, "[ERROR] LoadImage: image path is required\n");
+            LOG_ERROR("[ERROR] LoadImage: image path is required\n");
             return sd_error_t::ERROR_FILE_IO;
         }
 
-        printf("[LoadImage] Loading: %s\n", image_path.c_str());
+        LOG_INFO("[LoadImage] Loading: %s\n", image_path.c_str());
 
         int w, h, c;
         uint8_t* data = stbi_load(image_path.c_str(), &w, &h, &c, 3);
         if (!data) {
-            fprintf(stderr, "[ERROR] LoadImage: Failed to load %s\n", image_path.c_str());
+            LOG_ERROR("[ERROR] LoadImage: Failed to load %s\n", image_path.c_str());
             return sd_error_t::ERROR_FILE_IO;
         }
 
@@ -56,7 +56,7 @@ public:
         image->channel = 3;
         image->data = data;
 
-        printf("[LoadImage] Loaded: %dx%d\n", w, h);
+        LOG_INFO("[LoadImage] Loaded: %dx%d\n", w, h);
 
         outputs["IMAGE"] = make_image_ptr(image);
         outputs["MASK"] = nullptr;
@@ -70,15 +70,16 @@ REGISTER_NODE("LoadImage", LoadImageNode);
 // LoadImageMask - 加载 Mask 图像
 // ============================================================================
 class LoadImageMaskNode : public Node {
-public:
-    std::string get_class_type() const override { return "LoadImageMask"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "LoadImageMask";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "STRING", true, std::string("")},
-            {"channel", "STRING", false, std::string("alpha")}
-        };
+        return {{"image", "STRING", true, std::string("")}, {"channel", "STRING", false, std::string("alpha")}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -87,20 +88,19 @@ public:
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         std::string image_path = std::any_cast<std::string>(inputs.at("image"));
-        std::string channel = inputs.count("channel") ?
-            std::any_cast<std::string>(inputs.at("channel")) : "alpha";
+        std::string channel = inputs.count("channel") ? std::any_cast<std::string>(inputs.at("channel")) : "alpha";
 
         if (image_path.empty()) {
-            fprintf(stderr, "[ERROR] LoadImageMask: image path is required\n");
+            LOG_ERROR("[ERROR] LoadImageMask: image path is required\n");
             return sd_error_t::ERROR_FILE_IO;
         }
 
-        printf("[LoadImageMask] Loading: %s (channel=%s)\n", image_path.c_str(), channel.c_str());
+        LOG_INFO("[LoadImageMask] Loading: %s (channel=%s)\n", image_path.c_str(), channel.c_str());
 
         int w, h, c;
         uint8_t* data = stbi_load(image_path.c_str(), &w, &h, &c, 0);
         if (!data) {
-            fprintf(stderr, "[ERROR] LoadImageMask: Failed to load %s\n", image_path.c_str());
+            LOG_ERROR("[ERROR] LoadImageMask: Failed to load %s\n", image_path.c_str());
             return sd_error_t::ERROR_FILE_IO;
         }
 
@@ -140,7 +140,7 @@ public:
         mask->data = mask_data;
 
         outputs["MASK"] = make_image_ptr(mask);
-        printf("[LoadImageMask] Loaded mask: %dx%d\n", w, h);
+        LOG_INFO("[LoadImageMask] Loaded mask: %dx%d\n", w, h);
         return sd_error_t::OK;
     }
 };
@@ -150,15 +150,16 @@ REGISTER_NODE("LoadImageMask", LoadImageMaskNode);
 // SaveImage - 保存图像
 // ============================================================================
 class SaveImageNode : public Node {
-public:
-    std::string get_class_type() const override { return "SaveImage"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "SaveImage";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"images", "IMAGE", true, nullptr},
-            {"filename_prefix", "STRING", false, std::string("sd-engine")}
-        };
+        return {{"images", "IMAGE", true, nullptr}, {"filename_prefix", "STRING", false, std::string("sd-engine")}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -168,27 +169,25 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         (void)outputs;
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("images"));
-        std::string prefix = inputs.count("filename_prefix") ?
-            std::any_cast<std::string>(inputs.at("filename_prefix")) : "sd-engine";
+        std::string prefix =
+            inputs.count("filename_prefix") ? std::any_cast<std::string>(inputs.at("filename_prefix")) : "sd-engine";
 
         if (!image || !image->data) {
-            fprintf(stderr, "[ERROR] SaveImage: No image data\n");
+            LOG_ERROR("[ERROR] SaveImage: No image data\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
         std::string filename = prefix + ".png";
-        printf("[SaveImage] Saving to %s (%dx%d)\n",
-               filename.c_str(), image->width, image->height);
+        LOG_INFO("[SaveImage] Saving to %s (%dx%d)\n", filename.c_str(), image->width, image->height);
 
-        bool success = stbi_write_png(filename.c_str(),
-                                      image->width, image->height,
-                                      image->channel, image->data, 0) != 0;
+        bool success =
+            stbi_write_png(filename.c_str(), image->width, image->height, image->channel, image->data, 0) != 0;
         if (!success) {
-            fprintf(stderr, "[ERROR] SaveImage: Failed to write %s\n", filename.c_str());
+            LOG_ERROR("[ERROR] SaveImage: Failed to write %s\n", filename.c_str());
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
-        printf("[SaveImage] Saved successfully\n");
+        LOG_INFO("[SaveImage] Saved successfully\n");
         return sd_error_t::OK;
     }
 };
@@ -198,17 +197,19 @@ REGISTER_NODE("SaveImage", SaveImageNode);
 // ImageScale - 图像缩放
 // ============================================================================
 class ImageScaleNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageScale"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageScale";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"width", "INT", true, 0},
-            {"height", "INT", true, 0},
-            {"method", "STRING", false, std::string("bilinear")}
-        };
+        return {{"image", "IMAGE", true, nullptr},
+                {"width", "INT", true, 0},
+                {"height", "INT", true, 0},
+                {"method", "STRING", false, std::string("bilinear")}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -219,16 +220,15 @@ public:
         ImagePtr src_image = std::any_cast<ImagePtr>(inputs.at("image"));
         int target_width = std::any_cast<int>(inputs.at("width"));
         int target_height = std::any_cast<int>(inputs.at("height"));
-        std::string method = inputs.count("method") ?
-            std::any_cast<std::string>(inputs.at("method")) : "bilinear";
+        std::string method = inputs.count("method") ? std::any_cast<std::string>(inputs.at("method")) : "bilinear";
 
         if (!src_image || !src_image->data) {
-            fprintf(stderr, "[ERROR] ImageScale: No source image\n");
+            LOG_ERROR("[ERROR] ImageScale: No source image\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
         if (target_width <= 0 || target_height <= 0) {
-            fprintf(stderr, "[ERROR] ImageScale: Invalid target size %dx%d\n", target_width, target_height);
+            LOG_ERROR("[ERROR] ImageScale: Invalid target size %dx%d\n", target_width, target_height);
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
@@ -237,13 +237,13 @@ public:
             return sd_error_t::OK;
         }
 
-        printf("[ImageScale] Resizing from %dx%d to %dx%d (method: %s)\n",
-               src_image->width, src_image->height, target_width, target_height, method.c_str());
+        LOG_INFO("[ImageScale] Resizing from %dx%d to %dx%d (method: %s)\n", src_image->width, src_image->height,
+                 target_width, target_height, method.c_str());
 
         size_t dst_size = target_width * target_height * src_image->channel;
         uint8_t* dst_data = (uint8_t*)malloc(dst_size);
         if (!dst_data) {
-            fprintf(stderr, "[ERROR] ImageScale: Out of memory\n");
+            LOG_ERROR("[ERROR] ImageScale: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
 
@@ -256,20 +256,9 @@ public:
             filter = STBIR_FILTER_CATMULLROM;
         }
 
-        stbir_resize(
-            src_image->data, src_image->width, src_image->height, 0,
-            dst_data, target_width, target_height, 0,
-            STBIR_TYPE_UINT8,
-            src_image->channel,
-            -1,
-            0,
-            STBIR_EDGE_CLAMP,
-            STBIR_EDGE_CLAMP,
-            filter,
-            filter,
-            STBIR_COLORSPACE_LINEAR,
-            nullptr
-        );
+        stbir_resize(src_image->data, src_image->width, src_image->height, 0, dst_data, target_width, target_height, 0,
+                     STBIR_TYPE_UINT8, src_image->channel, -1, 0, STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP, filter, filter,
+                     STBIR_COLORSPACE_LINEAR, nullptr);
 
         sd_image_t dst_image = {};
         dst_image.width = target_width;
@@ -280,13 +269,13 @@ public:
         sd_image_t* result = acquire_image();
         if (!result) {
             free(dst_data);
-            fprintf(stderr, "[ERROR] ImageScale: Out of memory\n");
+            LOG_ERROR("[ERROR] ImageScale: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         *result = dst_image;
 
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[ImageScale] Resized successfully\n");
+        LOG_INFO("[ImageScale] Resized successfully\n");
         return sd_error_t::OK;
     }
 };
@@ -296,18 +285,20 @@ REGISTER_NODE("ImageScale", ImageScaleNode);
 // ImageCrop - 图像裁剪
 // ============================================================================
 class ImageCropNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageCrop"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageCrop";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"x", "INT", true, 0},
-            {"y", "INT", true, 0},
-            {"width", "INT", true, 0},
-            {"height", "INT", true, 0}
-        };
+        return {{"image", "IMAGE", true, nullptr},
+                {"x", "INT", true, 0},
+                {"y", "INT", true, 0},
+                {"width", "INT", true, 0},
+                {"height", "INT", true, 0}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -322,26 +313,22 @@ public:
         int crop_height = std::any_cast<int>(inputs.at("height"));
 
         if (!src_image || !src_image->data) {
-            fprintf(stderr, "[ERROR] ImageCrop: No source image\n");
+            LOG_ERROR("[ERROR] ImageCrop: No source image\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
-        if (crop_x < 0 || crop_y < 0 ||
-            crop_width <= 0 || crop_height <= 0 ||
-            crop_x + crop_width > (int)src_image->width ||
-            crop_y + crop_height > (int)src_image->height) {
-            fprintf(stderr, "[ERROR] ImageCrop: Invalid crop region (%d,%d,%d,%d) for image %dx%d\n",
-                    crop_x, crop_y, crop_width, crop_height,
-                    src_image->width, src_image->height);
+        if (crop_x < 0 || crop_y < 0 || crop_width <= 0 || crop_height <= 0 ||
+            crop_x + crop_width > (int)src_image->width || crop_y + crop_height > (int)src_image->height) {
+            LOG_ERROR("[ERROR] ImageCrop: Invalid crop region (%d,%d,%d,%d) for image %dx%d\n", crop_x, crop_y,
+                      crop_width, crop_height, src_image->width, src_image->height);
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
-        printf("[ImageCrop] Cropping to (%d,%d) size %dx%d\n",
-               crop_x, crop_y, crop_width, crop_height);
+        LOG_INFO("[ImageCrop] Cropping to (%d,%d) size %dx%d\n", crop_x, crop_y, crop_width, crop_height);
 
         uint8_t* dst_data = (uint8_t*)malloc(crop_width * crop_height * src_image->channel);
         if (!dst_data) {
-            fprintf(stderr, "[ERROR] ImageCrop: Out of memory\n");
+            LOG_ERROR("[ERROR] ImageCrop: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
 
@@ -364,13 +351,13 @@ public:
         sd_image_t* result = acquire_image();
         if (!result) {
             free(dst_data);
-            fprintf(stderr, "[ERROR] ImageCrop: Out of memory\n");
+            LOG_ERROR("[ERROR] ImageCrop: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         *result = dst_image;
 
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[ImageCrop] Cropped successfully\n");
+        LOG_INFO("[ImageCrop] Cropped successfully\n");
         return sd_error_t::OK;
     }
 };
@@ -380,15 +367,16 @@ REGISTER_NODE("ImageCrop", ImageCropNode);
 // ImageUpscaleWithModel - 使用 ESRGAN 模型放大图像
 // ============================================================================
 class ImageUpscaleWithModelNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageUpscaleWithModel"; }
-    std::string get_category() const override { return "image/upscaling"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageUpscaleWithModel";
+    }
+    std::string get_category() const override {
+        return "image/upscaling";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"upscale_model", "UPSCALE_MODEL", true, nullptr}
-        };
+        return {{"image", "IMAGE", true, nullptr}, {"upscale_model", "UPSCALE_MODEL", true, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -400,26 +388,25 @@ public:
         UpscalerPtr upscaler = std::any_cast<UpscalerPtr>(inputs.at("upscale_model"));
 
         if (!image || !image->data) {
-            fprintf(stderr, "[ERROR] ImageUpscaleWithModel: No image data\n");
+            LOG_ERROR("[ERROR] ImageUpscaleWithModel: No image data\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         if (!upscaler) {
-            fprintf(stderr, "[ERROR] ImageUpscaleWithModel: No upscale model\n");
+            LOG_ERROR("[ERROR] ImageUpscaleWithModel: No upscale model\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         int scale = get_upscale_factor(upscaler.get());
-        printf("[ImageUpscaleWithModel] Upscaling %dx%d by %dx...\n",
-               image->width, image->height, scale);
+        LOG_INFO("[ImageUpscaleWithModel] Upscaling %dx%d by %dx...\n", image->width, image->height, scale);
 
         sd_image_t result = upscale(upscaler.get(), *image, scale);
         if (!result.data) {
-            fprintf(stderr, "[ERROR] ImageUpscaleWithModel: Upscale failed\n");
+            LOG_ERROR("[ERROR] ImageUpscaleWithModel: Upscale failed\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
-        printf("[ImageUpscaleWithModel] Upscaled to %dx%d\n", result.width, result.height);
+        LOG_INFO("[ImageUpscaleWithModel] Upscaled to %dx%d\n", result.width, result.height);
 
         sd_image_t* result_ptr = acquire_image();
         if (!result_ptr) {
@@ -437,14 +424,16 @@ REGISTER_NODE("ImageUpscaleWithModel", ImageUpscaleWithModelNode);
 // PreviewImage - 预览图像
 // ============================================================================
 class PreviewImageNode : public Node {
-public:
-    std::string get_class_type() const override { return "PreviewImage"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "PreviewImage";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"images", "IMAGE", true, nullptr}
-        };
+        return {{"images", "IMAGE", true, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -456,17 +445,17 @@ public:
         ImagePtr image = std::any_cast<ImagePtr>(inputs.at("images"));
 
         if (!image || !image->data) {
-            fprintf(stderr, "[ERROR] PreviewImage: No image data\n");
+            LOG_ERROR("[ERROR] PreviewImage: No image data\n");
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
-        printf("\n");
-        printf("╔══════════════════════════════════════╗\n");
-        printf("║         [PreviewImage]               ║\n");
-        printf("║  Size: %4dx%-4d                     ║\n", image->width, image->height);
-        printf("║  Channels: %d                        ║\n", image->channel);
-        printf("╚══════════════════════════════════════╝\n");
-        printf("\n");
+        LOG_INFO("\n");
+        LOG_INFO("╔══════════════════════════════════════╗\n");
+        LOG_INFO("║         [PreviewImage]               ║\n");
+        LOG_INFO("║  Size: %4dx%-4d                     ║\n", image->width, image->height);
+        LOG_INFO("║  Channels: %d                        ║\n", image->channel);
+        LOG_INFO("╚══════════════════════════════════════╝\n");
+        LOG_INFO("\n");
 
         return sd_error_t::OK;
     }
@@ -477,17 +466,19 @@ REGISTER_NODE("PreviewImage", PreviewImageNode);
 // ImageBlend - 图像混合
 // ============================================================================
 class ImageBlendNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageBlend"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageBlend";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image1", "IMAGE", true, nullptr},
-            {"image2", "IMAGE", true, nullptr},
-            {"blend_factor", "FLOAT", false, 0.5f},
-            {"blend_mode", "STRING", false, std::string("normal")}
-        };
+        return {{"image1", "IMAGE", true, nullptr},
+                {"image2", "IMAGE", true, nullptr},
+                {"blend_factor", "FLOAT", false, 0.5f},
+                {"blend_mode", "STRING", false, std::string("normal")}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -497,13 +488,12 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr img1 = std::any_cast<ImagePtr>(inputs.at("image1"));
         ImagePtr img2 = std::any_cast<ImagePtr>(inputs.at("image2"));
-        float blend_factor = inputs.count("blend_factor") ?
-            std::any_cast<float>(inputs.at("blend_factor")) : 0.5f;
-        std::string blend_mode = inputs.count("blend_mode") ?
-            std::any_cast<std::string>(inputs.at("blend_mode")) : "normal";
+        float blend_factor = inputs.count("blend_factor") ? std::any_cast<float>(inputs.at("blend_factor")) : 0.5f;
+        std::string blend_mode =
+            inputs.count("blend_mode") ? std::any_cast<std::string>(inputs.at("blend_mode")) : "normal";
 
         if (!img1 || !img1->data || !img2 || !img2->data) {
-            fprintf(stderr, "[ERROR] ImageBlend: Missing input images\n");
+            LOG_ERROR("[ERROR] ImageBlend: Missing input images\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -512,8 +502,8 @@ public:
         int channels = (int)img1->channel;
 
         if ((int)img2->width != width || (int)img2->height != height) {
-            fprintf(stderr, "[ERROR] ImageBlend: Image sizes must match (%dx%d vs %dx%d)\n",
-                    width, height, (int)img2->width, (int)img2->height);
+            LOG_ERROR("[ERROR] ImageBlend: Image sizes must match (%dx%d vs %dx%d)\n", width, height, (int)img2->width,
+                      (int)img2->height);
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -522,7 +512,7 @@ public:
 
         uint8_t* dst_data = (uint8_t*)malloc(width * height * out_channels);
         if (!dst_data) {
-            fprintf(stderr, "[ERROR] ImageBlend: Out of memory\n");
+            LOG_ERROR("[ERROR] ImageBlend: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
 
@@ -567,8 +557,8 @@ public:
         result_img->data = dst_data;
 
         outputs["IMAGE"] = make_image_ptr(result_img);
-        printf("[ImageBlend] Blended %dx%dx%d (mode=%s, factor=%.2f)\n",
-               width, height, out_channels, blend_mode.c_str(), blend_factor);
+        LOG_INFO("[ImageBlend] Blended %dx%dx%d (mode=%s, factor=%.2f)\n", width, height, out_channels,
+                 blend_mode.c_str(), blend_factor);
         return sd_error_t::OK;
     }
 };
@@ -578,19 +568,21 @@ REGISTER_NODE("ImageBlend", ImageBlendNode);
 // ImageCompositeMasked - 蒙版合成
 // ============================================================================
 class ImageCompositeMaskedNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageCompositeMasked"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageCompositeMasked";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"destination", "IMAGE", true, nullptr},
-            {"source", "IMAGE", true, nullptr},
-            {"x", "INT", false, 0},
-            {"y", "INT", false, 0},
-            {"mask", "IMAGE", false, nullptr},
-            {"resize_source", "BOOLEAN", false, false}
-        };
+        return {{"destination", "IMAGE", true, nullptr},
+                {"source", "IMAGE", true, nullptr},
+                {"x", "INT", false, 0},
+                {"y", "INT", false, 0},
+                {"mask", "IMAGE", false, nullptr},
+                {"resize_source", "BOOLEAN", false, false}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -606,7 +598,7 @@ public:
         bool resize_source = inputs.count("resize_source") ? std::any_cast<bool>(inputs.at("resize_source")) : false;
 
         if (!dst || !dst->data || !src || !src->data) {
-            fprintf(stderr, "[ERROR] ImageCompositeMasked: Missing input images\n");
+            LOG_ERROR("[ERROR] ImageCompositeMasked: Missing input images\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -623,14 +615,9 @@ public:
         int src_stride_h = src_h;
         if (resize_source && (src_w != dst_w || src_h != dst_h)) {
             src_resized.resize(dst_w * dst_h * src_c);
-            stbir_resize(
-                src->data, src_w, src_h, 0,
-                src_resized.data(), dst_w, dst_h, 0,
-                STBIR_TYPE_UINT8, src_c, -1, 0,
-                STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP,
-                STBIR_FILTER_TRIANGLE, STBIR_FILTER_TRIANGLE,
-                STBIR_COLORSPACE_LINEAR, nullptr
-            );
+            stbir_resize(src->data, src_w, src_h, 0, src_resized.data(), dst_w, dst_h, 0, STBIR_TYPE_UINT8, src_c, -1,
+                         0, STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP, STBIR_FILTER_TRIANGLE, STBIR_FILTER_TRIANGLE,
+                         STBIR_COLORSPACE_LINEAR, nullptr);
             src_data = src_resized.data();
             src_stride_w = dst_w;
             src_stride_h = dst_h;
@@ -638,18 +625,20 @@ public:
 
         uint8_t* out_data = (uint8_t*)malloc(dst_w * dst_h * dst_c);
         if (!out_data) {
-            fprintf(stderr, "[ERROR] ImageCompositeMasked: Out of memory\n");
+            LOG_ERROR("[ERROR] ImageCompositeMasked: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
         memcpy(out_data, dst->data, dst_w * dst_h * dst_c);
 
         for (int y = 0; y < src_stride_h; y++) {
             int dst_y = offset_y + y;
-            if (dst_y < 0 || dst_y >= dst_h) continue;
+            if (dst_y < 0 || dst_y >= dst_h)
+                continue;
 
             for (int x = 0; x < src_stride_w; x++) {
                 int dst_x = offset_x + x;
-                if (dst_x < 0 || dst_x >= dst_w) continue;
+                if (dst_x < 0 || dst_x >= dst_w)
+                    continue;
 
                 int dst_idx = (dst_y * dst_w + dst_x) * dst_c;
                 int src_idx = (y * src_stride_w + x) * src_c;
@@ -684,7 +673,7 @@ public:
         result_img->data = out_data;
 
         outputs["IMAGE"] = make_image_ptr(result_img);
-        printf("[ImageCompositeMasked] Composited source onto destination at (%d,%d)\n", offset_x, offset_y);
+        LOG_INFO("[ImageCompositeMasked] Composited source onto destination at (%d,%d)\n", offset_x, offset_y);
         return sd_error_t::OK;
     }
 };
@@ -694,9 +683,13 @@ REGISTER_NODE("ImageCompositeMasked", ImageCompositeMaskedNode);
 // ImageInvert - 颜色反转
 // ============================================================================
 class ImageInvertNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageInvert"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageInvert";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
         return {{"image", "IMAGE", true, nullptr}};
@@ -709,7 +702,7 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
         if (!img || !img->data) {
-            fprintf(stderr, "[ERROR] ImageInvert: Missing input image\n");
+            LOG_ERROR("[ERROR] ImageInvert: Missing input image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -719,7 +712,8 @@ public:
         size_t pixels = w * h * c;
 
         uint8_t* dst = (uint8_t*)malloc(pixels);
-        if (!dst) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
             for (int ch = 0; ch < c; ch++) {
@@ -728,10 +722,16 @@ public:
         }
 
         sd_image_t* result = acquire_image();
-        if (!result) { free(dst); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
-        result->width = w; result->height = h; result->channel = c; result->data = dst;
+        if (!result) {
+            free(dst);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
+        result->width = w;
+        result->height = h;
+        result->channel = c;
+        result->data = dst;
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[ImageInvert] Inverted %dx%dx%d\n", w, h, c);
+        LOG_INFO("[ImageInvert] Inverted %dx%dx%d\n", w, h, c);
         return sd_error_t::OK;
     }
 };
@@ -741,17 +741,19 @@ REGISTER_NODE("ImageInvert", ImageInvertNode);
 // ImageColorAdjust - 亮度/对比度/饱和度调整
 // ============================================================================
 class ImageColorAdjustNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageColorAdjust"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageColorAdjust";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"brightness", "FLOAT", false, 1.0f},
-            {"contrast", "FLOAT", false, 1.0f},
-            {"saturation", "FLOAT", false, 1.0f}
-        };
+        return {{"image", "IMAGE", true, nullptr},
+                {"brightness", "FLOAT", false, 1.0f},
+                {"contrast", "FLOAT", false, 1.0f},
+                {"saturation", "FLOAT", false, 1.0f}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -761,11 +763,11 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
         float brightness = inputs.count("brightness") ? std::any_cast<float>(inputs.at("brightness")) : 1.0f;
-        float contrast   = inputs.count("contrast")   ? std::any_cast<float>(inputs.at("contrast"))   : 1.0f;
+        float contrast = inputs.count("contrast") ? std::any_cast<float>(inputs.at("contrast")) : 1.0f;
         float saturation = inputs.count("saturation") ? std::any_cast<float>(inputs.at("saturation")) : 1.0f;
 
         if (!img || !img->data) {
-            fprintf(stderr, "[ERROR] ImageColorAdjust: Missing input image\n");
+            LOG_ERROR("[ERROR] ImageColorAdjust: Missing input image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -773,19 +775,22 @@ public:
         int h = (int)img->height;
         int c = (int)img->channel;
         if (c != 3 && c != 4) {
-            fprintf(stderr, "[ERROR] ImageColorAdjust: Only 3 or 4 channel images supported\n");
+            LOG_ERROR("[ERROR] ImageColorAdjust: Only 3 or 4 channel images supported\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         uint8_t* dst = (uint8_t*)malloc(w * h * c);
-        if (!dst) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
             float r = img->data[i * c + 0] / 255.0f;
             float g = img->data[i * c + 1] / 255.0f;
             float b = img->data[i * c + 2] / 255.0f;
 
-            r *= brightness; g *= brightness; b *= brightness;
+            r *= brightness;
+            g *= brightness;
+            b *= brightness;
 
             r = (r - 0.5f) * contrast + 0.5f;
             g = (g - 0.5f) * contrast + 0.5f;
@@ -799,14 +804,22 @@ public:
             dst[i * c + 0] = (uint8_t)(std::clamp(r, 0.0f, 1.0f) * 255.0f + 0.5f);
             dst[i * c + 1] = (uint8_t)(std::clamp(g, 0.0f, 1.0f) * 255.0f + 0.5f);
             dst[i * c + 2] = (uint8_t)(std::clamp(b, 0.0f, 1.0f) * 255.0f + 0.5f);
-            if (c == 4) dst[i * c + 3] = img->data[i * c + 3];
+            if (c == 4)
+                dst[i * c + 3] = img->data[i * c + 3];
         }
 
         sd_image_t* result = acquire_image();
-        if (!result) { free(dst); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
-        result->width = w; result->height = h; result->channel = c; result->data = dst;
+        if (!result) {
+            free(dst);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
+        result->width = w;
+        result->height = h;
+        result->channel = c;
+        result->data = dst;
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[ImageColorAdjust] Adjusted %dx%dx%d (b=%.2f, c=%.2f, s=%.2f)\n", w, h, c, brightness, contrast, saturation);
+        LOG_INFO("[ImageColorAdjust] Adjusted %dx%dx%d (b=%.2f, c=%.2f, s=%.2f)\n", w, h, c, brightness, contrast,
+                 saturation);
         return sd_error_t::OK;
     }
 };
@@ -816,15 +829,16 @@ REGISTER_NODE("ImageColorAdjust", ImageColorAdjustNode);
 // ImageBlur - 盒式模糊
 // ============================================================================
 class ImageBlurNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageBlur"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageBlur";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"radius", "INT", false, 3}
-        };
+        return {{"image", "IMAGE", true, nullptr}, {"radius", "INT", false, 3}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -834,10 +848,11 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
         int radius = inputs.count("radius") ? std::any_cast<int>(inputs.at("radius")) : 3;
-        if (radius < 1) radius = 1;
+        if (radius < 1)
+            radius = 1;
 
         if (!img || !img->data) {
-            fprintf(stderr, "[ERROR] ImageBlur: Missing input image\n");
+            LOG_ERROR("[ERROR] ImageBlur: Missing input image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -846,30 +861,70 @@ public:
         int c = (int)img->channel;
 
         uint8_t* dst = (uint8_t*)malloc(w * h * c);
-        if (!dst) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
-        for (int y = 0; y < h; y++) {
+        // 使用分离核优化：先水平模糊，再垂直模糊
+        // 复杂度从 O(w*h*r^2) 降到 O(w*h*r)
+        std::vector<uint8_t> tmp(w * h * c);
+
+        for (int ch = 0; ch < c; ch++) {
+            // 水平方向
+            for (int y = 0; y < h; y++) {
+                int sum = 0;
+                int count = 0;
+                // 初始化窗口
+                for (int dx = -radius; dx <= radius; dx++) {
+                    int px = std::clamp(dx, 0, w - 1);
+                    sum += img->data[(y * w + px) * c + ch];
+                    count++;
+                }
+                tmp[(y * w + 0) * c + ch] = (uint8_t)(sum / count);
+
+                // 滑动窗口
+                for (int x = 1; x < w; x++) {
+                    int left_x = std::clamp(x - radius - 1, 0, w - 1);
+                    int right_x = std::clamp(x + radius, 0, w - 1);
+                    sum -= img->data[(y * w + left_x) * c + ch];
+                    sum += img->data[(y * w + right_x) * c + ch];
+                    tmp[(y * w + x) * c + ch] = (uint8_t)(sum / count);
+                }
+            }
+
+            // 垂直方向
             for (int x = 0; x < w; x++) {
-                for (int ch = 0; ch < c; ch++) {
-                    int sum = 0, count = 0;
-                    for (int dy = -radius; dy <= radius; dy++) {
-                        for (int dx = -radius; dx <= radius; dx++) {
-                            int py = std::clamp(y + dy, 0, h - 1);
-                            int px = std::clamp(x + dx, 0, w - 1);
-                            sum += img->data[(py * w + px) * c + ch];
-                            count++;
-                        }
-                    }
+                int sum = 0;
+                int count = 0;
+                // 初始化窗口
+                for (int dy = -radius; dy <= radius; dy++) {
+                    int py = std::clamp(dy, 0, h - 1);
+                    sum += tmp[(py * w + x) * c + ch];
+                    count++;
+                }
+                dst[(0 * w + x) * c + ch] = (uint8_t)(sum / count);
+
+                // 滑动窗口
+                for (int y = 1; y < h; y++) {
+                    int top_y = std::clamp(y - radius - 1, 0, h - 1);
+                    int bottom_y = std::clamp(y + radius, 0, h - 1);
+                    sum -= tmp[(top_y * w + x) * c + ch];
+                    sum += tmp[(bottom_y * w + x) * c + ch];
                     dst[(y * w + x) * c + ch] = (uint8_t)(sum / count);
                 }
             }
         }
 
         sd_image_t* result = acquire_image();
-        if (!result) { free(dst); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
-        result->width = w; result->height = h; result->channel = c; result->data = dst;
+        if (!result) {
+            free(dst);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
+        result->width = w;
+        result->height = h;
+        result->channel = c;
+        result->data = dst;
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[ImageBlur] Blurred %dx%dx%d (radius=%d)\n", w, h, c, radius);
+        LOG_INFO("[ImageBlur] Blurred %dx%dx%d (radius=%d)\n", w, h, c, radius);
         return sd_error_t::OK;
     }
 };
@@ -879,9 +934,13 @@ REGISTER_NODE("ImageBlur", ImageBlurNode);
 // ImageGrayscale - 灰度转换
 // ============================================================================
 class ImageGrayscaleNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageGrayscale"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageGrayscale";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
         return {{"image", "IMAGE", true, nullptr}};
@@ -894,7 +953,7 @@ public:
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
         ImagePtr img = std::any_cast<ImagePtr>(inputs.at("image"));
         if (!img || !img->data) {
-            fprintf(stderr, "[ERROR] ImageGrayscale: Missing input image\n");
+            LOG_ERROR("[ERROR] ImageGrayscale: Missing input image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -902,22 +961,30 @@ public:
         int h = (int)img->height;
         int c = (int)img->channel;
         if (c < 3) {
-            fprintf(stderr, "[ERROR] ImageGrayscale: Image must have at least 3 channels\n");
+            LOG_ERROR("[ERROR] ImageGrayscale: Image must have at least 3 channels\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         uint8_t* dst = (uint8_t*)malloc(w * h);
-        if (!dst) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
-            dst[i] = (uint8_t)(0.299f * img->data[i * c + 0] + 0.587f * img->data[i * c + 1] + 0.114f * img->data[i * c + 2] + 0.5f);
+            dst[i] = (uint8_t)(0.299f * img->data[i * c + 0] + 0.587f * img->data[i * c + 1] +
+                               0.114f * img->data[i * c + 2] + 0.5f);
         }
 
         sd_image_t* result = acquire_image();
-        if (!result) { free(dst); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
-        result->width = w; result->height = h; result->channel = 1; result->data = dst;
+        if (!result) {
+            free(dst);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
+        result->width = w;
+        result->height = h;
+        result->channel = 1;
+        result->data = dst;
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[ImageGrayscale] Converted %dx%d to grayscale\n", w, h);
+        LOG_INFO("[ImageGrayscale] Converted %dx%d to grayscale\n", w, h);
         return sd_error_t::OK;
     }
 };
@@ -927,15 +994,16 @@ REGISTER_NODE("ImageGrayscale", ImageGrayscaleNode);
 // ImageThreshold - 二值化
 // ============================================================================
 class ImageThresholdNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageThreshold"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageThreshold";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"threshold", "INT", false, 128}
-        };
+        return {{"image", "IMAGE", true, nullptr}, {"threshold", "INT", false, 128}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -948,7 +1016,7 @@ public:
         threshold = std::clamp(threshold, 0, 255);
 
         if (!img || !img->data) {
-            fprintf(stderr, "[ERROR] ImageThreshold: Missing input image\n");
+            LOG_ERROR("[ERROR] ImageThreshold: Missing input image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -957,7 +1025,8 @@ public:
         int c = (int)img->channel;
 
         uint8_t* dst = (uint8_t*)malloc(w * h * c);
-        if (!dst) return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        if (!dst)
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
 
         for (int i = 0; i < w * h; i++) {
             for (int ch = 0; ch < c; ch++) {
@@ -966,10 +1035,16 @@ public:
         }
 
         sd_image_t* result = acquire_image();
-        if (!result) { free(dst); return sd_error_t::ERROR_MEMORY_ALLOCATION; }
-        result->width = w; result->height = h; result->channel = c; result->data = dst;
+        if (!result) {
+            free(dst);
+            return sd_error_t::ERROR_MEMORY_ALLOCATION;
+        }
+        result->width = w;
+        result->height = h;
+        result->channel = c;
+        result->data = dst;
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[ImageThreshold] Thresholded %dx%dx%d (threshold=%d)\n", w, h, c, threshold);
+        LOG_INFO("[ImageThreshold] Thresholded %dx%dx%d (threshold=%d)\n", w, h, c, threshold);
         return sd_error_t::OK;
     }
 };

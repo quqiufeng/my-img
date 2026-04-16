@@ -4,6 +4,7 @@
 // 图像预处理器节点实现
 // ============================================================================
 
+#include "core/log.h"
 #include "nodes/node_utils.h"
 
 namespace sdengine {
@@ -12,16 +13,18 @@ namespace sdengine {
 // CannyEdgePreprocessor - Canny 边缘检测预处理
 // ============================================================================
 class CannyEdgePreprocessorNode : public Node {
-public:
-    std::string get_class_type() const override { return "CannyEdgePreprocessor"; }
-    std::string get_category() const override { return "image/preprocessors"; }
+  public:
+    std::string get_class_type() const override {
+        return "CannyEdgePreprocessor";
+    }
+    std::string get_category() const override {
+        return "image/preprocessors";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"low_threshold", "INT", false, 100},
-            {"high_threshold", "INT", false, 200}
-        };
+        return {{"image", "IMAGE", true, nullptr},
+                {"low_threshold", "INT", false, 100},
+                {"high_threshold", "INT", false, 200}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -34,12 +37,12 @@ public:
         int high_threshold = inputs.count("high_threshold") ? std::any_cast<int>(inputs.at("high_threshold")) : 200;
 
         if (!src || !src->data || src->channel != 3) {
-            fprintf(stderr, "[ERROR] CannyEdgePreprocessor: Requires RGB image\n");
+            LOG_ERROR("[ERROR] CannyEdgePreprocessor: Requires RGB image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        printf("[CannyEdgePreprocessor] Processing %dx%d (low=%d, high=%d)\n",
-               src->width, src->height, low_threshold, high_threshold);
+        LOG_INFO("[CannyEdgePreprocessor] Processing %dx%d (low=%d, high=%d)\n", src->width, src->height, low_threshold,
+                 high_threshold);
 
         int w = src->width;
         int h = src->height;
@@ -111,7 +114,7 @@ public:
         *result = dst_image;
 
         outputs["IMAGE"] = make_image_ptr(result);
-        printf("[CannyEdgePreprocessor] Done\n");
+        LOG_INFO("[CannyEdgePreprocessor] Done\n");
         return sd_error_t::OK;
     }
 };
@@ -123,22 +126,20 @@ REGISTER_NODE("CannyEdgePreprocessor", CannyEdgePreprocessorNode);
 // ImageRemoveBackground - 背景抠图
 // ============================================================================
 class ImageRemoveBackgroundNode : public Node {
-public:
-    std::string get_class_type() const override { return "ImageRemoveBackground"; }
-    std::string get_category() const override { return "image"; }
+  public:
+    std::string get_class_type() const override {
+        return "ImageRemoveBackground";
+    }
+    std::string get_category() const override {
+        return "image";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"model", "REMBG_MODEL", true, nullptr}
-        };
+        return {{"image", "IMAGE", true, nullptr}, {"model", "REMBG_MODEL", true, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
-        return {
-            {"IMAGE", "IMAGE"},
-            {"MASK", "IMAGE"}
-        };
+        return {{"IMAGE", "IMAGE"}, {"MASK", "IMAGE"}};
     }
 
     sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
@@ -146,7 +147,7 @@ public:
         auto model = std::any_cast<std::shared_ptr<RemBGModel>>(inputs.at("model"));
 
         if (!image || !image->data || !model || !model->session) {
-            fprintf(stderr, "[ERROR] ImageRemoveBackground: Missing inputs\n");
+            LOG_ERROR("[ERROR] ImageRemoveBackground: Missing inputs\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -155,7 +156,7 @@ public:
         int src_c = (int)image->channel;
 
         if (src_c != 3 && src_c != 4) {
-            fprintf(stderr, "[ERROR] ImageRemoveBackground: Only 3 or 4 channel images supported\n");
+            LOG_ERROR("[ERROR] ImageRemoveBackground: Only 3 or 4 channel images supported\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -164,21 +165,19 @@ public:
         std::vector<float> input_data(1 * 3 * model_size * model_size);
         {
             std::vector<uint8_t> resized(model_size * model_size * src_c);
-            stbir_resize(
-                image->data, src_w, src_h, 0,
-                resized.data(), model_size, model_size, 0,
-                STBIR_TYPE_UINT8, src_c, -1, 0,
-                STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP,
-                STBIR_FILTER_TRIANGLE, STBIR_FILTER_TRIANGLE,
-                STBIR_COLORSPACE_LINEAR, nullptr
-            );
+            stbir_resize(image->data, src_w, src_h, 0, resized.data(), model_size, model_size, 0, STBIR_TYPE_UINT8,
+                         src_c, -1, 0, STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP, STBIR_FILTER_TRIANGLE, STBIR_FILTER_TRIANGLE,
+                         STBIR_COLORSPACE_LINEAR, nullptr);
 
             for (int y = 0; y < model_size; y++) {
                 for (int x = 0; x < model_size; x++) {
                     int idx = (y * model_size + x) * src_c;
-                    input_data[0 * 3 * model_size * model_size + 0 * model_size * model_size + y * model_size + x] = resized[idx + 0] / 255.0f;
-                    input_data[0 * 3 * model_size * model_size + 1 * model_size * model_size + y * model_size + x] = resized[idx + 1] / 255.0f;
-                    input_data[0 * 3 * model_size * model_size + 2 * model_size * model_size + y * model_size + x] = resized[idx + 2] / 255.0f;
+                    input_data[0 * 3 * model_size * model_size + 0 * model_size * model_size + y * model_size + x] =
+                        resized[idx + 0] / 255.0f;
+                    input_data[0 * 3 * model_size * model_size + 1 * model_size * model_size + y * model_size + x] =
+                        resized[idx + 1] / 255.0f;
+                    input_data[0 * 3 * model_size * model_size + 2 * model_size * model_size + y * model_size + x] =
+                        resized[idx + 2] / 255.0f;
                 }
             }
         }
@@ -192,12 +191,10 @@ public:
 
         std::vector<Ort::Value> output_tensors;
         try {
-            output_tensors = model->session->Run(
-                Ort::RunOptions{nullptr},
-                input_names, &input_tensor, 1,
-                output_names, 1);
+            output_tensors =
+                model->session->Run(Ort::RunOptions{nullptr}, input_names, &input_tensor, 1, output_names, 1);
         } catch (const Ort::Exception& e) {
-            fprintf(stderr, "[ERROR] ImageRemoveBackground: ONNX inference failed: %s\n", e.what());
+            LOG_ERROR("[ERROR] ImageRemoveBackground: ONNX inference failed: %s\n", e.what());
             return sd_error_t::ERROR_EXECUTION_FAILED;
         }
 
@@ -215,19 +212,14 @@ public:
                 mask_1024[i] = (uint8_t)(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
             }
 
-            stbir_resize(
-                mask_1024.data(), out_w, out_h, 0,
-                mask_resized.data(), src_w, src_h, 0,
-                STBIR_TYPE_UINT8, 1, -1, 0,
-                STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP,
-                STBIR_FILTER_TRIANGLE, STBIR_FILTER_TRIANGLE,
-                STBIR_COLORSPACE_LINEAR, nullptr
-            );
+            stbir_resize(mask_1024.data(), out_w, out_h, 0, mask_resized.data(), src_w, src_h, 0, STBIR_TYPE_UINT8, 1,
+                         -1, 0, STBIR_EDGE_CLAMP, STBIR_EDGE_CLAMP, STBIR_FILTER_TRIANGLE, STBIR_FILTER_TRIANGLE,
+                         STBIR_COLORSPACE_LINEAR, nullptr);
         }
 
         uint8_t* rgba_data = (uint8_t*)malloc(src_w * src_h * 4);
         if (!rgba_data) {
-            fprintf(stderr, "[ERROR] ImageRemoveBackground: Out of memory\n");
+            LOG_ERROR("[ERROR] ImageRemoveBackground: Out of memory\n");
             return sd_error_t::ERROR_MEMORY_ALLOCATION;
         }
 
@@ -266,7 +258,7 @@ public:
 
         outputs["IMAGE"] = make_image_ptr(result_img);
         outputs["MASK"] = make_image_ptr(mask_img);
-        printf("[ImageRemoveBackground] Removed background: %dx%d -> RGBA + Mask\n", src_w, src_h);
+        LOG_INFO("[ImageRemoveBackground] Removed background: %dx%d -> RGBA + Mask\n", src_w, src_h);
         return sd_error_t::OK;
     }
 };
@@ -276,15 +268,16 @@ REGISTER_NODE("ImageRemoveBackground", ImageRemoveBackgroundNode);
 // LineArtPreprocessor - LineArt 线稿提取
 // ============================================================================
 class LineArtPreprocessorNode : public Node {
-public:
-    std::string get_class_type() const override { return "LineArtPreprocessor"; }
-    std::string get_category() const override { return "image/preprocessors"; }
+  public:
+    std::string get_class_type() const override {
+        return "LineArtPreprocessor";
+    }
+    std::string get_category() const override {
+        return "image/preprocessors";
+    }
 
     std::vector<PortDef> get_inputs() const override {
-        return {
-            {"image", "IMAGE", true, nullptr},
-            {"lineart_model", "LINEART_MODEL", true, nullptr}
-        };
+        return {{"image", "IMAGE", true, nullptr}, {"lineart_model", "LINEART_MODEL", true, nullptr}};
     }
 
     std::vector<PortDef> get_outputs() const override {
@@ -296,21 +289,20 @@ public:
         auto preprocessor = std::any_cast<std::shared_ptr<LineArtPreprocessor>>(inputs.at("lineart_model"));
 
         if (!src || !src->data || src->channel != 3) {
-            fprintf(stderr, "[ERROR] LineArtPreprocessor: Requires RGB image\n");
+            LOG_ERROR("[ERROR] LineArtPreprocessor: Requires RGB image\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
         if (!preprocessor) {
-            fprintf(stderr, "[ERROR] LineArtPreprocessor: Model not loaded\n");
+            LOG_ERROR("[ERROR] LineArtPreprocessor: Model not loaded\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
-        printf("[LineArtPreprocessor] Processing %dx%d\n",
-               src->width, src->height);
+        LOG_INFO("[LineArtPreprocessor] Processing %dx%d\n", src->width, src->height);
 
         LineArtResult result = preprocessor->process(src->data, src->width, src->height);
         if (!result.success) {
-            fprintf(stderr, "[ERROR] LineArtPreprocessor: Processing failed\n");
+            LOG_ERROR("[ERROR] LineArtPreprocessor: Processing failed\n");
             return sd_error_t::ERROR_INVALID_INPUT;
         }
 
@@ -332,7 +324,7 @@ public:
         *image_result = dst_image;
 
         outputs["IMAGE"] = make_image_ptr(image_result);
-        printf("[LineArtPreprocessor] Done\n");
+        LOG_INFO("[LineArtPreprocessor] Done\n");
         return sd_error_t::OK;
     }
 };
@@ -341,29 +333,23 @@ REGISTER_NODE("LineArtPreprocessor", LineArtPreprocessorNode);
 #else // !HAS_ONNXRUNTIME
 
 static std::vector<PortDef> rembg_inputs() {
-    return {
-        {"image", "IMAGE", true, nullptr},
-        {"model", "REMBG_MODEL", true, nullptr}
-    };
+    return {{"image", "IMAGE", true, nullptr}, {"model", "REMBG_MODEL", true, nullptr}};
 }
 static std::vector<PortDef> rembg_outputs() {
     return {{"IMAGE", "IMAGE"}, {"MASK", "IMAGE"}};
 }
-DEFINE_ONNX_PLACEHOLDER_NODE(ImageRemoveBackgroundNode, "ImageRemoveBackground", "image",
-    rembg_inputs, rembg_outputs, sd_error_t::ERROR_EXECUTION_FAILED)
+DEFINE_ONNX_PLACEHOLDER_NODE(ImageRemoveBackgroundNode, "ImageRemoveBackground", "image", rembg_inputs, rembg_outputs,
+                             sd_error_t::ERROR_EXECUTION_FAILED)
 REGISTER_NODE("ImageRemoveBackground", ImageRemoveBackgroundNode);
 
 static std::vector<PortDef> lineart_inputs() {
-    return {
-        {"image", "IMAGE", true, nullptr},
-        {"lineart_model", "LINEART_MODEL", true, nullptr}
-    };
+    return {{"image", "IMAGE", true, nullptr}, {"lineart_model", "LINEART_MODEL", true, nullptr}};
 }
 static std::vector<PortDef> lineart_outputs() {
     return {{"IMAGE", "IMAGE"}};
 }
-DEFINE_ONNX_PLACEHOLDER_NODE(LineArtPreprocessorNode, "LineArtPreprocessor", "image/preprocessors",
-    lineart_inputs, lineart_outputs, sd_error_t::ERROR_EXECUTION_FAILED)
+DEFINE_ONNX_PLACEHOLDER_NODE(LineArtPreprocessorNode, "LineArtPreprocessor", "image/preprocessors", lineart_inputs,
+                             lineart_outputs, sd_error_t::ERROR_EXECUTION_FAILED)
 REGISTER_NODE("LineArtPreprocessor", LineArtPreprocessorNode);
 
 #endif // HAS_ONNXRUNTIME

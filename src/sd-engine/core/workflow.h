@@ -11,11 +11,11 @@
 #pragma once
 
 #include "node.h"
+#include <any>
 #include <map>
 #include <memory>
-#include <vector>
 #include <string>
-#include <any>
+#include <vector>
 
 namespace sdengine {
 
@@ -24,7 +24,7 @@ namespace sdengine {
 /// 管理一组节点及其连接关系，负责从 JSON 解析、验证工作流合法性，
 /// 并生成拓扑排序后的执行顺序。
 class Workflow {
-public:
+  public:
     Workflow() = default;
     ~Workflow() = default;
 
@@ -72,11 +72,11 @@ public:
     /// @brief 清空所有节点和连接
     void clear();
 
-private:
-    std::map<std::string, std::unique_ptr<Node>> nodes_;                    ///< 节点实例
-    std::map<std::string, std::vector<Link>> input_links_;                 ///< 节点的输入连接
-    std::map<std::string, std::vector<Link>> output_links_;                ///< 节点的输出连接
-    std::map<std::string, std::map<std::string, std::any>> input_values_;  ///< 节点的字面量输入值
+  private:
+    std::map<std::string, std::unique_ptr<Node>> nodes_;                  ///< 节点实例
+    std::map<std::string, std::vector<Link>> input_links_;                ///< 节点的输入连接
+    std::map<std::string, std::vector<Link>> output_links_;               ///< 节点的输出连接
+    std::map<std::string, std::map<std::string, std::any>> input_values_; ///< 节点的字面量输入值
 
     /// @brief 解析 ComfyUI JSON 格式
     bool parse_comfyui_json(const std::string& json_str);

@@ -3,8 +3,8 @@
 // ============================================================================
 
 #include "workflow.h"
-#include "node.h"
 #include "nlohmann/json.hpp"
+#include "node.h"
 #include <fstream>
 #include <queue>
 #include <set>
@@ -19,9 +19,8 @@ bool Workflow::load_from_file(const std::string& path) {
     if (!file.is_open()) {
         return false;
     }
-    
-    std::string json_str((std::istreambuf_iterator<char>(file)),
-                          std::istreambuf_iterator<char>());
+
+    std::string json_str((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     return load_from_string(json_str);
 }
 
@@ -47,37 +46,37 @@ static std::any json_to_any(const json& j) {
 bool Workflow::parse_comfyui_json(const std::string& json_str) {
     try {
         json j = json::parse(json_str);
-        
+
         // 解析每个节点
         for (auto& [node_id, node_data] : j.items()) {
-            if (!node_data.is_object()) continue;
-            
+            if (!node_data.is_object())
+                continue;
+
             // 获取节点类型
             std::string class_type = node_data.value("class_type", "");
             if (class_type.empty()) {
                 continue;
             }
-            
+
             // 创建节点实例
             auto node = NodeRegistry::instance().create(class_type);
             if (!node) {
                 // 不支持的节点类型，跳过
                 continue;
             }
-            
+
             // 在 move 之前先获取输入定义
             auto input_defs = node->get_inputs();
-            
+
             node->set_id(node_id);
             nodes_[node_id] = std::move(node);
-            
+
             // 解析输入连接和字面量值
             if (node_data.contains("inputs") && node_data["inputs"].is_object()) {
                 for (auto& [input_name, input_value] : node_data["inputs"].items()) {
                     // 检查是否是连接引用 [node_id, slot_index]
-                    if (input_value.is_array() && input_value.size() == 2 && 
-                        input_value[0].is_string() && input_value[1].is_number()) {
-                        
+                    if (input_value.is_array() && input_value.size() == 2 && input_value[0].is_string() &&
+                        input_value[1].is_number()) {
                         Link link;
                         link.src_node_id = input_value[0].get<std::string>();
                         link.src_slot = input_value[1].get<int>();
@@ -103,7 +102,7 @@ bool Workflow::parse_comfyui_json(const std::string& json_str) {
                 }
             }
         }
-        
+
         return true;
     } catch (const std::exception& e) {
         return false;
@@ -155,30 +154,30 @@ std::vector<std::string> Workflow::topological_sort() const {
     std::vector<std::string> result;
     std::map<std::string, int> in_degree;
     std::queue<std::string> queue;
-    
+
     // 初始化入度
     for (const auto& [id, _] : nodes_) {
         in_degree[id] = 0;
     }
-    
+
     // 计算入度
     for (const auto& [id, links] : input_links_) {
         in_degree[id] = links.size();
     }
-    
+
     // 找到入度为 0 的节点
     for (const auto& [id, degree] : in_degree) {
         if (degree == 0) {
             queue.push(id);
         }
     }
-    
+
     // Kahn 算法
     while (!queue.empty()) {
         std::string u = queue.front();
         queue.pop();
         result.push_back(u);
-        
+
         // 找到所有 u 的下游节点
         auto it = output_links_.find(u);
         if (it != output_links_.end()) {
@@ -191,7 +190,7 @@ std::vector<std::string> Workflow::topological_sort() const {
             }
         }
     }
-    
+
     return result;
 }
 
@@ -202,7 +201,7 @@ bool Workflow::validate(std::string& error_msg) const {
         error_msg = "Workflow contains cycles";
         return false;
     }
-    
+
     // 检查所有引用的节点是否存在
     for (const auto& [id, links] : input_links_) {
         for (const auto& link : links) {
@@ -212,7 +211,74 @@ bool Workflow::validate(std::string& error_msg) const {
             }
         }
     }
-    
+
+    // 检查必填端口是否都有值/连接
+    for (const auto& [node_id, node_ptr] : nodes_) {
+        auto input_defs = node_ptr->get_inputs();
+        auto links = get_input_links(node_id);
+        auto values = get_input_values(node_id);
+
+        for (const auto& def : input_defs) {
+            if (!def.required)
+                continue;
+
+            bool has_link = false;
+            for (const auto& link : links) {
+                if (link.dst_slot >= 0 && link.dst_slot < (int)input_defs.size()) {
+                    if (input_defs[link.dst_slot].name == def.name) {
+                        has_link = true;
+                        break;
+                    }
+                }
+            }
+
+            bool has_value = values.find(def.name) != values.end();
+
+            if (!has_link && !has_value) {
+                error_msg =
+                    "Node " + node_id + " (" + node_ptr->get_class_type() + ") missing required input: " + def.name;
+                return false;
+            }
+        }
+    }
+
+    // 检查端口类型匹配
+    for (const auto& [dst_node_id, links] : input_links_) {
+        auto dst_node = get_node(dst_node_id);
+        if (!dst_node)
+            continue;
+        auto dst_inputs = dst_node->get_inputs();
+
+        for (const auto& link : links) {
+            auto src_node = get_node(link.src_node_id);
+            if (!src_node)
+                continue;
+            auto src_outputs = src_node->get_outputs();
+
+            if (link.src_slot < 0 || link.src_slot >= (int)src_outputs.size()) {
+                error_msg = "Invalid output slot " + std::to_string(link.src_slot) + " on node " + link.src_node_id;
+                return false;
+            }
+            if (link.dst_slot < 0 || link.dst_slot >= (int)dst_inputs.size()) {
+                error_msg = "Invalid input slot " + std::to_string(link.dst_slot) + " on node " + link.dst_node_id;
+                return false;
+            }
+
+            const std::string& src_type = src_outputs[link.src_slot].type;
+            const std::string& dst_type = dst_inputs[link.dst_slot].type;
+
+            // 允许 MODEL/CLIP/VAE 之间的通用连接（它们都基于 sd_ctx_t）
+            bool is_generic_model = (src_type == "MODEL" || src_type == "CLIP" || src_type == "VAE") &&
+                                    (dst_type == "MODEL" || dst_type == "CLIP" || dst_type == "VAE");
+
+            if (src_type != dst_type && !is_generic_model) {
+                error_msg = "Type mismatch: node " + link.src_node_id + " outputs " + src_type + " but node " +
+                            link.dst_node_id + " expects " + dst_type;
+                return false;
+            }
+        }
+    }
+
     return true;
 }
 

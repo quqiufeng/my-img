@@ -12,20 +12,20 @@
 #pragma once
 
 #include "node.h"
-#include <list>
-#include <unordered_map>
 #include <chrono>
+#include <list>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace sdengine {
 
 /// @brief 缓存条目
 struct CacheEntry {
-    std::string hash;                                       ///< 输入哈希值
-    NodeOutputs outputs;                                    ///< 缓存的输出数据
-    std::chrono::steady_clock::time_point last_access;      ///< 最后访问时间
-    size_t memory_size = 0;                                 ///< 估算的内存占用（字节）
+    std::string hash;                                  ///< 输入哈希值
+    NodeOutputs outputs;                               ///< 缓存的输出数据
+    std::chrono::steady_clock::time_point last_access; ///< 最后访问时间
+    size_t memory_size = 0;                            ///< 估算的内存占用（字节）
 };
 
 /// @brief 节点执行结果缓存管理器
@@ -33,7 +33,7 @@ struct CacheEntry {
 /// 以节点 ID + 输入哈希为键存储输出结果，自动估算内存占用并在超限时
 /// 清理最久未访问的条目。
 class ExecutionCache {
-public:
+  public:
     /// @brief 构造函数
     /// @param max_size_bytes 缓存最大内存限制（默认 1GB）
     explicit ExecutionCache(size_t max_size_bytes = 1024 * 1024 * 1024);
@@ -45,8 +45,7 @@ public:
     NodeOutputs get(const std::string& node_id, const std::string& hash);
 
     /// @brief 将条目存入缓存
-    void put(const std::string& node_id, const std::string& hash,
-             const NodeOutputs& outputs);
+    void put(const std::string& node_id, const std::string& hash, const NodeOutputs& outputs);
 
     /// @brief 垃圾回收：清理过期或超量的缓存条目
     void gc();
@@ -55,15 +54,19 @@ public:
     void clear();
 
     /// @brief 获取当前缓存估算内存占用
-    size_t get_current_size() const { return current_size_; }
+    size_t get_current_size() const {
+        return current_size_;
+    }
 
     /// @brief 获取缓存内存上限
-    size_t get_max_size() const { return max_size_; }
+    size_t get_max_size() const {
+        return max_size_;
+    }
 
     /// @brief 获取当前缓存条目数量
     size_t size() const;
 
-private:
+  private:
     using LRUList = std::list<std::string>;
     using LRUListIter = LRUList::iterator;
 
