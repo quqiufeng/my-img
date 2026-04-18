@@ -21,6 +21,10 @@ class AnimateDiffLoaderNode : public Node {
         return "animatediff";
     }
 
+    bool is_placeholder() const override {
+        return true;
+    }
+
     std::vector<PortDef> get_inputs() const override {
         return {{"model_path", "STRING", true, std::string("")},
                 {"motion_module", "STRING", true, std::string("")},
@@ -59,6 +63,10 @@ class AnimateDiffSamplerNode : public Node {
     }
     std::string get_category() const override {
         return "animatediff";
+    }
+
+    bool is_placeholder() const override {
+        return true;
     }
 
     std::vector<PortDef> get_inputs() const override {

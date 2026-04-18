@@ -117,6 +117,10 @@ class MiDaSDepthMapPreprocessorNode : public Node {
         return "image/preprocessors";
     }
 
+    bool is_placeholder() const override {
+        return true;
+    }
+
     std::vector<PortDef> get_inputs() const override {
         return {
             {"image", "IMAGE", true, nullptr}, {"a", "FLOAT", false, 6.28f}, {"bg_threshold", "FLOAT", false, 0.1f}};
@@ -156,6 +160,10 @@ class OpenPosePreprocessorNode : public Node {
     }
     std::string get_category() const override {
         return "image/preprocessors";
+    }
+
+    bool is_placeholder() const override {
+        return true;
     }
 
     std::vector<PortDef> get_inputs() const override {

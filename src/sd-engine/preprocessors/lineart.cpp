@@ -8,10 +8,9 @@
 
 #ifdef HAS_ONNXRUNTIME
 
-#include <cstdio>
-#include <cmath>
-#include <algorithm>
 #include "core/log.h"
+#include <algorithm>
+#include <cmath>
 
 namespace sdengine {
 
@@ -23,7 +22,7 @@ bool LineArtPreprocessor::load(const std::string& model_path) {
     try {
         session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), session_options);
     } catch (const Ort::Exception& e) {
-        fprintf(stderr, "[ERROR] LineArtPreprocessor: Failed to load model: %s\n", e.what());
+        LOG_ERROR("[ERROR] LineArtPreprocessor: Failed to load model: %s\n", e.what());
         return false;
     }
 
@@ -36,16 +35,18 @@ bool LineArtPreprocessor::load(const std::string& model_path) {
             std::vector<int64_t> shape = tensor_info.GetShape();
             if (shape.size() >= 4) {
                 // shape: [batch, channels, height, width]
-                if (shape[2] > 0) input_height_ = static_cast<int>(shape[2]);
-                if (shape[3] > 0) input_width_ = static_cast<int>(shape[3]);
+                if (shape[2] > 0)
+                    input_height_ = static_cast<int>(shape[2]);
+                if (shape[3] > 0)
+                    input_width_ = static_cast<int>(shape[3]);
             }
         }
     } catch (...) {
         // fallback to default 512x512
     }
 
-    printf("[LineArtPreprocessor] Loaded model: %s (input_size=%dx%d)\n",
-           model_path.c_str(), input_width_, input_height_);
+    LOG_INFO("[LineArtPreprocessor] Loaded model: %s (input_size=%dx%d)\n", model_path.c_str(), input_width_,
+             input_height_);
     return true;
 }
 
@@ -86,8 +87,7 @@ LineArtResult LineArtPreprocessor::process(const uint8_t* rgb_data, int width, i
 
     std::vector<int64_t> input_shape = {1, 3, input_height_, input_width_};
     Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        memory_info_, input_tensor_values.data(), input_tensor_values.size(),
-        input_shape.data(), input_shape.size());
+        memory_info_, input_tensor_values.data(), input_tensor_values.size(), input_shape.data(), input_shape.size());
 
     // Get input/output names
     Ort::AllocatorWithDefaultOptions allocator;
@@ -111,12 +111,10 @@ LineArtResult LineArtPreprocessor::process(const uint8_t* rgb_data, int width, i
     // Run inference
     std::vector<Ort::Value> output_tensors;
     try {
-        output_tensors = session_->Run(
-            Ort::RunOptions{nullptr},
-            input_names.data(), &input_tensor, num_inputs,
-            output_names.data(), num_outputs);
+        output_tensors = session_->Run(Ort::RunOptions{nullptr}, input_names.data(), &input_tensor, num_inputs,
+                                       output_names.data(), num_outputs);
     } catch (const Ort::Exception& e) {
-        fprintf(stderr, "[ERROR] LineArtPreprocessor: ONNX inference failed: %s\n", e.what());
+        LOG_ERROR("[ERROR] LineArtPreprocessor: ONNX inference failed: %s\n", e.what());
         return result;
     }
 
@@ -154,12 +152,13 @@ LineArtResult LineArtPreprocessor::process(const uint8_t* rgb_data, int width, i
             max_val = std::max(max_val, out_data[i]);
         }
         float range = max_val - min_val;
-        if (range < 1e-5f) range = 1.0f;
+        if (range < 1e-5f)
+            range = 1.0f;
 
         for (int y = 0; y < out_h; y++) {
             for (int x = 0; x < out_w; x++) {
                 int idx = y * out_w + x;
-                float val = out_data[idx];  // assume first channel if multi-channel
+                float val = out_data[idx]; // assume first channel if multi-channel
                 if (out_c > 1) {
                     // average channels
                     val = 0.0f;
@@ -177,7 +176,7 @@ LineArtResult LineArtPreprocessor::process(const uint8_t* rgb_data, int width, i
 
         result.success = true;
     } catch (const std::exception& e) {
-        fprintf(stderr, "[ERROR] LineArtPreprocessor: Output processing failed: %s\n", e.what());
+        LOG_ERROR("[ERROR] LineArtPreprocessor: Output processing failed: %s\n", e.what());
     }
 
     return result;

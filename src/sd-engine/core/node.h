@@ -102,12 +102,18 @@ class Node {
     /// @param inputs  输入数据
     /// @param outputs 输出数据（由节点填充）
     /// @return 执行结果错误码
-    virtual sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) = 0;
+    [[nodiscard]] virtual sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) = 0;
 
     /// @brief 根据输入计算缓存哈希
     /// @param inputs 当前输入数据
     /// @return 哈希字符串，用于 ExecutionCache
     virtual std::string compute_hash(const NodeInputs& inputs) const;
+
+    /// @brief 是否为占位符节点（未完整实现，执行会返回错误）
+    /// @return true 表示该节点是占位符，不应在生产环境使用
+    virtual bool is_placeholder() const {
+        return false;
+    }
 
   protected:
     std::string id_; ///< 节点唯一标识

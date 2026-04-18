@@ -8,10 +8,9 @@
 
 #ifdef HAS_ONNXRUNTIME
 
-#include <cstdio>
-#include <cstring>
-#include <algorithm>
 #include "core/log.h"
+#include <algorithm>
+#include <cstring>
 
 namespace sdengine {
 namespace face {
@@ -25,12 +24,12 @@ bool FaceSwapper::load(const std::string& inswapper_path, const std::string& arc
         inswapper_session_ = std::make_unique<Ort::Session>(env_, inswapper_path.c_str(), session_options);
         arcface_session_ = std::make_unique<Ort::Session>(env_, arcface_path.c_str(), session_options);
     } catch (const Ort::Exception& e) {
-        fprintf(stderr, "[ERROR] FaceSwapper::load: %s\n", e.what());
+        LOG_ERROR("[ERROR] FaceSwapper::load: %s\n", e.what());
         return false;
     }
 
-    printf("[FaceSwapper] Loaded inswapper: %s\n", inswapper_path.c_str());
-    printf("[FaceSwapper] Loaded arcface: %s\n", arcface_path.c_str());
+    LOG_INFO("[FaceSwapper] Loaded inswapper: %s\n", inswapper_path.c_str());
+    LOG_INFO("[FaceSwapper] Loaded arcface: %s\n", arcface_path.c_str());
     return true;
 }
 
@@ -61,10 +60,7 @@ std::vector<float> FaceSwapper::extract_embedding(const uint8_t* rgb_128) {
                 float p01 = rgb_128[(y0 * 128 + x1) * 3 + c] / 255.0f;
                 float p10 = rgb_128[(y1 * 128 + x0) * 3 + c] / 255.0f;
                 float p11 = rgb_128[(y1 * 128 + x1) * 3 + c] / 255.0f;
-                float val = p00 * (1 - fx) * (1 - fy) +
-                            p01 * fx * (1 - fy) +
-                            p10 * (1 - fx) * fy +
-                            p11 * fx * fy;
+                float val = p00 * (1 - fx) * (1 - fy) + p01 * fx * (1 - fy) + p10 * (1 - fx) * fy + p11 * fx * fy;
                 // 归一化到 [-1, 1]
                 input_tensor_values[(y * 112 + x) * 3 + c] = (val - 0.5f) / 0.5f;
             }
@@ -95,12 +91,10 @@ std::vector<float> FaceSwapper::extract_embedding(const uint8_t* rgb_128) {
 
     std::vector<Ort::Value> output_tensors;
     try {
-        output_tensors = arcface_session_->Run(
-            Ort::RunOptions{nullptr},
-            input_names.data(), &input_tensor, 1,
-            output_names.data(), output_names.size());
+        output_tensors = arcface_session_->Run(Ort::RunOptions{nullptr}, input_names.data(), &input_tensor, 1,
+                                               output_names.data(), output_names.size());
     } catch (const Ort::Exception& e) {
-        fprintf(stderr, "[ERROR] FaceSwapper::extract_embedding: ONNX Runtime error: %s\n", e.what());
+        LOG_ERROR("[ERROR] FaceSwapper::extract_embedding: ONNX Runtime error: %s\n", e.what());
         return embedding;
     }
 
@@ -111,8 +105,8 @@ std::vector<float> FaceSwapper::extract_embedding(const uint8_t* rgb_128) {
 
     auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
     if (output_shape.size() != 2 || output_shape[0] != 1 || output_shape[1] != 512) {
-        LOG_ERROR("[ERROR] FaceSwapper::extract_embedding: Unexpected output shape [%ld, %ld]\n",
-                output_shape[0], output_shape[1]);
+        LOG_ERROR("[ERROR] FaceSwapper::extract_embedding: Unexpected output shape [%ld, %ld]\n", output_shape[0],
+                  output_shape[1]);
         return embedding;
     }
 
@@ -148,13 +142,14 @@ SwapResult FaceSwapper::swap(const uint8_t* target_rgb_128, const uint8_t* sourc
     }
 
     std::vector<int64_t> target_shape = {1, 3, 128, 128};
-    Ort::Value target_tensor = Ort::Value::CreateTensor<float>(
-        memory_info_, target_tensor_values.data(), target_tensor_values.size(), target_shape.data(), target_shape.size());
+    Ort::Value target_tensor =
+        Ort::Value::CreateTensor<float>(memory_info_, target_tensor_values.data(), target_tensor_values.size(),
+                                        target_shape.data(), target_shape.size());
 
     // 3. 准备 source embedding 输入 [1, 512]
     std::vector<int64_t> source_shape = {1, 512};
-    Ort::Value source_tensor = Ort::Value::CreateTensor<float>(
-        memory_info_, embedding.data(), embedding.size(), source_shape.data(), source_shape.size());
+    Ort::Value source_tensor = Ort::Value::CreateTensor<float>(memory_info_, embedding.data(), embedding.size(),
+                                                               source_shape.data(), source_shape.size());
 
     // 4. 获取输入/输出名称
     Ort::AllocatorWithDefaultOptions allocator;
@@ -182,12 +177,10 @@ SwapResult FaceSwapper::swap(const uint8_t* target_rgb_128, const uint8_t* sourc
 
     std::vector<Ort::Value> output_tensors;
     try {
-        output_tensors = inswapper_session_->Run(
-            Ort::RunOptions{nullptr},
-            input_names.data(), input_tensors.data(), input_tensors.size(),
-            output_names.data(), output_names.size());
+        output_tensors = inswapper_session_->Run(Ort::RunOptions{nullptr}, input_names.data(), input_tensors.data(),
+                                                 input_tensors.size(), output_names.data(), output_names.size());
     } catch (const Ort::Exception& e) {
-        fprintf(stderr, "[ERROR] FaceSwapper::swap: ONNX Runtime error: %s\n", e.what());
+        LOG_ERROR("[ERROR] FaceSwapper::swap: ONNX Runtime error: %s\n", e.what());
         return result;
     }
 
@@ -198,10 +191,10 @@ SwapResult FaceSwapper::swap(const uint8_t* target_rgb_128, const uint8_t* sourc
 
     // 6. 解析输出 [1, 3, 128, 128]
     auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
-    if (output_shape.size() != 4 || output_shape[0] != 1 || output_shape[1] != 3 ||
-        output_shape[2] != 128 || output_shape[3] != 128) {
-        LOG_ERROR("[ERROR] FaceSwapper::swap: Unexpected output shape [%ld, %ld, %ld, %ld]\n",
-                output_shape[0], output_shape[1], output_shape[2], output_shape[3]);
+    if (output_shape.size() != 4 || output_shape[0] != 1 || output_shape[1] != 3 || output_shape[2] != 128 ||
+        output_shape[3] != 128) {
+        LOG_ERROR("[ERROR] FaceSwapper::swap: Unexpected output shape [%ld, %ld, %ld, %ld]\n", output_shape[0],
+                  output_shape[1], output_shape[2], output_shape[3]);
         return result;
     }
 

@@ -8,10 +8,9 @@
 
 #ifdef HAS_ONNXRUNTIME
 
-#include <cstdio>
-#include <cstring>
-#include <algorithm>
 #include "core/log.h"
+#include <algorithm>
+#include <cstring>
 
 namespace sdengine {
 namespace face {
@@ -25,13 +24,12 @@ bool FaceRestorer::load(const std::string& model_path, RestoreModelType type) {
     try {
         session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), session_options);
     } catch (const Ort::Exception& e) {
-        fprintf(stderr, "[ERROR] FaceRestorer::load: %s\n", e.what());
+        LOG_ERROR("[ERROR] FaceRestorer::load: %s\n", e.what());
         return false;
     }
 
-    printf("[FaceRestorer] Loaded model: %s (type=%s)\n",
-           model_path.c_str(),
-           type == RestoreModelType::GFPGAN ? "GFPGAN" : "CodeFormer");
+    LOG_INFO("[FaceRestorer] Loaded model: %s (type=%s)\n", model_path.c_str(),
+             type == RestoreModelType::GFPGAN ? "GFPGAN" : "CodeFormer");
     return true;
 }
 
@@ -46,7 +44,7 @@ RestoreResult FaceRestorer::restore(const uint8_t* rgb_512, float codeformer_fid
     // 归一化到 [-1, 1] 或 [0, 1]（GFPGAN/CodeFormer 通常使用 [-1, 1]）
     std::vector<float> input_tensor_values(1 * 3 * 512 * 512);
     const float mean[3] = {0.5f, 0.5f, 0.5f};
-    const float std[3]  = {0.5f, 0.5f, 0.5f};
+    const float std[3] = {0.5f, 0.5f, 0.5f};
 
     for (int y = 0; y < 512; y++) {
         for (int x = 0; x < 512; x++) {
@@ -91,20 +89,18 @@ RestoreResult FaceRestorer::restore(const uint8_t* rgb_512, float codeformer_fid
         // 先尝试 double，失败则 fallback 到 float
         std::vector<int64_t> w_shape = {1};
         std::vector<double> w_values_double = {(double)codeformer_fidelity};
-        Ort::Value w_tensor = Ort::Value::CreateTensor<double>(
-            memory_info_, w_values_double.data(), w_values_double.size(), w_shape.data(), w_shape.size());
+        Ort::Value w_tensor = Ort::Value::CreateTensor<double>(memory_info_, w_values_double.data(),
+                                                               w_values_double.size(), w_shape.data(), w_shape.size());
         input_tensors.push_back(std::move(w_tensor));
     }
 
     // 运行推理
     std::vector<Ort::Value> output_tensors;
     try {
-        output_tensors = session_->Run(
-            Ort::RunOptions{nullptr},
-            input_names.data(), input_tensors.data(), input_tensors.size(),
-            output_names.data(), output_names.size());
+        output_tensors = session_->Run(Ort::RunOptions{nullptr}, input_names.data(), input_tensors.data(),
+                                       input_tensors.size(), output_names.data(), output_names.size());
     } catch (const Ort::Exception& e) {
-        fprintf(stderr, "[ERROR] FaceRestorer::restore: ONNX Runtime error: %s\n", e.what());
+        LOG_ERROR("[ERROR] FaceRestorer::restore: ONNX Runtime error: %s\n", e.what());
         return result;
     }
 
@@ -116,10 +112,10 @@ RestoreResult FaceRestorer::restore(const uint8_t* rgb_512, float codeformer_fid
     // 解析输出
     Ort::Value& output_tensor = output_tensors[0];
     auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
-    if (output_shape.size() != 4 || output_shape[0] != 1 || output_shape[1] != 3 ||
-        output_shape[2] != 512 || output_shape[3] != 512) {
-        LOG_ERROR("[ERROR] FaceRestorer::restore: Unexpected output shape [%ld, %ld, %ld, %ld]\n",
-                output_shape[0], output_shape[1], output_shape[2], output_shape[3]);
+    if (output_shape.size() != 4 || output_shape[0] != 1 || output_shape[1] != 3 || output_shape[2] != 512 ||
+        output_shape[3] != 512) {
+        LOG_ERROR("[ERROR] FaceRestorer::restore: Unexpected output shape [%ld, %ld, %ld, %ld]\n", output_shape[0],
+                  output_shape[1], output_shape[2], output_shape[3]);
         return result;
     }
 
