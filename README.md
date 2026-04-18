@@ -58,10 +58,17 @@ my-img/
 
 ```bash
 cd ~/my-img/build
-./build_sd_cpp.sh
+./build_sd.sh
 ```
 
 这个脚本会自动调用 `apply_patches.sh`，将 my-img 所需的修改应用到 `stable-diffusion.cpp` 源码中，然后编译。
+
+**build_sd.sh 选项：**
+```bash
+./build_sd.sh --help              # 显示帮助
+./build_sd.sh --no-cuda           # 仅 CPU 编译
+./build_sd.sh --clean --jobs 8    # 清理后使用 8 线程编译
+```
 
 ### 2. 编译 my-img
 
@@ -214,8 +221,14 @@ sd-workflow --list-nodes
 | **图像** | `ImageGrayscale` | 灰度转换 |
 | **图像** | `ImageThreshold` | 二值化 |
 | **图像** | `CannyEdgePreprocessor` | Canny 边缘检测预处理 |
+| **图像** | `MiDaS-DepthMapPreprocessor` | MiDaS 深度图预处理（⚠️ 占位符，需 ONNX 模型） |
+| **图像** | `OpenPosePreprocessor` | OpenPose 姿态预处理（⚠️ 占位符，需 ONNX 模型） |
 | **图像** | `LoadImageMask` | 加载 mask |
 | **图像** | `PreviewImage` | 终端预览 |
+| **修复** | `INPAINT_LoadInpaintModel` | 加载 Inpaint 模型（⚠️ 占位符） |
+| **修复** | `INPAINT_ApplyInpaint` | 应用 Inpaint（⚠️ 占位符） |
+| **视频** | `AnimateDiffLoader` | 加载 AnimateDiff 运动模块（⚠️ 占位符） |
+| **视频** | `AnimateDiffSampler` | AnimateDiff 采样器（⚠️ 占位符） |
 | **测试** | `ConstantInt` / `AddInt` / `MultiplyInt` / `PrintInt` | 测试节点 |
 
 ### 核心特性
@@ -333,7 +346,7 @@ cd ~/my-img
 ./apply_patches.sh
 
 cd ~/my-img/build
-./build_sd_cpp.sh
+./build_sd.sh
 
 cd ~/my-img/build
 cmake .. && make -j$(nproc)
@@ -547,16 +560,16 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 | # | 节点类别 | 具体节点 | 进度 |
 |---|---------|---------|------|
 | 1 | **条件编码** | ConditioningCombine / ConditioningConcat / ConditioningAverage | ✅ |
-| 2 | **Latent** | LatentUpscale / LatentComposite | ⬜ |
+| 2 | **Latent** | LatentUpscale / LatentComposite | ✅ |
 | 3 | **采样** | KSamplerAdvanced / SamplerCustom | ✅ |
 | 4 | **图像** | ImageBlend / ImageCompositeMasked / ImageRemoveBackground | ✅ |
 | 5 | **超分** | UpscaleModelLoader / ImageUpscaleWithModel | ✅ |
 | 6 | **人脸** | FaceDetect / FaceRestoreWithModel / FaceSwap | ✅ |
 | 7 | **ControlNet** | ControlNetLoader / ControlNetApply / CannyEdgePreprocessor | ✅ |
-| 8 | **ControlNet** | MiDaS-DepthMapPreprocessor / OpenPosePreprocessor | ⬜ |
+| 8 | **ControlNet** | MiDaS-DepthMapPreprocessor / OpenPosePreprocessor | ⚠️ 占位符（需 ONNX 模型） |
 | 9 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ✅ |
-| 10 | **修复** | INPAINT_LoadInpaintModel / INPAINT_ApplyInpaint | ⬜ |
-| 11 | **视频** | AnimateDiff Loader / Sampler | ⬜ |
+| 10 | **修复** | INPAINT_LoadInpaintModel / INPAINT_ApplyInpaint | ⚠️ 占位符（需 inpaint UNet 支持） |
+| 11 | **视频** | AnimateDiff Loader / Sampler | ⚠️ 占位符（需 motion module 支持） |
 
 ---
 
@@ -568,7 +581,7 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 
 | 维度 | 评分 | 说明 |
 |------|------|------|
-| **功能完整性** | A- | 46 个核心节点覆盖 txt2img/img2img/LoRA/ControlNet/IPAdapter/人脸/图像处理/Deep HighRes Fix |
+| **功能完整性** | B+ | 46+ 节点覆盖核心功能；MiDaS/OpenPose/Inpaint/AnimateDiff 为占位符（运行时返回错误而非假结果） |
 | **架构设计** | A- | DAG 执行引擎 + 缓存 + 多线程并行 + 对象池，设计清晰 |
 | **代码质量** | A- | `core_nodes.cpp` 已拆分为 6 个模块，公共代码提取到 `node_utils`，ONNX 占位符使用宏统一生成 |
 | **测试覆盖** | B+ | 25 个 test cases / 123 assertions，新增 Cache LRU、ImageScale、ImageCrop 测试 |
@@ -588,7 +601,7 @@ python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --li
 
 1. **测试未覆盖核心生成链路**：`KSampler`、`VAEDecode` 等关键节点缺乏端到端测试（需要大模型，测试成本高）
 2. **ONNX 模型需自备**：LineArt、人脸修复等节点需要用户自行转换/下载 ONNX 模型
-3. **部分高级预处理器缺失**：MiDaS Depth、OpenPose、LineArt（模型型）等尚未支持
+3. **部分高级预处理器为占位符**：MiDaS Depth、OpenPose 为占位符（运行时返回错误）；LineArt 需 ONNX 模型
 4. **日志系统已引入但未全面替换**：`log.h` 已创建，后续需逐步替换所有 `printf` 调用
 
 ### 生产部署建议

@@ -169,6 +169,8 @@ if(EXISTS ${SD_ENGINE_SRC})
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_detect_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_restore_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_swap_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/inpaint_nodes.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/animatediff_nodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/core_nodes.cpp"
         ${SD_ENGINE_FACE_SRC}
         ${SD_ENGINE_PREPROCESSOR_SRC}

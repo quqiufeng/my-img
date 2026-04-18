@@ -105,6 +105,83 @@ class CannyEdgePreprocessorNode : public Node {
 };
 REGISTER_NODE("CannyEdgePreprocessor", CannyEdgePreprocessorNode);
 
+// ============================================================================
+// MiDaS-DepthMapPreprocessor - MiDaS 深度图预处理（占位符，需 ONNX 模型支持）
+// ============================================================================
+class MiDaSDepthMapPreprocessorNode : public Node {
+  public:
+    std::string get_class_type() const override {
+        return "MiDaS-DepthMapPreprocessor";
+    }
+    std::string get_category() const override {
+        return "image/preprocessors";
+    }
+
+    std::vector<PortDef> get_inputs() const override {
+        return {
+            {"image", "IMAGE", true, nullptr}, {"a", "FLOAT", false, 6.28f}, {"bg_threshold", "FLOAT", false, 0.1f}};
+    }
+
+    std::vector<PortDef> get_outputs() const override {
+        return {{"IMAGE", "IMAGE"}};
+    }
+
+    sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
+        ImagePtr src;
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", src));
+        float a = get_input_opt<float>(inputs, "a", 6.28f);
+        float bg_threshold = get_input_opt<float>(inputs, "bg_threshold", 0.1f);
+        (void)a;
+        (void)bg_threshold;
+
+        if (!src || !src->data || src->channel != 3) {
+            LOG_ERROR("[ERROR] MiDaS-DepthMapPreprocessor: Requires RGB image\n");
+            return sd_error_t::ERROR_INVALID_INPUT;
+        }
+
+        LOG_ERROR("[ERROR] MiDaS-DepthMapPreprocessor: Real MiDaS depth estimation requires ONNX model. "
+                  "Placeholder is disabled. Please build with HAS_ONNXRUNTIME and provide a MiDaS ONNX model.\n");
+        return sd_error_t::ERROR_EXECUTION_FAILED;
+    }
+};
+REGISTER_NODE("MiDaS-DepthMapPreprocessor", MiDaSDepthMapPreprocessorNode);
+
+// ============================================================================
+// OpenPosePreprocessor - OpenPose 姿态预处理（占位符，需 ONNX 模型支持）
+// ============================================================================
+class OpenPosePreprocessorNode : public Node {
+  public:
+    std::string get_class_type() const override {
+        return "OpenPosePreprocessor";
+    }
+    std::string get_category() const override {
+        return "image/preprocessors";
+    }
+
+    std::vector<PortDef> get_inputs() const override {
+        return {{"image", "IMAGE", true, nullptr}};
+    }
+
+    std::vector<PortDef> get_outputs() const override {
+        return {{"IMAGE", "IMAGE"}};
+    }
+
+    sd_error_t execute(const NodeInputs& inputs, NodeOutputs& outputs) override {
+        ImagePtr src;
+        SD_RETURN_IF_ERROR(get_input(inputs, "image", src));
+
+        if (!src || !src->data || src->channel != 3) {
+            LOG_ERROR("[ERROR] OpenPosePreprocessor: Requires RGB image\n");
+            return sd_error_t::ERROR_INVALID_INPUT;
+        }
+
+        LOG_ERROR("[ERROR] OpenPosePreprocessor: Real OpenPose pose detection requires ONNX model. "
+                  "Placeholder is disabled. Please build with HAS_ONNXRUNTIME and provide an OpenPose ONNX model.\n");
+        return sd_error_t::ERROR_EXECUTION_FAILED;
+    }
+};
+REGISTER_NODE("OpenPosePreprocessor", OpenPosePreprocessorNode);
+
 void init_preprocessor_cpu_nodes() {
     // 空函数，确保本翻译单元被链接
 }

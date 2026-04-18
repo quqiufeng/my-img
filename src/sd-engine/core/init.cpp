@@ -22,6 +22,8 @@ extern void init_preprocessor_nodes();
 extern void init_face_detect_nodes();
 extern void init_face_restore_nodes();
 extern void init_face_swap_nodes();
+extern void init_inpaint_nodes();
+extern void init_animatediff_nodes();
 
 void init_builtin_nodes() {
     init_test_nodes();
@@ -39,6 +41,8 @@ void init_builtin_nodes() {
     init_face_detect_nodes();
     init_face_restore_nodes();
     init_face_swap_nodes();
+    init_inpaint_nodes();
+    init_animatediff_nodes();
 }
 
 } // namespace sdengine

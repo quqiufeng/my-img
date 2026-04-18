@@ -18,6 +18,31 @@
 
 ### 编译
 
+#### 第一步：编译 stable-diffusion.cpp（强制使用 build_sd.sh）
+
+> **⚠️ 强制要求**：必须使用 `build_sd.sh` 脚本编译 stable-diffusion.cpp。该脚本会自动应用 my-img 所需的补丁（C API 扩展、Deep HighRes Fix hooks 等），然后执行编译。手动运行 `cmake` 和 `make` 会导致补丁未应用，链接时缺少符号。
+
+```bash
+cd ~/my-img/build
+./build_sd.sh [选项]
+```
+
+**build_sd.sh 选项：**
+- `--cuda` / `--no-cuda`：启用/禁用 CUDA（默认启用）
+- `--flash-attn` / `--no-flash`：启用/禁用 Flash Attention（默认启用，需 CUDA）
+- `--clean`：清理 build 目录后重新编译
+- `--jobs N`：并行编译线程数（默认 `$(nproc)`）
+- `--help`：显示帮助信息
+
+**示例：**
+```bash
+./build_sd.sh                    # 默认：CUDA + Flash Attention
+./build_sd.sh --no-cuda          # 仅 CPU
+./build_sd.sh --clean --jobs 8   # 清理后使用 8 线程编译
+```
+
+#### 第二步：编译 my-img
+
 ```bash
 cd ~/my-img/build
 cmake .. -DSD_PATH=/home/dministrator/stable-diffusion.cpp
@@ -89,6 +114,21 @@ free_upscaler_ctx(upscaler);
 
 ## 关键坑点
 
+### 0. 禁止手动编译 stable-diffusion.cpp（必须使用 build_sd.sh）
+
+```bash
+# ❌ 错误：手动编译会导致补丁未应用，链接失败
+mkdir -p ~/stable-diffusion.cpp/build && cd ~/stable-diffusion.cpp/build
+cmake .. -DSD_CUDA=ON
+make -j$(nproc)
+
+# ✅ 正确：使用 build_sd.sh 自动应用补丁并编译
+cd ~/my-img/build
+./build_sd.sh
+```
+
+**后果**：手动编译后，my-img 链接时会报错 `undefined reference to 'sd_sampler_run'`、`undefined reference to 'sd_conditioning_concat'` 等，因为补丁中的 C API 扩展未注入到 stable-diffusion.cpp 源码中。
+
 ### 1. mask_image 不能为 NULL
 
 ```cpp
@@ -132,10 +172,12 @@ ctx_params.vae_tiling_params.target_overlap = 32;
 
 - **C++17** 标准
 - **默认启用 GPU + Flash Attention**
+- **编译 stable-diffusion.cpp 必须使用 `build_sd.sh`**（自动应用补丁，禁止手动 cmake/make）
 - 新增节点继承 `sdengine::Node`，使用 `REGISTER_NODE` 宏注册
 - 中间图像缓冲区优先使用 `std::vector<uint8_t>`
 - 使用 `LOG_INFO()` / `LOG_ERROR()` 输出日志（禁止裸 `printf`）
 - 运行 `clang-format` 保持代码风格一致
+- 内存分配使用 `try-catch (std::bad_alloc)`，禁止 `new` 后检查 `nullptr`
 
 ---
 
