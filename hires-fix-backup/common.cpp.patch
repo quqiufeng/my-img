@@ -1,0 +1,88 @@
+diff --git a/examples/common/common.cpp b/examples/common/common.cpp
+index 2d0fb60..47b52fa 100644
+--- a/examples/common/common.cpp
++++ b/examples/common/common.cpp
+@@ -822,10 +822,22 @@ ArgOptions SDGenerationParams::get_options() {
+          "--upscale-repeats",
+          "Run the ESRGAN upscaler this many times (default: 1)",
+          &upscale_repeats},
+-        {"",
+-         "--upscale-tile-size",
+-         "tile size for ESRGAN upscaling (default: 128)",
+-         &upscale_tile_size},
++         {"",
++          "--upscale-tile-size",
++          "tile size for ESRGAN upscaling (default: 128)",
++          &upscale_tile_size},
++         {"",
++          "--hires-width",
++          "target width for hires fix",
++          &hires_width},
++         {"",
++          "--hires-height",
++          "target height for hires fix",
++          &hires_height},
++         {"",
++          "--hires-steps",
++          "steps for hires fix sampling (default: 20)",
++          &hires_steps},
+     };
+ 
+     options.float_options = {
+@@ -905,14 +917,14 @@ ArgOptions SDGenerationParams::get_options() {
+          "--moe-boundary",
+          "timestep boundary for Wan2.2 MoE model. (default: 0.875). Only enabled if `--high-noise-steps` is set to -1",
+          &moe_boundary},
+-        {"",
+-         "--vace-strength",
+-         "wan vace strength",
+-         &vace_strength},
+-        {"",
+-         "--vae-tile-overlap",
+-         "tile overlap for vae tiling, in fraction of tile size (default: 0.5)",
+-         &vae_tiling_params.target_overlap},
++         {"",
++          "--vace-strength",
++          "wan vace strength",
++          &vace_strength},
++         {"",
++          "--hires-strength",
++          "strength for hires fix denoising (default: 0.5)",
++          &hires_strength},
+     };
+ 
+     options.bool_options = {
+@@ -931,11 +943,16 @@ ArgOptions SDGenerationParams::get_options() {
+          "do not embed generation metadata on image files",
+          false,
+          &embed_image_metadata},
+-        {"",
+-         "--vae-tiling",
+-         "process vae in tiles to reduce memory usage",
+-         true,
+-         &vae_tiling_params.enabled},
++         {"",
++          "--vae-tiling",
++          "process vae in tiles to reduce memory usage",
++          true,
++          &vae_tiling_params.enabled},
++         {"",
++          "--hires-fix",
++          "enable hires fix (default: false)",
++          true,
++          &hires_fix},
+     };
+ 
+     auto on_seed_arg = [&](int argc, const char** argv, int index) {
+@@ -1957,6 +1974,11 @@ sd_img_gen_params_t SDGenerationParams::to_sd_img_gen_params_t() {
+     params.pm_params             = pm_params;
+     params.vae_tiling_params     = vae_tiling_params;
+     params.cache                 = cache_params;
++    params.hires_fix             = hires_fix;
++    params.hires_width           = hires_width;
++    params.hires_height          = hires_height;
++    params.hires_strength        = hires_strength;
++    params.hires_steps           = hires_steps;
+     return params;
+ }
+ 

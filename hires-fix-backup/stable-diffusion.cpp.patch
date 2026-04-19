@@ -1,5 +1,5 @@
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index 683a07d..7a74cc8 100644
+index 42ed2d4..1594d91 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
 @@ -5,6 +5,7 @@
@@ -10,7 +10,7 @@ index 683a07d..7a74cc8 100644
  #include "util.h"
  
  #include "auto_encoder_kl.hpp"
-@@ -102,6 +103,37 @@ static float get_cache_reuse_threshold(const sd_cache_params_t& params) {
+@@ -105,6 +106,37 @@ static float get_cache_reuse_threshold(const sd_cache_params_t& params) {
  
  /*=============================================== StableDiffusionGGML ================================================*/
  
@@ -48,7 +48,7 @@ index 683a07d..7a74cc8 100644
  class StableDiffusionGGML {
  public:
      ggml_backend_t backend             = nullptr;  // general backend
-@@ -1606,6 +1638,7 @@ public:
+@@ -1623,6 +1655,7 @@ public:
          float cfg_scale     = guidance.txt_cfg;
          float img_cfg_scale = guidance.img_cfg;
          float slg_scale     = guidance.slg.scale;
@@ -56,7 +56,7 @@ index 683a07d..7a74cc8 100644
  
          sd_sample::SampleCacheRuntime cache_runtime = sd_sample::init_sample_cache_runtime(version,
                                                                                             cache_params,
-@@ -1626,6 +1659,11 @@ public:
+@@ -1643,6 +1676,11 @@ public:
          SamplePreviewContext preview = prepare_sample_preview_context();
  
          auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
@@ -68,7 +68,7 @@ index 683a07d..7a74cc8 100644
              if (step == 1 || step == -1) {
                  pretty_progress(0, (int)steps, 0);
              }
-@@ -1641,7 +1679,7 @@ public:
+@@ -1658,7 +1696,7 @@ public:
              adjust_sample_step_scalings(shifted_timestep, timesteps_vec, c_in, &c_skip, &c_out);
  
              sd::Tensor<float> timesteps_tensor({static_cast<int64_t>(timesteps_vec.size())}, timesteps_vec);
@@ -77,7 +77,7 @@ index 683a07d..7a74cc8 100644
              sd::Tensor<float> noised_input = x * c_in;
              if (!denoise_mask.empty() && version == VERSION_WAN2_2_TI2V) {
                  noised_input = noised_input * denoise_mask + init_latent * (1.0f - denoise_mask);
-@@ -1792,7 +1830,16 @@ public:
+@@ -1809,7 +1847,16 @@ public:
              return denoised;
          };
  
@@ -95,7 +95,168 @@ index 683a07d..7a74cc8 100644
          if (x0_opt.empty()) {
              LOG_ERROR("Diffusion model sampling failed");
              if (control_net) {
-@@ -3211,6 +3258,32 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+@@ -2308,6 +2355,11 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
+     sd_img_gen_params->pm_params         = {nullptr, 0, nullptr, 20.f};
+     sd_img_gen_params->vae_tiling_params = {false, 0, 0, 0.5f, 0.0f, 0.0f};
+     sd_cache_params_init(&sd_img_gen_params->cache);
++    sd_img_gen_params->hires_fix = false;
++    sd_img_gen_params->hires_width = 0;
++    sd_img_gen_params->hires_height = 0;
++    sd_img_gen_params->hires_strength = 0.5f;
++    sd_img_gen_params->hires_steps = 20;
+ }
+ 
+ char* sd_img_gen_params_to_str(const sd_img_gen_params_t* sd_img_gen_params) {
+@@ -3129,6 +3181,11 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+     }
+ 
+     int64_t t0                    = ggml_time_ms();
++    LOG_INFO("Setting vae_tiling_params: enabled=%d, tile_size=%dx%d, overlap=%.2f",
++             sd_img_gen_params->vae_tiling_params.enabled,
++             sd_img_gen_params->vae_tiling_params.tile_size_x,
++             sd_img_gen_params->vae_tiling_params.tile_size_y,
++             sd_img_gen_params->vae_tiling_params.target_overlap);
+     sd_ctx->sd->vae_tiling_params = sd_img_gen_params->vae_tiling_params;
+     GenerationRequest request(sd_ctx, sd_img_gen_params);
+     LOG_INFO("generate_image %dx%d", request.width, request.height);
+@@ -3138,6 +3195,12 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+     sd_ctx->sd->set_flow_shift(sd_img_gen_params->sample_params.flow_shift);
+     sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
+ 
++    // HiRes Fix: 在生成 latent 之前修改 request 尺寸
++    if (sd_img_gen_params->hires_fix && sd_img_gen_params->hires_width > 0 && sd_img_gen_params->hires_height > 0) {
++        LOG_INFO("[HiRes Fix] Will generate at %dx%d then upscale to %dx%d", 
++                 request.width, request.height, sd_img_gen_params->hires_width, sd_img_gen_params->hires_height);
++    }
++
+     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
+ 
+     SamplePlan plan(sd_ctx, sd_img_gen_params, request);
+@@ -3169,6 +3232,8 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+ 
+         sd_ctx->sd->rng->manual_seed(cur_seed);
+         sd_ctx->sd->sampler_rng->manual_seed(cur_seed);
++        
++        // 生成噪声（用于采样）
+         sd::Tensor<float> noise = sd::randn_like<float>(latents.init_latent, sd_ctx->sd->rng);
+ 
+         sd::Tensor<float> x_0 = sd_ctx->sd->sample(sd_ctx->sd->diffusion_model,
+@@ -3197,6 +3262,114 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+         int64_t sampling_end  = ggml_time_ms();
+         if (!x_0.empty()) {
+             LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
++            
++            // HiRes Fix: 第二阶段 - 放大 latent 并重新采样
++            if (sd_img_gen_params->hires_fix && sd_img_gen_params->hires_width > 0 && sd_img_gen_params->hires_height > 0) {
++                int64_t hires_start = ggml_time_ms();
++                LOG_INFO("[HiRes Fix] Starting second phase sampling...");
++                
++                int vae_scale_factor = sd_ctx->sd->get_vae_scale_factor();
++                int target_w = sd_img_gen_params->hires_width / vae_scale_factor;
++                int target_h = sd_img_gen_params->hires_height / vae_scale_factor;
++                
++                // 1. 放大第一阶段的 x_0 (这是已经去噪后的 clean latent)
++                auto current_shape = x_0.shape();
++                std::vector<int64_t> target_shape = current_shape;
++                target_shape[0] = target_w;
++                target_shape[1] = target_h;
++                
++                sd::Tensor<float> upscaled_x0 = sd::ops::interpolate(x_0, target_shape, sd::ops::InterpolateMode::Nearest);
++                
++                // 2. 放大 concat_latent 和 uncond_concat_latent
++                sd::Tensor<float> upscaled_concat_latent;
++                sd::Tensor<float> upscaled_uncond_concat_latent;
++                if (!latents.concat_latent.empty()) {
++                    upscaled_concat_latent = sd::ops::interpolate(latents.concat_latent, target_shape, sd::ops::InterpolateMode::Nearest);
++                }
++                if (!latents.uncond_concat_latent.empty()) {
++                    upscaled_uncond_concat_latent = sd::ops::interpolate(latents.uncond_concat_latent, target_shape, sd::ops::InterpolateMode::Nearest);
++                }
++                
++                // 3. 放大 denoise_mask
++                sd::Tensor<float> upscaled_denoise_mask;
++                if (!latents.denoise_mask.empty()) {
++                    upscaled_denoise_mask = sd::ops::interpolate(latents.denoise_mask, target_shape, sd::ops::InterpolateMode::Nearest);
++                }
++                
++                // 4. 重新计算 sigmas（基于新的尺寸）
++                float hires_strength = sd_img_gen_params->hires_strength > 0 ? sd_img_gen_params->hires_strength : 0.5f;
++                
++                scheduler_t scheduler = resolve_scheduler(sd_ctx,
++                                                          sd_img_gen_params->sample_params.scheduler,
++                                                          plan.sample_method);
++                std::vector<float> new_sigmas = sd_ctx->sd->denoiser->get_sigmas(plan.total_steps,
++                                                                                  sd_ctx->sd->get_image_seq_len(sd_img_gen_params->hires_height, sd_img_gen_params->hires_width),
++                                                                                  scheduler,
++                                                                                  sd_ctx->sd->version);
++                
++                // 5. 根据 hires_strength 截断 sigmas
++                std::vector<float> hires_sigmas;
++                if (hires_strength < 1.0f && new_sigmas.size() > 1) {
++                    int start_step = static_cast<int>((1.0f - hires_strength) * (new_sigmas.size() - 1));
++                    hires_sigmas = std::vector<float>(new_sigmas.begin() + start_step, new_sigmas.end());
++                    LOG_INFO("[HiRes Fix] Sigmas truncated: start_step=%d/%zu, remaining_steps=%zu", 
++                             start_step, new_sigmas.size() - 1, hires_sigmas.size() - 1);
++                } else {
++                    hires_sigmas = new_sigmas;
++                }
++                
++                // 6. 创建新的 embeds（更新 concat_latent）
++                SDCondition hires_cond = embeds.cond;
++                SDCondition hires_uncond = embeds.uncond;
++                if (!upscaled_concat_latent.empty()) {
++                    hires_cond.c_concat = upscaled_concat_latent;
++                    hires_uncond.c_concat = upscaled_uncond_concat_latent;
++                }
++                
++                // 7. 生成新的噪声并运行第二次采样
++                sd::Tensor<float> hires_noise = sd::randn_like<float>(upscaled_x0, sd_ctx->sd->sampler_rng);
++                
++                LOG_INFO("[HiRes Fix] Second phase: latent %dx%d, strength=%.2f, sigma_range=[%.4f, %.4f]",
++                         target_w, target_h, hires_strength, hires_sigmas[0], hires_sigmas[hires_sigmas.size()-1]);
++                
++                int64_t hires_sampling_start = ggml_time_ms();
++                sd::Tensor<float> hires_x0 = sd_ctx->sd->sample(sd_ctx->sd->diffusion_model,
++                                                                 true,
++                                                                 upscaled_x0,
++                                                                 std::move(hires_noise),
++                                                                 hires_cond,
++                                                                 hires_uncond,
++                                                                 embeds.img_cond,
++                                                                 embeds.id_cond,
++                                                                 latents.control_image,
++                                                                 request.control_strength,
++                                                                 request.guidance,
++                                                                 plan.eta,
++                                                                 request.shifted_timestep,
++                                                                 plan.sample_method,
++                                                                 sd_ctx->sd->is_flow_denoiser(),
++                                                                 hires_sigmas,
++                                                                 plan.start_merge_step,
++                                                                 latents.ref_latents,
++                                                                 request.increase_ref_index,
++                                                                 upscaled_denoise_mask,
++                                                                 sd::Tensor<float>(),
++                                                                 1.f,
++                                                                 request.cache_params);
++                int64_t hires_sampling_end = ggml_time_ms();
++                
++                if (!hires_x0.empty()) {
++                    LOG_INFO("[HiRes Fix] Second phase sampling completed, taking %.2fs", 
++                             (hires_sampling_end - hires_sampling_start) * 1.0f / 1000);
++                    x_0 = std::move(hires_x0);
++                } else {
++                    LOG_ERROR("[HiRes Fix] Second phase sampling failed, using first phase result");
++                }
++                
++                int64_t hires_end = ggml_time_ms();
++                LOG_INFO("[HiRes Fix] Total HiRes processing: %.2fs", (hires_end - hires_start) * 1.0f / 1000);
++            }
++            
+             final_latents.push_back(std::move(x_0));
+             continue;
+         }
+@@ -3230,6 +3403,32 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
      return result;
  }
  
@@ -128,7 +289,7 @@ index 683a07d..7a74cc8 100644
  static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
                                                                                const sd_vid_gen_params_t* sd_vid_gen_params,
                                                                                GenerationRequest* request) {
-@@ -3606,3 +3679,326 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
+@@ -3625,3 +3824,324 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
      LOG_INFO("generate_video completed in %.2fs", (t1 - t0) * 1.0f / 1000);
      return result;
  }
@@ -137,10 +298,8 @@ index 683a07d..7a74cc8 100644
 +// ComfyUI-style Node-level API - Added by my-img project
 +// ============================================================================
 +
-+struct sd_latent_t {
-+    sd::Tensor<float> tensor;
-+};
-+
++// sd_latent_t 定义在 stable-diffusion-ext.h 中
++// sd_conditioning_t 定义如下
 +struct sd_conditioning_t {
 +    SDCondition cond;
 +};

@@ -18,68 +18,14 @@
 #include "stable-diffusion.h"
 #include <vector>
 
-// 前向声明 sd::Tensor
-namespace sd {
-template <typename T>
-class Tensor;
-}
+// 包含 Tensor 定义
+#include "tensor.hpp"
 
-// ============================================================================
-// 原有的 Deep HighRes Fix Hook API
-// ============================================================================
+// 暴露 sd_latent_t 定义（sd-engine 需要访问 tensor 成员）
+struct sd_latent_t {
+    sd::Tensor<float> tensor;
+};
 
-// Latent hook 类型定义
-typedef sd::Tensor<float> (*sd_latent_hook_t)(
-    sd::Tensor<float>& latent,
-    int step,
-    int total_steps,
-    void* user_data);
-
-// Guidance hook 类型定义
-typedef void (*sd_guidance_hook_t)(
-    float* txt_cfg,
-    float* img_cfg,
-    float* distilled_guidance,
-    int step,
-    int total_steps,
-    void* user_data);
-
-SD_API void sd_set_latent_hook(sd_latent_hook_t hook, void* user_data);
-SD_API void sd_clear_latent_hook();
-SD_API void sd_set_guidance_hook(sd_guidance_hook_t hook, void* user_data);
-SD_API void sd_clear_guidance_hook();
-
-// Deep HighRes Fix 参数结构
-typedef struct {
-    const char* prompt;
-    const char* negative_prompt;
-    float cfg_scale;
-    int sample_method;
-    int scheduler;
-    int64_t seed;
-    int total_steps;
-    int target_width;
-    int target_height;
-    bool vae_tiling;
-    sd_image_t init_image;
-    float strength;
-    float phase1_cfg_scale;
-    float phase2_cfg_scale;
-    float phase3_cfg_scale;
-} sd_deep_hires_params_t;
-
-SD_API void sd_deep_hires_params_init(sd_deep_hires_params_t* params);
-SD_API sd_image_t* generate_image_deep_hires(
-    sd_ctx_t* sd_ctx,
-    const sd_deep_hires_params_t* params
-);
-
-// ============================================================================
-// 新的 ComfyUI 风格节点级 API
-// ============================================================================
-
-// Opaque handle types
-typedef struct sd_latent_t sd_latent_t;
 typedef struct sd_conditioning_t sd_conditioning_t;
 
 // ---------------------------------------------------------------------------

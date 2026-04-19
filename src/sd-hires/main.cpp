@@ -37,6 +37,11 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include <sys/resource.h>
+
+#ifdef GGML_USE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 struct Args {
     // 模型路径
@@ -254,12 +259,12 @@ static sd_image_t* generate_single(sd_ctx_t* ctx, const sd_image_t* init_image, 
         params.init_image = *init_image;
     }
 
-    if (args.vae_tiling) {
-        params.vae_tiling_params.enabled = true;
-        params.vae_tiling_params.tile_size_x = 512;
-        params.vae_tiling_params.tile_size_y = 512;
-        params.vae_tiling_params.target_overlap = 64;
-    }
+    // 启用 VAE tiling 避免大分辨率时显存不足
+    // 使用 128x128 tile，平衡速度和内存
+    params.vae_tiling_params.enabled = true;
+    params.vae_tiling_params.tile_size_x = 128;
+    params.vae_tiling_params.tile_size_y = 128;
+    params.vae_tiling_params.target_overlap = 16;
 
     return generate_image(ctx, &params);
 }
@@ -280,15 +285,20 @@ static sd_image_t* deep_hires_generate(sd_ctx_t* ctx, const sd_image_t& input_im
     int phase3_steps = std::max(8, total_steps * 3 / 4);
     int phase2_steps = std::max(4, total_steps - phase1_steps - phase3_steps);
 
-    // Phase 1: 低分辨率生成
+    // Phase 1: 低分辨率生成（基于输入图）
     int phase1_w = std::min(512, target_w / 2);
     int phase1_h = std::min(512, target_h / 2);
     phase1_w = (phase1_w + 63) & ~63;
     phase1_h = (phase1_h + 63) & ~63;
 
-    printf("\n[Phase 1] Low-res composition: %dx%d, steps=%d, strength=1.0\n", phase1_w, phase1_h, phase1_steps);
+    printf("\n[Phase 1] Low-res composition: %dx%d, steps=%d, strength=0.75\n", phase1_w, phase1_h, phase1_steps);
 
-    SdImagePtr phase1_result(generate_single(ctx, nullptr, phase1_w, phase1_h, args, 1.0f, phase1_steps, 0));
+    // 将输入图缩放到 phase1 分辨率
+    std::vector<uint8_t> input_buffer;
+    sd_image_t input_resized = {};
+    resize_image(input_image, phase1_w, phase1_h, input_buffer, input_resized);
+
+    SdImagePtr phase1_result(generate_single(ctx, &input_resized, phase1_w, phase1_h, args, 0.75f, phase1_steps, 0));
     if (!phase1_result || !phase1_result->data) {
         fprintf(stderr, "[ERROR] Phase 1 failed\n");
         return nullptr;
@@ -407,6 +417,16 @@ static sd_image_t esrgan_upscale(const sd_image_t& input_image, const Args& args
 }
 
 int main(int argc, char** argv) {
+    // 增加栈大小到 64MB，避免大分辨率生成时栈溢出
+    const rlim_t kStackSize = 64 * 1024 * 1024;
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_STACK, &rl) == 0) {
+        if (rl.rlim_cur < kStackSize) {
+            rl.rlim_cur = kStackSize;
+            setrlimit(RLIMIT_STACK, &rl);
+        }
+    }
+
     Args args;
     if (!parse_args(argc, argv, args)) {
         return 1;
@@ -434,6 +454,13 @@ int main(int argc, char** argv) {
         }
         img_for_hires = &upscaled_image;
     }
+
+    // 强制释放 ESRGAN 显存，确保 SD 模型有足够空间
+    printf("[INFO] Clearing ESRGAN memory...\n");
+#ifdef GGML_USE_CUDA
+    cudaDeviceSynchronize();
+    cudaFree(0);
+#endif
 
     // Step 2: Deep HighRes Fix / img2img
     printf("[INFO] Loading diffusion model...\n");

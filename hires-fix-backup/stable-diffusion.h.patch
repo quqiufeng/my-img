@@ -1,0 +1,18 @@
+diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
+index 64ca401..7d844e2 100644
+--- a/include/stable-diffusion.h
++++ b/include/stable-diffusion.h
+@@ -312,6 +312,13 @@ typedef struct {
+     sd_pm_params_t pm_params;
+     sd_tiling_params_t vae_tiling_params;
+     sd_cache_params_t cache;
++    
++    // HiRes Fix parameters
++    bool hires_fix;
++    int hires_width;
++    int hires_height;
++    float hires_strength;
++    int hires_steps;
+ } sd_img_gen_params_t;
+ 
+ typedef struct {
