@@ -1,0 +1,1026 @@
+diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
+index 64ca401..5b25254 100644
+--- a/include/stable-diffusion.h
++++ b/include/stable-diffusion.h
+@@ -312,6 +312,14 @@ typedef struct {
+     sd_pm_params_t pm_params;
+     sd_tiling_params_t vae_tiling_params;
+     sd_cache_params_t cache;
++
++    // HiRes Fix parameters
++    bool hires_fix;
++    int hires_width;
++    int hires_height;
++    float hires_strength;
++    int hires_steps;
++    int hires_mode;  // 0=latent (default), 1=pixel (ComfyUI-style)
+ } sd_img_gen_params_t;
+ 
+ typedef struct {
+diff --git a/src/denoiser.hpp b/src/denoiser.hpp
+index e4303f5..6b2a82a 100644
+--- a/src/denoiser.hpp
++++ b/src/denoiser.hpp
+@@ -837,10 +837,12 @@ static sd::Tensor<float> sample_euler_flow(denoise_cb_t model,
+                                            std::shared_ptr<RNG> rng,
+                                            float eta) {
+     int steps = static_cast<int>(sigmas.size()) - 1;
++    LOG_INFO("[HiRes Fix] sample_euler_flow: steps=%d, sigmas.size()=%zu", steps, sigmas.size());
+     for (int i = 0; i < steps; i++) {
+         float sigma       = sigmas[i];
+         auto denoised_opt = model(x, sigma, i + 1);
+         if (denoised_opt.empty()) {
++            LOG_ERROR("[HiRes Fix] model() returned empty at step %d/%d", i + 1, steps);
+             return {};
+         }
+         sd::Tensor<float> denoised               = std::move(denoised_opt);
+diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+index 42ed2d4..82cd5aa 100644
+--- a/src/stable-diffusion.cpp
++++ b/src/stable-diffusion.cpp
+@@ -4,6 +4,7 @@
+ #include "rng.hpp"
+ #include "rng_mt19937.hpp"
+ #include "rng_philox.hpp"
++#include "stable-diffusion-ext.h"
+ #include "stable-diffusion.h"
+ #include "util.h"
+ 
+@@ -105,6 +106,37 @@ static float get_cache_reuse_threshold(const sd_cache_params_t& params) {
+ 
+ /*=============================================== StableDiffusionGGML ================================================*/
+ 
++// ============================================================================
++// Deep HighRes Fix Hook - Added by my-img project
++// ============================================================================
++// This hook allows external code to intercept the latent during sampling
++// and perform operations like resolution interpolation.
++//
++// The hook is called before each sampling step. It receives the current latent
++// tensor and can return a modified/replaced tensor.
++
++typedef sd::Tensor<float> (*sd_latent_hook_t)(
++    sd::Tensor<float>& latent,
++    int step,
++    int total_steps,
++    void* user_data);
++
++// Guidance hook: allows modifying txt_cfg, img_cfg, and distilled_guidance during sampling
++typedef void (*sd_guidance_hook_t)(
++    float* txt_cfg,
++    float* img_cfg,
++    float* distilled_guidance,
++    int step,
++    int total_steps,
++    void* user_data);
++
++static sd_latent_hook_t g_sd_latent_hook     = nullptr;
++static void* g_sd_latent_hook_user_data      = nullptr;
++static sd_guidance_hook_t g_sd_guidance_hook = nullptr;
++static void* g_sd_guidance_hook_user_data    = nullptr;
++
++// ============================================================================
++
+ class StableDiffusionGGML {
+ public:
+     ggml_backend_t backend             = nullptr;  // general backend
+@@ -438,8 +470,8 @@ public:
+                                                                      offload_params_to_cpu,
+                                                                      tensor_storage_map);
+                 diffusion_model  = std::make_shared<MMDiTModel>(backend,
+-                                                               offload_params_to_cpu,
+-                                                               tensor_storage_map);
++                                                                offload_params_to_cpu,
++                                                                tensor_storage_map);
+             } else if (sd_version_is_flux(version)) {
+                 bool is_chroma = false;
+                 for (auto pair : tensor_storage_map) {
+@@ -487,10 +519,10 @@ public:
+                                                                  tensor_storage_map,
+                                                                  version);
+                 diffusion_model  = std::make_shared<FluxModel>(backend,
+-                                                              offload_params_to_cpu,
+-                                                              tensor_storage_map,
+-                                                              version,
+-                                                              sd_ctx_params->chroma_use_dit_mask);
++                                                               offload_params_to_cpu,
++                                                               tensor_storage_map,
++                                                               version,
++                                                               sd_ctx_params->chroma_use_dit_mask);
+             } else if (sd_version_is_wan(version)) {
+                 cond_stage_model = std::make_shared<T5CLIPEmbedder>(clip_backend,
+                                                                     offload_params_to_cpu,
+@@ -499,10 +531,10 @@ public:
+                                                                     0,
+                                                                     true);
+                 diffusion_model  = std::make_shared<WanModel>(backend,
+-                                                             offload_params_to_cpu,
+-                                                             tensor_storage_map,
+-                                                             "model.diffusion_model",
+-                                                             version);
++                                                              offload_params_to_cpu,
++                                                              tensor_storage_map,
++                                                              "model.diffusion_model",
++                                                              version);
+                 if (strlen(SAFE_STR(sd_ctx_params->high_noise_diffusion_model_path)) > 0) {
+                     high_noise_diffusion_model = std::make_shared<WanModel>(backend,
+                                                                             offload_params_to_cpu,
+@@ -531,38 +563,38 @@ public:
+                                                                  "",
+                                                                  enable_vision);
+                 diffusion_model  = std::make_shared<QwenImageModel>(backend,
+-                                                                   offload_params_to_cpu,
+-                                                                   tensor_storage_map,
+-                                                                   "model.diffusion_model",
+-                                                                   version,
+-                                                                   sd_ctx_params->qwen_image_zero_cond_t);
++                                                                    offload_params_to_cpu,
++                                                                    tensor_storage_map,
++                                                                    "model.diffusion_model",
++                                                                    version,
++                                                                    sd_ctx_params->qwen_image_zero_cond_t);
+             } else if (sd_version_is_anima(version)) {
+                 cond_stage_model = std::make_shared<AnimaConditioner>(clip_backend,
+                                                                       offload_params_to_cpu,
+                                                                       tensor_storage_map);
+                 diffusion_model  = std::make_shared<AnimaModel>(backend,
+-                                                               offload_params_to_cpu,
+-                                                               tensor_storage_map,
+-                                                               "model.diffusion_model");
++                                                                offload_params_to_cpu,
++                                                                tensor_storage_map,
++                                                                "model.diffusion_model");
+             } else if (sd_version_is_z_image(version)) {
+                 cond_stage_model = std::make_shared<LLMEmbedder>(clip_backend,
+                                                                  offload_params_to_cpu,
+                                                                  tensor_storage_map,
+                                                                  version);
+                 diffusion_model  = std::make_shared<ZImageModel>(backend,
+-                                                                offload_params_to_cpu,
+-                                                                tensor_storage_map,
+-                                                                "model.diffusion_model",
+-                                                                version);
++                                                                 offload_params_to_cpu,
++                                                                 tensor_storage_map,
++                                                                 "model.diffusion_model",
++                                                                 version);
+             } else if (sd_version_is_ernie_image(version)) {
+                 cond_stage_model = std::make_shared<LLMEmbedder>(clip_backend,
+                                                                  offload_params_to_cpu,
+                                                                  tensor_storage_map,
+                                                                  version);
+                 diffusion_model  = std::make_shared<ErnieImageModel>(backend,
+-                                                                    offload_params_to_cpu,
+-                                                                    tensor_storage_map,
+-                                                                    "model.diffusion_model");
++                                                                     offload_params_to_cpu,
++                                                                     tensor_storage_map,
++                                                                     "model.diffusion_model");
+             } else {  // SD1.x SD2.x SDXL
+                 std::map<std::string, std::string> embbeding_map;
+                 for (uint32_t i = 0; i < sd_ctx_params->embedding_count; i++) {
+@@ -1620,9 +1652,10 @@ public:
+                              float vace_strength,
+                              const sd_cache_params_t* cache_params) {
+         std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
+-        float cfg_scale     = guidance.txt_cfg;
+-        float img_cfg_scale = guidance.img_cfg;
+-        float slg_scale     = guidance.slg.scale;
++        float cfg_scale          = guidance.txt_cfg;
++        float img_cfg_scale      = guidance.img_cfg;
++        float slg_scale          = guidance.slg.scale;
++        float distilled_guidance = guidance.distilled_guidance;
+ 
+         sd_sample::SampleCacheRuntime cache_runtime = sd_sample::init_sample_cache_runtime(version,
+                                                                                            cache_params,
+@@ -1643,6 +1676,11 @@ public:
+         SamplePreviewContext preview = prepare_sample_preview_context();
+ 
+         auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
++            // Deep HighRes Fix guidance hook: allow modifying cfg_scale during sampling
++            if (g_sd_guidance_hook != nullptr) {
++                g_sd_guidance_hook(&cfg_scale, &img_cfg_scale, &distilled_guidance, step, (int)steps, g_sd_guidance_hook_user_data);
++            }
++
+             if (step == 1 || step == -1) {
+                 pretty_progress(0, (int)steps, 0);
+             }
+@@ -1658,7 +1696,7 @@ public:
+             adjust_sample_step_scalings(shifted_timestep, timesteps_vec, c_in, &c_skip, &c_out);
+ 
+             sd::Tensor<float> timesteps_tensor({static_cast<int64_t>(timesteps_vec.size())}, timesteps_vec);
+-            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{guidance.distilled_guidance});
++            sd::Tensor<float> guidance_tensor({1}, std::vector<float>{distilled_guidance});
+             sd::Tensor<float> noised_input = x * c_in;
+             if (!denoise_mask.empty() && version == VERSION_WAN2_2_TI2V) {
+                 noised_input = noised_input * denoise_mask + init_latent * (1.0f - denoise_mask);
+@@ -1716,14 +1754,18 @@ public:
+ 
+                 sd::Tensor<float> cached_output;
+                 if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
++                    LOG_INFO("[HiRes Fix] Using cached output for condition");
+                     return std::move(cached_output);
+                 }
+ 
++                LOG_INFO("[HiRes Fix] Running diffusion model compute...");
+                 auto output_opt = work_diffusion_model->compute(n_threads, diffusion_params);
+                 if (output_opt.empty()) {
+-                    LOG_ERROR("diffusion model compute failed");
++                    LOG_ERROR("[HiRes Fix] diffusion model compute failed");
+                     return sd::Tensor<float>();
+                 }
++                LOG_INFO("[HiRes Fix] diffusion model compute succeeded, output shape: [%s]",
++                         output_opt.shape_str().c_str());
+ 
+                 step_cache.after_condition(&condition, noised_input, output_opt);
+                 return output_opt;
+@@ -1732,6 +1774,7 @@ public:
+             if (start_merge_step == -1 || step <= start_merge_step) {
+                 cond_out = run_condition(cond);
+                 if (cond_out.empty()) {
++                    LOG_ERROR("[HiRes Fix] cond run_condition failed");
+                     return {};
+                 }
+             } else {
+@@ -1739,6 +1782,7 @@ public:
+                 cond_out = run_condition(id_cond,
+                                          cond.c_concat.empty() ? nullptr : &cond.c_concat);
+                 if (cond_out.empty()) {
++                    LOG_ERROR("[HiRes Fix] id_cond run_condition failed");
+                     return {};
+                 }
+             }
+@@ -1753,6 +1797,7 @@ public:
+                 }
+                 uncond_out = run_condition(uncond);
+                 if (uncond_out.empty()) {
++                    LOG_ERROR("[HiRes Fix] uncond run_condition failed");
+                     return {};
+                 }
+             }
+@@ -1760,6 +1805,7 @@ public:
+                 img_cond_out = run_condition(img_cond,
+                                              cond.c_concat.empty() ? nullptr : &cond.c_concat);
+                 if (img_cond_out.empty()) {
++                    LOG_ERROR("[HiRes Fix] img_cond run_condition failed");
+                     return {};
+                 }
+             }
+@@ -1809,7 +1855,16 @@ public:
+             return denoised;
+         };
+ 
+-        auto x0_opt = sample_k_diffusion(method, denoise, x_t, sigmas, sampler_rng, eta, is_flow_denoiser);
++        // Deep HighRes Fix hook: wrap denoise to allow latent modification
++        auto denoise_with_hook = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
++            sd::Tensor<float> mutable_x = x;
++            if (g_sd_latent_hook != nullptr) {
++                mutable_x = g_sd_latent_hook(mutable_x, step, (int)steps, g_sd_latent_hook_user_data);
++            }
++            return denoise(mutable_x, sigma, step);
++        };
++
++        auto x0_opt = sample_k_diffusion(method, denoise_with_hook, x_t, sigmas, sampler_rng, eta, is_flow_denoiser);
+         if (x0_opt.empty()) {
+             LOG_ERROR("Diffusion model sampling failed");
+             if (control_net) {
+@@ -2141,7 +2196,7 @@ void sd_cache_params_init(sd_cache_params_t* cache_params) {
+ 
+ void sd_ctx_params_init(sd_ctx_params_t* sd_ctx_params) {
+     *sd_ctx_params                         = {};
+-    sd_ctx_params->vae_decode_only         = true;
++    sd_ctx_params->vae_decode_only         = false;  // Enable VAE encode for pixel-space HiRes Fix
+     sd_ctx_params->free_params_immediately = true;
+     sd_ctx_params->n_threads               = sd_get_num_physical_cores();
+     sd_ctx_params->wtype                   = SD_TYPE_COUNT;
+@@ -2308,6 +2363,11 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
+     sd_img_gen_params->pm_params         = {nullptr, 0, nullptr, 20.f};
+     sd_img_gen_params->vae_tiling_params = {false, 0, 0, 0.5f, 0.0f, 0.0f};
+     sd_cache_params_init(&sd_img_gen_params->cache);
++    sd_img_gen_params->hires_fix      = false;
++    sd_img_gen_params->hires_width    = 0;
++    sd_img_gen_params->hires_height   = 0;
++    sd_img_gen_params->hires_strength = 0.5f;
++    sd_img_gen_params->hires_steps    = 20;
+ }
+ 
+ char* sd_img_gen_params_to_str(const sd_img_gen_params_t* sd_img_gen_params) {
+@@ -2674,7 +2734,7 @@ struct SamplePlan {
+ 
+         if (sample_params->custom_sigmas_count > 0) {
+             sigmas      = std::vector<float>(sample_params->custom_sigmas,
+-                                        sample_params->custom_sigmas + sample_params->custom_sigmas_count);
++                                             sample_params->custom_sigmas + sample_params->custom_sigmas_count);
+             total_steps = static_cast<int>(sigmas.size()) - 1;
+             LOG_WARN("total_steps != custom_sigmas_count - 1, set total_steps to %d", total_steps);
+             if (sample_steps >= total_steps) {
+@@ -3128,7 +3188,12 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+         return nullptr;
+     }
+ 
+-    int64_t t0                    = ggml_time_ms();
++    int64_t t0 = ggml_time_ms();
++    LOG_INFO("Setting vae_tiling_params: enabled=%d, tile_size=%dx%d, overlap=%.2f",
++             sd_img_gen_params->vae_tiling_params.enabled,
++             sd_img_gen_params->vae_tiling_params.tile_size_x,
++             sd_img_gen_params->vae_tiling_params.tile_size_y,
++             sd_img_gen_params->vae_tiling_params.target_overlap);
+     sd_ctx->sd->vae_tiling_params = sd_img_gen_params->vae_tiling_params;
+     GenerationRequest request(sd_ctx, sd_img_gen_params);
+     LOG_INFO("generate_image %dx%d", request.width, request.height);
+@@ -3138,6 +3203,12 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+     sd_ctx->sd->set_flow_shift(sd_img_gen_params->sample_params.flow_shift);
+     sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
+ 
++    // HiRes Fix: 在生成 latent 之前修改 request 尺寸
++    if (sd_img_gen_params->hires_fix && sd_img_gen_params->hires_width > 0 && sd_img_gen_params->hires_height > 0) {
++        LOG_INFO("[HiRes Fix] Will generate at %dx%d then upscale to %dx%d",
++                 request.width, request.height, sd_img_gen_params->hires_width, sd_img_gen_params->hires_height);
++    }
++
+     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
+ 
+     SamplePlan plan(sd_ctx, sd_img_gen_params, request);
+@@ -3169,6 +3240,8 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+ 
+         sd_ctx->sd->rng->manual_seed(cur_seed);
+         sd_ctx->sd->sampler_rng->manual_seed(cur_seed);
++
++        // 生成噪声（用于采样）
+         sd::Tensor<float> noise = sd::randn_like<float>(latents.init_latent, sd_ctx->sd->rng);
+ 
+         sd::Tensor<float> x_0 = sd_ctx->sd->sample(sd_ctx->sd->diffusion_model,
+@@ -3197,6 +3270,169 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+         int64_t sampling_end  = ggml_time_ms();
+         if (!x_0.empty()) {
+             LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
++
++            // HiRes Fix: 第二阶段 - 放大并重新采样
++            if (sd_img_gen_params->hires_fix && sd_img_gen_params->hires_width > 0 && sd_img_gen_params->hires_height > 0) {
++                int64_t hires_start = ggml_time_ms();
++                LOG_INFO("[HiRes Fix] Starting second phase sampling...");
++
++                int vae_scale_factor = sd_ctx->sd->get_vae_scale_factor();
++                int target_w         = sd_img_gen_params->hires_width / vae_scale_factor;
++                int target_h         = sd_img_gen_params->hires_height / vae_scale_factor;
++
++                sd::Tensor<float> upscaled_x0;
++                sd::Tensor<float> upscaled_concat_latent;
++                sd::Tensor<float> upscaled_uncond_concat_latent;
++                sd::Tensor<float> upscaled_denoise_mask;
++
++                if (sd_img_gen_params->hires_mode == 1 && sd_ctx->sd->first_stage_model != nullptr) {
++                    // ===== Pixel-space HiRes Fix (ComfyUI-style) =====
++                    LOG_INFO("[HiRes Fix] Mode: pixel-space (ComfyUI-style)");
++
++                    // 1. Decode first phase to pixel image (small resolution, no tiling needed)
++                    int64_t decode_start                = ggml_time_ms();
++                    sd::Tensor<float> first_stage_image = sd_ctx->sd->decode_first_stage(x_0);
++                    int64_t decode_end                  = ggml_time_ms();
++
++                    if (!first_stage_image.empty()) {
++                        LOG_INFO("[HiRes Fix] Decoded to pixels in %.2fs", (decode_end - decode_start) * 1.0f / 1000);
++
++                        // 2. Upscale pixel image
++                        auto img_shape                      = first_stage_image.shape();
++                        std::vector<int64_t> upscaled_shape = img_shape;
++                        upscaled_shape[0]                   = sd_img_gen_params->hires_width;
++                        upscaled_shape[1]                   = sd_img_gen_params->hires_height;
++
++                        int64_t upscale_start            = ggml_time_ms();
++                        sd::Tensor<float> upscaled_image = sd::ops::interpolate(
++                            first_stage_image, upscaled_shape, sd::ops::InterpolateMode::Nearest);
++                        int64_t upscale_end = ggml_time_ms();
++                        LOG_INFO("[HiRes Fix] Upscaled pixels in %.2fs", (upscale_end - upscale_start) * 1.0f / 1000);
++
++                        // 3. Encode back to latent
++                        int64_t encode_start = ggml_time_ms();
++                        upscaled_x0          = sd_ctx->sd->encode_first_stage(upscaled_image);
++                        int64_t encode_end   = ggml_time_ms();
++
++                        if (!upscaled_x0.empty()) {
++                            LOG_INFO("[HiRes Fix] Encoded to latent in %.2fs", (encode_end - encode_start) * 1.0f / 1000);
++                        } else {
++                            LOG_ERROR("[HiRes Fix] Encode failed, falling back to latent mode");
++                        }
++                    } else {
++                        LOG_ERROR("[HiRes Fix] Decode failed, falling back to latent mode");
++                    }
++                }
++
++                if (upscaled_x0.empty()) {
++                    // ===== Latent-space HiRes Fix (default) =====
++                    if (sd_img_gen_params->hires_mode == 1) {
++                        LOG_WARN("[HiRes Fix] Pixel mode failed, using latent mode");
++                    } else {
++                        LOG_INFO("[HiRes Fix] Mode: latent-space");
++                    }
++
++                    auto current_shape                = x_0.shape();
++                    std::vector<int64_t> target_shape = current_shape;
++                    target_shape[0]                   = target_w;
++                    target_shape[1]                   = target_h;
++
++                    upscaled_x0 = sd::ops::interpolate(x_0, target_shape, sd::ops::InterpolateMode::Nearest);
++
++                    if (!latents.concat_latent.empty()) {
++                        upscaled_concat_latent = sd::ops::interpolate(latents.concat_latent, target_shape, sd::ops::InterpolateMode::Nearest);
++                    }
++                    if (!latents.uncond_concat_latent.empty()) {
++                        upscaled_uncond_concat_latent = sd::ops::interpolate(latents.uncond_concat_latent, target_shape, sd::ops::InterpolateMode::Nearest);
++                    }
++                    if (!latents.denoise_mask.empty()) {
++                        upscaled_denoise_mask = sd::ops::interpolate(latents.denoise_mask, target_shape, sd::ops::InterpolateMode::Nearest);
++                    }
++                }
++
++                // 4. 重新计算 sigmas（基于新的尺寸）
++                float hires_strength = sd_img_gen_params->hires_strength > 0 ? sd_img_gen_params->hires_strength : 0.5f;
++
++                scheduler_t scheduler         = resolve_scheduler(sd_ctx,
++                                                                  sd_img_gen_params->sample_params.scheduler,
++                                                                  plan.sample_method);
++                std::vector<float> new_sigmas = sd_ctx->sd->denoiser->get_sigmas(plan.total_steps,
++                                                                                 sd_ctx->sd->get_image_seq_len(sd_img_gen_params->hires_height, sd_img_gen_params->hires_width),
++                                                                                 scheduler,
++                                                                                 sd_ctx->sd->version);
++
++                // 5. 根据 hires_strength 截断 sigmas
++                std::vector<float> hires_sigmas;
++                if (hires_strength < 1.0f && new_sigmas.size() > 1) {
++                    int start_step = static_cast<int>((1.0f - hires_strength) * (new_sigmas.size() - 1));
++                    hires_sigmas   = std::vector<float>(new_sigmas.begin() + start_step, new_sigmas.end());
++                    LOG_INFO("[HiRes Fix] Sigmas truncated: start_step=%d/%zu, remaining_steps=%zu",
++                             start_step, new_sigmas.size() - 1, hires_sigmas.size() - 1);
++                } else {
++                    hires_sigmas = new_sigmas;
++                }
++
++                // 6. 创建新的 embeds（更新 concat_latent）
++                SDCondition hires_cond   = embeds.cond;
++                SDCondition hires_uncond = embeds.uncond;
++                if (!upscaled_concat_latent.empty()) {
++                    hires_cond.c_concat   = upscaled_concat_latent;
++                    hires_uncond.c_concat = upscaled_uncond_concat_latent;
++                }
++
++                // 为第二阶段创建新的 img_cond（使用正确尺寸的 concat_latent）
++                SDCondition hires_img_cond;
++                if (!hires_cond.c_concat.empty()) {
++                    // img_cond = {uncond_crossattn, uncond_vector, cond_concat}
++                    hires_img_cond = SDCondition(hires_uncond.c_crossattn,
++                                                 hires_uncond.c_vector,
++                                                 hires_cond.c_concat);
++                }
++
++                // 7. 生成新的噪声并运行第二次采样
++                sd::Tensor<float> hires_noise = sd::randn_like<float>(upscaled_x0, sd_ctx->sd->sampler_rng);
++
++                LOG_INFO("[HiRes Fix] Second phase: latent %dx%d, strength=%.2f, sigma_range=[%.4f, %.4f]",
++                         target_w, target_h, hires_strength, hires_sigmas[0], hires_sigmas[hires_sigmas.size() - 1]);
++
++                int64_t hires_sampling_start = ggml_time_ms();
++                sd::Tensor<float> hires_x0   = sd_ctx->sd->sample(sd_ctx->sd->diffusion_model,
++                                                                  true,
++                                                                  upscaled_x0,
++                                                                  std::move(hires_noise),
++                                                                  hires_cond,
++                                                                  hires_uncond,
++                                                                  hires_img_cond,       // 使用新创建的 img_cond
++                                                                  SDCondition(),        // Skip id_cond for second phase
++                                                                  sd::Tensor<float>(),  // Skip control_image (wrong size)
++                                                                  request.control_strength,
++                                                                  request.guidance,
++                                                                  plan.eta,
++                                                                  request.shifted_timestep,
++                                                                  plan.sample_method,
++                                                                  sd_ctx->sd->is_flow_denoiser(),
++                                                                  hires_sigmas,
++                                                                  -1,  // Reset start_merge_step for second phase
++                                                                  latents.ref_latents,
++                                                                  request.increase_ref_index,
++                                                                  upscaled_denoise_mask,
++                                                                  sd::Tensor<float>(),
++                                                                  1.f,
++                                                                  request.cache_params);
++                int64_t hires_sampling_end   = ggml_time_ms();
++
++                if (!hires_x0.empty()) {
++                    LOG_INFO("[HiRes Fix] Second phase sampling completed, taking %.2fs",
++                             (hires_sampling_end - hires_sampling_start) * 1.0f / 1000);
++                    x_0 = std::move(hires_x0);
++                } else {
++                    LOG_ERROR("[HiRes Fix] Second phase sampling failed, using first phase result");
++                }
++
++                int64_t hires_end = ggml_time_ms();
++                LOG_INFO("[HiRes Fix] Total HiRes processing: %.2fs", (hires_end - hires_start) * 1.0f / 1000);
++            }
++
+             final_latents.push_back(std::move(x_0));
+             continue;
+         }
+@@ -3230,6 +3466,32 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+     return result;
+ }
+ 
++// ============================================================================
++// Deep HighRes Fix API - Added by my-img project
++// ============================================================================
++
++SD_API void sd_set_latent_hook(sd_latent_hook_t hook, void* user_data) {
++    g_sd_latent_hook           = hook;
++    g_sd_latent_hook_user_data = user_data;
++}
++
++SD_API void sd_clear_latent_hook() {
++    g_sd_latent_hook           = nullptr;
++    g_sd_latent_hook_user_data = nullptr;
++}
++
++SD_API void sd_set_guidance_hook(sd_guidance_hook_t hook, void* user_data) {
++    g_sd_guidance_hook           = hook;
++    g_sd_guidance_hook_user_data = user_data;
++}
++
++SD_API void sd_clear_guidance_hook() {
++    g_sd_guidance_hook           = nullptr;
++    g_sd_guidance_hook_user_data = nullptr;
++}
++
++// ============================================================================
++
+ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
+                                                                               const sd_vid_gen_params_t* sd_vid_gen_params,
+                                                                               GenerationRequest* request) {
+@@ -3625,3 +3887,470 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
+     LOG_INFO("generate_video completed in %.2fs", (t1 - t0) * 1.0f / 1000);
+     return result;
+ }
++
++// ============================================================================
++// ComfyUI-style Node-level API - Added by my-img project
++// ============================================================================
++
++// sd_latent_t 定义在 stable-diffusion-ext.h 中
++// sd_conditioning_t 定义如下
++struct sd_conditioning_t {
++    SDCondition cond;
++};
++
++SD_API sd_conditioning_t* sd_encode_prompt(
++    sd_ctx_t* sd_ctx,
++    const char* prompt,
++    int clip_skip) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || prompt == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->cond_stage_model == nullptr) {
++        LOG_ERROR("cond_stage_model is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0 = ggml_time_ms();
++    ConditionerParams condition_params;
++    condition_params.text            = prompt;
++    condition_params.clip_skip       = clip_skip;
++    condition_params.width           = 512;  // default, will be overridden by KSampler
++    condition_params.height          = 512;  // default
++    condition_params.adm_in_channels = static_cast<int>(sd_ctx->sd->diffusion_model->get_adm_in_channels());
++
++    auto cond = sd_ctx->sd->cond_stage_model->get_learned_condition(
++        sd_ctx->sd->n_threads, condition_params);
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_encode_prompt completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    sd_conditioning_t* result = new sd_conditioning_t();
++    result->cond              = std::move(cond);
++    return result;
++}
++
++SD_API void sd_free_conditioning(sd_conditioning_t* cond) {
++    delete cond;
++}
++
++SD_API sd_latent_t* sd_create_empty_latent(
++    sd_ctx_t* sd_ctx,
++    int width,
++    int height) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return nullptr;
++    }
++
++    // Align dimensions to VAE scale factor
++    int vae_scale = sd_ctx->sd->first_stage_model ? sd_ctx->sd->first_stage_model->get_scale_factor() : 8;
++    int latent_w  = width / vae_scale;
++    int latent_h  = height / vae_scale;
++
++    // Standard SD latent shape: [batch=1, channels=4, height, width]
++    sd::Tensor<float> latent({latent_w, latent_h, 4, 1});
++    latent.fill_(0.0f);
++
++    sd_latent_t* result = new sd_latent_t();
++    result->tensor      = std::move(latent);
++    return result;
++}
++
++SD_API sd_latent_t* sd_encode_image(
++    sd_ctx_t* sd_ctx,
++    const sd_image_t* image) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || image == nullptr || image->data == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->first_stage_model == nullptr) {
++        LOG_ERROR("first_stage_model (VAE) is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0                     = ggml_time_ms();
++    sd::Tensor<float> image_tensor = sd_image_to_tensor(*image, image->width, image->height);
++    sd::Tensor<float> latent       = sd_ctx->sd->encode_first_stage(image_tensor);
++
++    if (latent.empty()) {
++        LOG_ERROR("encode_first_stage failed");
++        return nullptr;
++    }
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_encode_image completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    if (sd_ctx->sd->free_params_immediately) {
++        sd_ctx->sd->first_stage_model->free_params_buffer();
++    }
++
++    sd_latent_t* result = new sd_latent_t();
++    result->tensor      = std::move(latent);
++    return result;
++}
++
++SD_API sd_image_t* sd_decode_latent(
++    sd_ctx_t* sd_ctx,
++    const sd_latent_t* latent) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || latent == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->first_stage_model == nullptr) {
++        LOG_ERROR("first_stage_model (VAE) is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0                     = ggml_time_ms();
++    sd::Tensor<float> image_tensor = sd_ctx->sd->decode_first_stage(latent->tensor);
++
++    if (image_tensor.empty()) {
++        LOG_ERROR("decode_first_stage failed");
++        if (sd_ctx->sd->free_params_immediately) {
++            sd_ctx->sd->first_stage_model->free_params_buffer();
++        }
++        return nullptr;
++    }
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_decode_latent completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    if (sd_ctx->sd->free_params_immediately) {
++        sd_ctx->sd->first_stage_model->free_params_buffer();
++    }
++
++    sd_image_t* result = (sd_image_t*)malloc(sizeof(sd_image_t));
++    if (result == nullptr) {
++        return nullptr;
++    }
++    *result = tensor_to_sd_image(image_tensor);
++    return result;
++}
++
++SD_API void sd_free_latent(sd_latent_t* latent) {
++    delete latent;
++}
++
++SD_API void sd_free_image(sd_image_t* image) {
++    if (image) {
++        if (image->data) {
++            free(image->data);
++            image->data = nullptr;
++        }
++        free(image);
++    }
++}
++
++SD_API void sd_latent_get_shape(
++    const sd_latent_t* latent,
++    int* width,
++    int* height,
++    int* channels) {
++    if (latent == nullptr || latent->tensor.empty()) {
++        if (width)
++            *width = 0;
++        if (height)
++            *height = 0;
++        if (channels)
++            *channels = 0;
++        return;
++    }
++    const auto& shape = latent->tensor.shape();
++    // Typical shape: [W, H, C, 1] or [W, H, C]
++    if (width)
++        *width = static_cast<int>(shape[0]);
++    if (height)
++        *height = static_cast<int>(shape[1]);
++    if (channels)
++        *channels = static_cast<int>(shape[2]);
++}
++
++SD_API sd_latent_t* sd_latent_copy(const sd_latent_t* latent) {
++    if (latent == nullptr)
++        return nullptr;
++    sd_latent_t* copy = new sd_latent_t();
++    copy->tensor      = latent->tensor;  // sd::Tensor has value semantics
++    return copy;
++}
++
++SD_API sd_conditioning_t* sd_conditioning_copy(const sd_conditioning_t* cond) {
++    if (cond == nullptr)
++        return nullptr;
++    sd_conditioning_t* copy = new sd_conditioning_t();
++    copy->cond              = cond->cond;  // SDCondition has value semantics
++    return copy;
++}
++
++SD_API sd_latent_t* sd_sampler_run(
++    sd_ctx_t* sd_ctx,
++    const sd_latent_t* init_latent,
++    const sd_conditioning_t* positive,
++    const sd_conditioning_t* negative,
++    const sd_node_sample_params_t* params,
++    float strength) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || init_latent == nullptr ||
++        positive == nullptr || params == nullptr) {
++        return nullptr;
++    }
++    if (sd_ctx->sd->diffusion_model == nullptr) {
++        LOG_ERROR("diffusion_model is not loaded");
++        return nullptr;
++    }
++
++    int64_t t0 = ggml_time_ms();
++
++    // Setup RNGs
++    sd_ctx->sd->rng->manual_seed(params->seed);
++    if (sd_ctx->sd->sampler_rng) {
++        sd_ctx->sd->sampler_rng->manual_seed(params->seed);
++    }
++
++    // Build sigma schedule using the denoiser
++    int total_steps       = params->steps;
++    scheduler_t scheduler = params->scheduler;
++
++    // Get image sequence length for the denoiser
++    int image_seq_len = sd_ctx->sd->get_image_seq_len(
++        init_latent->tensor.shape()[1] * 8,  // height * vae_scale
++        init_latent->tensor.shape()[0] * 8   // width * vae_scale
++    );
++
++    std::vector<float> sigmas = sd_ctx->sd->denoiser->get_sigmas(
++        total_steps,
++        image_seq_len,
++        scheduler,
++        sd_ctx->sd->version);
++
++    if (sigmas.empty()) {
++        LOG_ERROR("failed to generate sigma schedule");
++        return nullptr;
++    }
++
++    // Adjust sigmas for strength (img2img)
++    if (strength < 1.0f && sigmas.size() > 1) {
++        int start_step = static_cast<int>((1.0f - strength) * (sigmas.size() - 1));
++        sigmas         = std::vector<float>(sigmas.begin() + start_step, sigmas.end());
++    }
++
++    // Prepare noise
++    sd::Tensor<float> noise = sd::randn_like<float>(init_latent->tensor, sd_ctx->sd->rng);
++
++    // Prepare guidance
++    sd_guidance_params_t guidance;
++    guidance.txt_cfg            = params->cfg_scale;
++    guidance.img_cfg            = 1.0f;
++    guidance.distilled_guidance = 0.0f;
++    guidance.slg.scale          = 0.0f;
++
++    // Use empty conditioning for negative if not provided
++    SDCondition uncond;
++    if (negative != nullptr) {
++        uncond = negative->cond;
++    }
++
++    // Setup cache params (disabled by default for node API)
++    sd_cache_params_t cache_params;
++    sd_cache_params_init(&cache_params);
++    cache_params.mode = SD_CACHE_DISABLED;
++
++    // Run sampling
++    sd::Tensor<float> x_0 = sd_ctx->sd->sample(
++        sd_ctx->sd->diffusion_model,
++        true,  // is_image_generation
++        init_latent->tensor,
++        std::move(noise),
++        positive->cond,
++        uncond,
++        SDCondition(),        // img_cond
++        SDCondition(),        // id_cond
++        sd::Tensor<float>(),  // control_image
++        0.0f,                 // control_strength
++        guidance,
++        params->eta,
++        0,  // shifted_timestep
++        params->sample_method,
++        sd_ctx->sd->is_flow_denoiser(),
++        sigmas,
++        -1,                   // start_merge_step
++        {},                   // ref_latents
++        false,                // increase_ref_index
++        sd::Tensor<float>(),  // denoise_mask
++        sd::Tensor<float>(),  // vace_context
++        1.0f,                 // vace_strength
++        &cache_params);
++
++    if (sd_ctx->sd->free_params_immediately) {
++        sd_ctx->sd->diffusion_model->free_params_buffer();
++    }
++
++    if (x_0.empty()) {
++        LOG_ERROR("sampling failed");
++        return nullptr;
++    }
++
++    int64_t t1 = ggml_time_ms();
++    LOG_INFO("sd_sampler_run completed in %.2fs", (t1 - t0) * 1.0f / 1000);
++
++    sd_latent_t* result = new sd_latent_t();
++    result->tensor      = std::move(x_0);
++    return result;
++}
++
++// ============================================================================
++// LoRA Support - Added by my-img project
++// ============================================================================
++
++SD_API void sd_apply_loras(
++    sd_ctx_t* sd_ctx,
++    const sd_lora_t* loras,
++    uint32_t lora_count) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return;
++    }
++    sd_ctx->sd->apply_loras(loras, lora_count);
++}
++
++SD_API void sd_clear_loras(sd_ctx_t* sd_ctx) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return;
++    }
++    sd_ctx->sd->apply_loras(nullptr, 0);
++}
++
++// ============================================================================
++// Conditioning Concat / Average - Added by my-img project
++// ============================================================================
++
++SD_API sd_conditioning_t* sd_conditioning_concat(const sd_conditioning_t* cond1,
++                                                 const sd_conditioning_t* cond2) {
++    if (cond1 == nullptr || cond2 == nullptr) {
++        return nullptr;
++    }
++
++    try {
++        sd_conditioning_t* result = new sd_conditioning_t();
++        result->cond              = cond1->cond;
++
++        if (!cond2->cond.c_crossattn.empty()) {
++            if (result->cond.c_crossattn.empty()) {
++                result->cond.c_crossattn = cond2->cond.c_crossattn;
++            } else {
++                result->cond.c_crossattn = sd::ops::concat(
++                    result->cond.c_crossattn, cond2->cond.c_crossattn, 1);
++            }
++        }
++
++        if (!cond2->cond.c_concat.empty()) {
++            if (result->cond.c_concat.empty()) {
++                result->cond.c_concat = cond2->cond.c_concat;
++            } else {
++                result->cond.c_concat = sd::ops::concat(
++                    result->cond.c_concat, cond2->cond.c_concat, 1);
++            }
++        }
++
++        return result;
++    } catch (const std::bad_alloc&) {
++        LOG_ERROR("sd_conditioning_concat: memory allocation failed");
++        return nullptr;
++    }
++}
++
++SD_API sd_conditioning_t* sd_conditioning_average(const sd_conditioning_t* cond1,
++                                                  const sd_conditioning_t* cond2,
++                                                  float conditioning_to_strength) {
++    if (cond1 == nullptr || cond2 == nullptr) {
++        return nullptr;
++    }
++
++    try {
++        sd_conditioning_t* result = new sd_conditioning_t();
++        float w1                  = 1.0f - conditioning_to_strength;
++        float w2                  = conditioning_to_strength;
++
++        if (!cond1->cond.c_crossattn.empty() && !cond2->cond.c_crossattn.empty()) {
++            result->cond.c_crossattn = cond1->cond.c_crossattn * w1 + cond2->cond.c_crossattn * w2;
++        } else if (!cond1->cond.c_crossattn.empty()) {
++            result->cond.c_crossattn = cond1->cond.c_crossattn;
++        } else if (!cond2->cond.c_crossattn.empty()) {
++            result->cond.c_crossattn = cond2->cond.c_crossattn;
++        }
++
++        if (!cond1->cond.c_concat.empty() && !cond2->cond.c_concat.empty()) {
++            result->cond.c_concat = cond1->cond.c_concat * w1 + cond2->cond.c_concat * w2;
++        } else if (!cond1->cond.c_concat.empty()) {
++            result->cond.c_concat = cond1->cond.c_concat;
++        } else if (!cond2->cond.c_concat.empty()) {
++            result->cond.c_concat = cond2->cond.c_concat;
++        }
++
++        return result;
++    } catch (const std::bad_alloc&) {
++        LOG_ERROR("sd_conditioning_average: memory allocation failed");
++        return nullptr;
++    }
++}
++
++// ============================================================================
++// IPAdapter Support - Added by my-img project
++// ============================================================================
++
++SD_API bool sd_load_ipadapter(
++    sd_ctx_t* sd_ctx,
++    const char* ipadapter_path,
++    int cross_attention_dim,
++    int num_tokens,
++    int clip_embeddings_dim) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || ipadapter_path == nullptr) {
++        return false;
++    }
++
++    LOG_ERROR("sd_load_ipadapter: IPAdapter is not yet implemented in stable-diffusion.cpp");
++    (void)cross_attention_dim;
++    (void)num_tokens;
++    (void)clip_embeddings_dim;
++    return false;
++}
++
++SD_API void sd_set_ipadapter_image(
++    sd_ctx_t* sd_ctx,
++    const sd_image_t* image,
++    float strength) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return;
++    }
++
++    LOG_ERROR("sd_set_ipadapter_image: IPAdapter is not yet implemented in stable-diffusion.cpp");
++    (void)image;
++    (void)strength;
++}
++
++SD_API void sd_clear_ipadapter(sd_ctx_t* sd_ctx) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr) {
++        return;
++    }
++}
++
++// ============================================================================
++// CLIP Vision Support - Added by my-img project
++// ============================================================================
++
++SD_API sd_clip_vision_output_t* sd_clip_vision_encode_image(
++    sd_ctx_t* sd_ctx,
++    const sd_image_t* image,
++    bool return_pooled) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || image == nullptr || image->data == nullptr) {
++        return nullptr;
++    }
++
++    LOG_ERROR("sd_clip_vision_encode_image: CLIP Vision is not yet implemented in stable-diffusion.cpp");
++    (void)return_pooled;
++    return nullptr;
++}
++
++SD_API void sd_free_clip_vision_output(sd_clip_vision_output_t* output) {
++    if (output) {
++        if (output->data) {
++            free(output->data);
++            output->data = nullptr;
++        }
++        free(output);
++    }
++}

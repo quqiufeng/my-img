@@ -50,6 +50,7 @@ enum sample_method_t {
     TCD_SAMPLE_METHOD,
     RES_MULTISTEP_SAMPLE_METHOD,
     RES_2S_SAMPLE_METHOD,
+    ER_SDE_SAMPLE_METHOD,
     SAMPLE_METHOD_COUNT
 };
 
@@ -78,11 +79,14 @@ enum prediction_t {
     PREDICTION_COUNT
 };
 
+// same as enum ggml_type
 enum sd_type_t {
     SD_TYPE_F32  = 0,
     SD_TYPE_F16  = 1,
     SD_TYPE_Q4_0 = 2,
     SD_TYPE_Q4_1 = 3,
+    // SD_TYPE_Q4_2 = 4, support has been removed
+    // SD_TYPE_Q4_3 = 5, support has been removed
     SD_TYPE_Q5_0    = 6,
     SD_TYPE_Q5_1    = 7,
     SD_TYPE_Q8_0    = 8,
@@ -108,10 +112,17 @@ enum sd_type_t {
     SD_TYPE_F64     = 28,
     SD_TYPE_IQ1_M   = 29,
     SD_TYPE_BF16    = 30,
+    // SD_TYPE_Q4_0_4_4 = 31, support has been removed from gguf files
+    // SD_TYPE_Q4_0_4_8 = 32,
+    // SD_TYPE_Q4_0_8_8 = 33,
     SD_TYPE_TQ1_0 = 34,
     SD_TYPE_TQ2_0 = 35,
-    SD_TYPE_MXFP4 = 39,
-    SD_TYPE_COUNT = 40,
+    // SD_TYPE_IQ4_NL_4_4 = 36,
+    // SD_TYPE_IQ4_NL_4_8 = 37,
+    // SD_TYPE_IQ4_NL_8_8 = 38,
+    SD_TYPE_MXFP4 = 39,  // MXFP4 (1 block)
+    SD_TYPE_NVFP4 = 40,  // NVFP4 (4 blocks, E4M3 scale)
+    SD_TYPE_COUNT = 41,
 };
 
 enum sd_log_level_t {
@@ -233,7 +244,7 @@ typedef struct {
     int id_images_count;
     const char* id_embed_path;
     float style_strength;
-} sd_pm_params_t;
+} sd_pm_params_t;  // photo maker
 
 enum sd_cache_mode_t {
     SD_CACHE_DISABLED = 0,
@@ -242,6 +253,7 @@ enum sd_cache_mode_t {
     SD_CACHE_DBCACHE,
     SD_CACHE_TAYLORSEER,
     SD_CACHE_CACHE_DIT,
+    SD_CACHE_SPECTRUM,
 };
 
 typedef struct {
@@ -262,6 +274,13 @@ typedef struct {
     int taylorseer_skip_interval;
     const char* scm_mask;
     bool scm_policy_dynamic;
+    float spectrum_w;
+    int spectrum_m;
+    float spectrum_lam;
+    int spectrum_window_size;
+    float spectrum_flex_window;
+    int spectrum_warmup_steps;
+    float spectrum_stop_percent;
 } sd_cache_params_t;
 
 typedef struct {
@@ -293,6 +312,14 @@ typedef struct {
     sd_pm_params_t pm_params;
     sd_tiling_params_t vae_tiling_params;
     sd_cache_params_t cache;
+
+    // HiRes Fix parameters
+    bool hires_fix;
+    int hires_width;
+    int hires_height;
+    float hires_strength;
+    int hires_steps;
+    int hires_mode;  // 0=latent (default), 1=pixel (ComfyUI-style)
 } sd_img_gen_params_t;
 
 typedef struct {
