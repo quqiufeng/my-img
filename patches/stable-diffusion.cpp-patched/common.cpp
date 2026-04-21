@@ -822,22 +822,26 @@ ArgOptions SDGenerationParams::get_options() {
          "--upscale-repeats",
          "Run the ESRGAN upscaler this many times (default: 1)",
          &upscale_repeats},
-         {"",
-          "--upscale-tile-size",
-          "tile size for ESRGAN upscaling (default: 128)",
-          &upscale_tile_size},
-         {"",
-          "--hires-width",
-          "target width for hires fix",
-          &hires_width},
-         {"",
-          "--hires-height",
-          "target height for hires fix",
-          &hires_height},
-         {"",
-          "--hires-steps",
-          "steps for hires fix sampling (default: 20)",
-          &hires_steps},
+        {"",
+         "--upscale-tile-size",
+         "tile size for ESRGAN upscaling (default: 128)",
+         &upscale_tile_size},
+        {"",
+         "--hires-width",
+         "target width for HiRes Fix, in pixel space (default: 0 = disabled)",
+         &hires_width},
+        {"",
+         "--hires-height",
+         "target height for HiRes Fix, in pixel space (default: 0 = disabled)",
+         &hires_height},
+        {"",
+         "--hires-steps",
+         "number of sample steps for HiRes Fix phase (default: 20)",
+         &hires_steps},
+        {"",
+         "--hires-mode",
+         "HiRes Fix upscale mode: 0=latent (default), 1=pixel (ComfyUI-style)",
+         &hires_mode},
     };
 
     options.float_options = {
@@ -917,14 +921,18 @@ ArgOptions SDGenerationParams::get_options() {
          "--moe-boundary",
          "timestep boundary for Wan2.2 MoE model. (default: 0.875). Only enabled if `--high-noise-steps` is set to -1",
          &moe_boundary},
-         {"",
-          "--vace-strength",
-          "wan vace strength",
-          &vace_strength},
-         {"",
-          "--hires-strength",
-          "strength for hires fix denoising (default: 0.5)",
-          &hires_strength},
+        {"",
+         "--vace-strength",
+         "wan vace strength",
+         &vace_strength},
+        {"",
+         "--vae-tile-overlap",
+         "tile overlap for vae tiling, in fraction of tile size (default: 0.5)",
+         &vae_tiling_params.target_overlap},
+        {"",
+         "--hires-strength",
+         "strength for HiRes Fix denoising phase, 0.0-1.0 (default: 0.5). Higher values add more details but may alter composition",
+         &hires_strength},
     };
 
     options.bool_options = {
@@ -943,16 +951,16 @@ ArgOptions SDGenerationParams::get_options() {
          "do not embed generation metadata on image files",
          false,
          &embed_image_metadata},
-         {"",
-          "--vae-tiling",
-          "process vae in tiles to reduce memory usage",
-          true,
-          &vae_tiling_params.enabled},
-         {"",
-          "--hires-fix",
-          "enable hires fix (default: false)",
-          true,
-          &hires_fix},
+        {"",
+         "--vae-tiling",
+         "process vae in tiles to reduce memory usage",
+         true,
+         &vae_tiling_params.enabled},
+        {"",
+         "--hires-fix",
+         "enable HiRes Fix: generate at low resolution then upscale and refine",
+         true,
+         &hires_fix},
     };
 
     auto on_seed_arg = [&](int argc, const char** argv, int index) {
@@ -1606,8 +1614,16 @@ bool SDGenerationParams::from_json_str(
         LOG_ERROR("invalid init_image");
         return false;
     }
+    if (!parse_image_json_field(j, "end_image", 3, width, height, end_image)) {
+        LOG_ERROR("invalid end_image");
+        return false;
+    }
     if (!parse_image_array_json_field(j, "ref_images", 3, width, height, ref_images)) {
         LOG_ERROR("invalid ref_images");
+        return false;
+    }
+    if (!parse_image_array_json_field(j, "control_frames", 3, width, height, control_frames)) {
+        LOG_ERROR("invalid control_frames");
         return false;
     }
     if (!parse_image_json_field(j, "mask_image", 1, width, height, mask_image)) {
@@ -1979,6 +1995,7 @@ sd_img_gen_params_t SDGenerationParams::to_sd_img_gen_params_t() {
     params.hires_height          = hires_height;
     params.hires_strength        = hires_strength;
     params.hires_steps           = hires_steps;
+    params.hires_mode            = hires_mode;
     return params;
 }
 

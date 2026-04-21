@@ -191,11 +191,12 @@ struct SDGenerationParams {
     int upscale_tile_size = 128;
 
     // HiRes Fix parameters
-    bool hires_fix        = false;
-    int hires_width       = 0;
-    int hires_height      = 0;
-    float hires_strength  = 0.5f;
-    int hires_steps       = 20;
+    bool hires_fix      = false;
+    int hires_width     = 0;
+    int hires_height    = 0;
+    float hires_strength = 0.5f;
+    int hires_steps     = 20;
+    int hires_mode      = 0;  // 0=latent (default), 1=pixel (ComfyUI-style)
 
     std::map<std::string, float> lora_map;
     std::map<std::string, float> high_noise_lora_map;

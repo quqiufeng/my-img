@@ -245,6 +245,16 @@ foreach(src ${SRC_FILES})
             ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
             /usr/lib/x86_64-linux-gnu/libcuda.so
         )
+    else()
+        # 自动检测常见 CUDA 路径
+        if(EXISTS /usr/local/cuda/lib64/libcudart.so)
+            target_link_libraries(${final_name} PRIVATE 
+                /usr/local/cuda/lib64/libcudart.so
+                /usr/local/cuda/lib64/libcublas.so
+                /usr/local/cuda/lib64/libcublasLt.so
+                /usr/lib/x86_64-linux-gnu/libcuda.so
+            )
+        endif()
     endif()
 
     target_include_directories(${final_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -307,6 +317,15 @@ if(EXISTS ${CATCH2_SRC} AND TEST_SRC_FILES)
             ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
             /usr/lib/x86_64-linux-gnu/libcuda.so
         )
+    else()
+        if(EXISTS /usr/local/cuda/lib64/libcudart.so)
+            target_link_libraries(sd-engine-tests PRIVATE 
+                /usr/local/cuda/lib64/libcudart.so
+                /usr/local/cuda/lib64/libcublas.so
+                /usr/local/cuda/lib64/libcublasLt.so
+                /usr/lib/x86_64-linux-gnu/libcuda.so
+            )
+        endif()
     endif()
     add_test(NAME sd-engine-tests COMMAND sd-engine-tests)
     list(APPEND ALL_TARGETS sd-engine-tests)

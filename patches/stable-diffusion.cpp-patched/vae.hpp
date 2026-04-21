@@ -87,8 +87,6 @@ public:
                         int64_t latent_y,
                         float encoding_factor = 1.0f) {
         tile_overlap       = std::max(std::min(params.target_overlap, 0.5f), 0.0f);
-        LOG_DEBUG("get_tile_sizes: params.tile_size_x=%d, params.tile_size_y=%d, params.rel_size_x=%.2f, params.rel_size_y=%.2f, latent_x=%ld, latent_y=%ld, encoding_factor=%.2f",
-                  params.tile_size_x, params.tile_size_y, params.rel_size_x, params.rel_size_y, latent_x, latent_y, encoding_factor);
         auto get_tile_size = [&](int requested_size, float factor, int64_t latent_size) {
             const int default_tile_size  = 32;
             const int min_tile_dimension = 4;
@@ -103,9 +101,7 @@ public:
                 tile_size = requested_size;
             }
             tile_size = static_cast<int>(tile_size * encoding_factor);
-            int result = std::max(std::min(tile_size, static_cast<int>(latent_size)), min_tile_dimension);
-            LOG_DEBUG("get_tile_size: requested=%d, factor=%.2f, latent=%ld -> result=%d", requested_size, factor, latent_size, result);
-            return result;
+            return std::max(std::min(tile_size, static_cast<int>(latent_size)), min_tile_dimension);
         };
 
         tile_size_x = get_tile_size(params.tile_size_x, params.rel_size_x, latent_x);
@@ -176,8 +172,12 @@ public:
             float tile_overlap;
             int tile_size_x, tile_size_y;
             get_tile_sizes(tile_size_x, tile_size_y, tile_overlap, tiling_params, input.shape()[0], input.shape()[1]);
+            // get_tile_sizes returns pixel-space tile sizes, but process_tiles_2d expects latent-space sizes
+            // when small_width is derived from input.shape (latent dimensions).
+            tile_size_x /= scale_factor;
+            tile_size_y /= scale_factor;
             if (!silent) {
-                LOG_DEBUG("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
+                LOG_DEBUG("VAE Tile size: %dx%d (latent)", tile_size_x, tile_size_y);
             }
             output = tiled_compute(
                 input,

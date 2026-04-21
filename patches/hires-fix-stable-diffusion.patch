@@ -1,5 +1,87 @@
+diff --git a/examples/common/common.cpp b/examples/common/common.cpp
+index 0235c53..7bbe1e2 100644
+--- a/examples/common/common.cpp
++++ b/examples/common/common.cpp
+@@ -826,6 +826,22 @@ ArgOptions SDGenerationParams::get_options() {
+          "--upscale-tile-size",
+          "tile size for ESRGAN upscaling (default: 128)",
+          &upscale_tile_size},
++        {"",
++         "--hires-width",
++         "target width for HiRes Fix, in pixel space (default: 0 = disabled)",
++         &hires_width},
++        {"",
++         "--hires-height",
++         "target height for HiRes Fix, in pixel space (default: 0 = disabled)",
++         &hires_height},
++        {"",
++         "--hires-steps",
++         "number of sample steps for HiRes Fix phase (default: 20)",
++         &hires_steps},
++        {"",
++         "--hires-mode",
++         "HiRes Fix upscale mode: 0=latent (default), 1=pixel (ComfyUI-style)",
++         &hires_mode},
+     };
+ 
+     options.float_options = {
+@@ -913,6 +929,10 @@ ArgOptions SDGenerationParams::get_options() {
+          "--vae-tile-overlap",
+          "tile overlap for vae tiling, in fraction of tile size (default: 0.5)",
+          &vae_tiling_params.target_overlap},
++        {"",
++         "--hires-strength",
++         "strength for HiRes Fix denoising phase, 0.0-1.0 (default: 0.5). Higher values add more details but may alter composition",
++         &hires_strength},
+     };
+ 
+     options.bool_options = {
+@@ -936,6 +956,11 @@ ArgOptions SDGenerationParams::get_options() {
+          "process vae in tiles to reduce memory usage",
+          true,
+          &vae_tiling_params.enabled},
++        {"",
++         "--hires-fix",
++         "enable HiRes Fix: generate at low resolution then upscale and refine",
++         true,
++         &hires_fix},
+     };
+ 
+     auto on_seed_arg = [&](int argc, const char** argv, int index) {
+@@ -1965,6 +1990,12 @@ sd_img_gen_params_t SDGenerationParams::to_sd_img_gen_params_t() {
+     params.pm_params             = pm_params;
+     params.vae_tiling_params     = vae_tiling_params;
+     params.cache                 = cache_params;
++    params.hires_fix             = hires_fix;
++    params.hires_width           = hires_width;
++    params.hires_height          = hires_height;
++    params.hires_strength        = hires_strength;
++    params.hires_steps           = hires_steps;
++    params.hires_mode            = hires_mode;
+     return params;
+ }
+ 
+diff --git a/examples/common/common.h b/examples/common/common.h
+index 5afe89b..254ecc6 100644
+--- a/examples/common/common.h
++++ b/examples/common/common.h
+@@ -190,6 +190,14 @@ struct SDGenerationParams {
+     int upscale_repeats   = 1;
+     int upscale_tile_size = 128;
+ 
++    // HiRes Fix parameters
++    bool hires_fix      = false;
++    int hires_width     = 0;
++    int hires_height    = 0;
++    float hires_strength = 0.5f;
++    int hires_steps     = 20;
++    int hires_mode      = 0;  // 0=latent (default), 1=pixel (ComfyUI-style)
++
+     std::map<std::string, float> lora_map;
+     std::map<std::string, float> high_noise_lora_map;
+ 
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index 64ca401..5b25254 100644
+index a99b104..4a6f119 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
 @@ -312,6 +312,14 @@ typedef struct {
@@ -18,7 +100,7 @@ index 64ca401..5b25254 100644
  
  typedef struct {
 diff --git a/src/denoiser.hpp b/src/denoiser.hpp
-index e4303f5..6b2a82a 100644
+index a6e81d5..dd4a314 100644
 --- a/src/denoiser.hpp
 +++ b/src/denoiser.hpp
 @@ -837,10 +837,12 @@ static sd::Tensor<float> sample_euler_flow(denoise_cb_t model,
@@ -34,8 +116,81 @@ index e4303f5..6b2a82a 100644
              return {};
          }
          sd::Tensor<float> denoised               = std::move(denoised_opt);
+diff --git a/src/ggml_extend.hpp b/src/ggml_extend.hpp
+index 859270c..1cc65af 100644
+--- a/src/ggml_extend.hpp
++++ b/src/ggml_extend.hpp
+@@ -815,6 +815,7 @@ __STATIC_INLINE__ sd::Tensor<float> sd_tensor_split_2d(const sd::Tensor<float>&
+ 
+ __STATIC_INLINE__ void sd_tensor_merge_2d(const sd::Tensor<float>& input,
+                                           sd::Tensor<float>* output,
++                                          sd::Tensor<float>* weight_buffer,
+                                           int x,
+                                           int y,
+                                           int overlap_x,
+@@ -848,17 +849,22 @@ __STATIC_INLINE__ void sd_tensor_merge_2d(const sd::Tensor<float>& input,
+             for (int64_t plane = 0; plane < plane_count; ++plane) {
+                 float new_value = input[plane * input_plane + src_xy];
+                 if (overlap_x > 0 || overlap_y > 0) {
+-                    float old_value   = (*output)[plane * output_plane + dst_xy];
+                     const float x_f_0 = (circular_x || (overlap_x > 0 && x > 0)) ? (ix - x_skip) / float(overlap_x) : 1.f;
+                     const float x_f_1 = (circular_x || (overlap_x > 0 && x < (img_width - width))) ? (width - ix) / float(overlap_x) : 1.f;
+                     const float y_f_0 = (circular_y || (overlap_y > 0 && y > 0)) ? (iy - y_skip) / float(overlap_y) : 1.f;
+                     const float y_f_1 = (circular_y || (overlap_y > 0 && y < (img_height - height))) ? (height - iy) / float(overlap_y) : 1.f;
+                     const float x_f   = std::min(std::min(x_f_0, x_f_1), 1.f);
+                     const float y_f   = std::min(std::min(y_f_0, y_f_1), 1.f);
+-                    (*output)[plane * output_plane + dst_xy] =
+-                        old_value + new_value * smootherstep_f32(y_f) * smootherstep_f32(x_f);
++                    float weight = smootherstep_f32(y_f) * smootherstep_f32(x_f);
++                    (*output)[plane * output_plane + dst_xy] += new_value * weight;
++                    if (weight_buffer != nullptr) {
++                        (*weight_buffer)[plane * output_plane + dst_xy] += weight;
++                    }
+                 } else {
+                     (*output)[plane * output_plane + dst_xy] = new_value;
++                    if (weight_buffer != nullptr) {
++                        (*weight_buffer)[plane * output_plane + dst_xy] = 1.0f;
++                    }
+                 }
+             }
+         }
+@@ -878,6 +884,7 @@ __STATIC_INLINE__ sd::Tensor<float> process_tiles_2d(const sd::Tensor<float>& in
+                                                      Fn&& on_processing,
+                                                      bool silent = false) {
+     sd::Tensor<float> output;
++    sd::Tensor<float> weight_buffer;
+     int input_width  = static_cast<int>(input.shape()[0]);
+     int input_height = static_cast<int>(input.shape()[1]);
+ 
+@@ -973,9 +980,10 @@ __STATIC_INLINE__ sd::Tensor<float> process_tiles_2d(const sd::Tensor<float>& in
+                 std::vector<int64_t> output_shape = output_tile.shape();
+                 output_shape[0]                   = output_width;
+                 output_shape[1]                   = output_height;
+-                output                            = sd::Tensor<float>::zeros(std::move(output_shape));
++                output                            = sd::Tensor<float>::zeros(output_shape);
++                weight_buffer                     = sd::Tensor<float>::zeros(output_shape);
+             }
+-            sd_tensor_merge_2d(output_tile, &output, x_out, y_out, overlap_x_out, overlap_y_out, circular_x, circular_y, dx, dy);
++            sd_tensor_merge_2d(output_tile, &output, &weight_buffer, x_out, y_out, overlap_x_out, overlap_y_out, circular_x, circular_y, dx, dy);
+ 
+             if (!silent) {
+                 int64_t t2 = ggml_time_ms();
+@@ -989,6 +997,13 @@ __STATIC_INLINE__ sd::Tensor<float> process_tiles_2d(const sd::Tensor<float>& in
+     if (!silent && tile_count < num_tiles) {
+         pretty_progress(num_tiles, num_tiles, last_time);
+     }
++    if (!output.empty() && !weight_buffer.empty()) {
++        for (int64_t i = 0; i < output.numel(); ++i) {
++            if (weight_buffer[i] > 1e-6f) {
++                output[i] /= weight_buffer[i];
++            }
++        }
++    }
+     if (output.empty()) {
+         return {};
+     }
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index 42ed2d4..82cd5aa 100644
+index b9d3e9a..028dfcb 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
 @@ -4,6 +4,7 @@
@@ -179,7 +334,7 @@ index 42ed2d4..82cd5aa 100644
              } else {  // SD1.x SD2.x SDXL
                  std::map<std::string, std::string> embbeding_map;
                  for (uint32_t i = 0; i < sd_ctx_params->embedding_count; i++) {
-@@ -1620,9 +1652,10 @@ public:
+@@ -1622,9 +1654,10 @@ public:
                               float vace_strength,
                               const sd_cache_params_t* cache_params) {
          std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
@@ -193,7 +348,19 @@ index 42ed2d4..82cd5aa 100644
  
          sd_sample::SampleCacheRuntime cache_runtime = sd_sample::init_sample_cache_runtime(version,
                                                                                             cache_params,
-@@ -1643,6 +1676,11 @@ public:
+@@ -1638,13 +1671,23 @@ public:
+         }
+ 
+         int64_t t0                   = ggml_time_us();
++        LOG_INFO("[HiRes Fix] sample: init_latent shape=%s, noise shape=%s, noise.empty=%d",
++                 sd::tensor_shape_to_string(init_latent.shape()).c_str(),
++                 sd::tensor_shape_to_string(noise.shape()).c_str(),
++                 (int)noise.empty());
+         sd::Tensor<float> x_t        = !noise.empty()
+                                            ? denoiser->noise_scaling(sigmas[0], noise, init_latent)
+                                            : init_latent;
++        LOG_INFO("[HiRes Fix] sample: x_t shape=%s", sd::tensor_shape_to_string(x_t.shape()).c_str());
+         sd::Tensor<float> denoised   = x_t;
          SamplePreviewContext preview = prepare_sample_preview_context();
  
          auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
@@ -205,7 +372,7 @@ index 42ed2d4..82cd5aa 100644
              if (step == 1 || step == -1) {
                  pretty_progress(0, (int)steps, 0);
              }
-@@ -1658,7 +1696,7 @@ public:
+@@ -1660,7 +1703,7 @@ public:
              adjust_sample_step_scalings(shifted_timestep, timesteps_vec, c_in, &c_skip, &c_out);
  
              sd::Tensor<float> timesteps_tensor({static_cast<int64_t>(timesteps_vec.size())}, timesteps_vec);
@@ -214,7 +381,7 @@ index 42ed2d4..82cd5aa 100644
              sd::Tensor<float> noised_input = x * c_in;
              if (!denoise_mask.empty() && version == VERSION_WAN2_2_TI2V) {
                  noised_input = noised_input * denoise_mask + init_latent * (1.0f - denoise_mask);
-@@ -1716,14 +1754,18 @@ public:
+@@ -1718,14 +1761,19 @@ public:
  
                  sd::Tensor<float> cached_output;
                  if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
@@ -222,7 +389,8 @@ index 42ed2d4..82cd5aa 100644
                      return std::move(cached_output);
                  }
  
-+                LOG_INFO("[HiRes Fix] Running diffusion model compute...");
++                LOG_INFO("[HiRes Fix] Running diffusion model compute... noised_input shape=%s",
++                         sd::tensor_shape_to_string(noised_input.shape()).c_str());
                  auto output_opt = work_diffusion_model->compute(n_threads, diffusion_params);
                  if (output_opt.empty()) {
 -                    LOG_ERROR("diffusion model compute failed");
@@ -230,11 +398,11 @@ index 42ed2d4..82cd5aa 100644
                      return sd::Tensor<float>();
                  }
 +                LOG_INFO("[HiRes Fix] diffusion model compute succeeded, output shape: [%s]",
-+                         output_opt.shape_str().c_str());
++                         sd::tensor_shape_to_string(output_opt.shape()).c_str());
  
                  step_cache.after_condition(&condition, noised_input, output_opt);
                  return output_opt;
-@@ -1732,6 +1774,7 @@ public:
+@@ -1734,6 +1782,7 @@ public:
              if (start_merge_step == -1 || step <= start_merge_step) {
                  cond_out = run_condition(cond);
                  if (cond_out.empty()) {
@@ -242,7 +410,7 @@ index 42ed2d4..82cd5aa 100644
                      return {};
                  }
              } else {
-@@ -1739,6 +1782,7 @@ public:
+@@ -1741,6 +1790,7 @@ public:
                  cond_out = run_condition(id_cond,
                                           cond.c_concat.empty() ? nullptr : &cond.c_concat);
                  if (cond_out.empty()) {
@@ -250,7 +418,7 @@ index 42ed2d4..82cd5aa 100644
                      return {};
                  }
              }
-@@ -1753,6 +1797,7 @@ public:
+@@ -1755,6 +1805,7 @@ public:
                  }
                  uncond_out = run_condition(uncond);
                  if (uncond_out.empty()) {
@@ -258,7 +426,7 @@ index 42ed2d4..82cd5aa 100644
                      return {};
                  }
              }
-@@ -1760,6 +1805,7 @@ public:
+@@ -1762,6 +1813,7 @@ public:
                  img_cond_out = run_condition(img_cond,
                                               cond.c_concat.empty() ? nullptr : &cond.c_concat);
                  if (img_cond_out.empty()) {
@@ -266,7 +434,7 @@ index 42ed2d4..82cd5aa 100644
                      return {};
                  }
              }
-@@ -1809,7 +1855,16 @@ public:
+@@ -1811,7 +1863,16 @@ public:
              return denoised;
          };
  
@@ -284,7 +452,7 @@ index 42ed2d4..82cd5aa 100644
          if (x0_opt.empty()) {
              LOG_ERROR("Diffusion model sampling failed");
              if (control_net) {
-@@ -2141,7 +2196,7 @@ void sd_cache_params_init(sd_cache_params_t* cache_params) {
+@@ -2143,7 +2204,7 @@ void sd_cache_params_init(sd_cache_params_t* cache_params) {
  
  void sd_ctx_params_init(sd_ctx_params_t* sd_ctx_params) {
      *sd_ctx_params                         = {};
@@ -293,7 +461,7 @@ index 42ed2d4..82cd5aa 100644
      sd_ctx_params->free_params_immediately = true;
      sd_ctx_params->n_threads               = sd_get_num_physical_cores();
      sd_ctx_params->wtype                   = SD_TYPE_COUNT;
-@@ -2308,6 +2363,11 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
+@@ -2310,6 +2371,11 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
      sd_img_gen_params->pm_params         = {nullptr, 0, nullptr, 20.f};
      sd_img_gen_params->vae_tiling_params = {false, 0, 0, 0.5f, 0.0f, 0.0f};
      sd_cache_params_init(&sd_img_gen_params->cache);
@@ -305,7 +473,7 @@ index 42ed2d4..82cd5aa 100644
  }
  
  char* sd_img_gen_params_to_str(const sd_img_gen_params_t* sd_img_gen_params) {
-@@ -2674,7 +2734,7 @@ struct SamplePlan {
+@@ -2700,7 +2766,7 @@ struct SamplePlan {
  
          if (sample_params->custom_sigmas_count > 0) {
              sigmas      = std::vector<float>(sample_params->custom_sigmas,
@@ -314,7 +482,7 @@ index 42ed2d4..82cd5aa 100644
              total_steps = static_cast<int>(sigmas.size()) - 1;
              LOG_WARN("total_steps != custom_sigmas_count - 1, set total_steps to %d", total_steps);
              if (sample_steps >= total_steps) {
-@@ -3128,7 +3188,12 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+@@ -3154,7 +3220,12 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
          return nullptr;
      }
  
@@ -328,7 +496,7 @@ index 42ed2d4..82cd5aa 100644
      sd_ctx->sd->vae_tiling_params = sd_img_gen_params->vae_tiling_params;
      GenerationRequest request(sd_ctx, sd_img_gen_params);
      LOG_INFO("generate_image %dx%d", request.width, request.height);
-@@ -3138,6 +3203,12 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+@@ -3164,6 +3235,12 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
      sd_ctx->sd->set_flow_shift(sd_img_gen_params->sample_params.flow_shift);
      sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
  
@@ -341,7 +509,7 @@ index 42ed2d4..82cd5aa 100644
      ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
  
      SamplePlan plan(sd_ctx, sd_img_gen_params, request);
-@@ -3169,6 +3240,8 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+@@ -3195,6 +3272,8 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
  
          sd_ctx->sd->rng->manual_seed(cur_seed);
          sd_ctx->sd->sampler_rng->manual_seed(cur_seed);
@@ -350,7 +518,7 @@ index 42ed2d4..82cd5aa 100644
          sd::Tensor<float> noise = sd::randn_like<float>(latents.init_latent, sd_ctx->sd->rng);
  
          sd::Tensor<float> x_0 = sd_ctx->sd->sample(sd_ctx->sd->diffusion_model,
-@@ -3197,6 +3270,169 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+@@ -3223,6 +3302,175 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
          int64_t sampling_end  = ggml_time_ms();
          if (!x_0.empty()) {
              LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
@@ -421,16 +589,19 @@ index 42ed2d4..82cd5aa 100644
 +                    target_shape[0]                   = target_w;
 +                    target_shape[1]                   = target_h;
 +
-+                    upscaled_x0 = sd::ops::interpolate(x_0, target_shape, sd::ops::InterpolateMode::Nearest);
++                    upscaled_x0 = sd::ops::interpolate(x_0, target_shape, sd::ops::InterpolateMode::Bilinear);
++                    LOG_INFO("[HiRes Fix] x_0 shape: [%s], upscaled_x0 shape: [%s]",
++                             sd::tensor_shape_to_string(x_0.shape()).c_str(),
++                             sd::tensor_shape_to_string(upscaled_x0.shape()).c_str());
 +
 +                    if (!latents.concat_latent.empty()) {
-+                        upscaled_concat_latent = sd::ops::interpolate(latents.concat_latent, target_shape, sd::ops::InterpolateMode::Nearest);
++                        upscaled_concat_latent = sd::ops::interpolate(latents.concat_latent, target_shape, sd::ops::InterpolateMode::Bilinear);
 +                    }
 +                    if (!latents.uncond_concat_latent.empty()) {
-+                        upscaled_uncond_concat_latent = sd::ops::interpolate(latents.uncond_concat_latent, target_shape, sd::ops::InterpolateMode::Nearest);
++                        upscaled_uncond_concat_latent = sd::ops::interpolate(latents.uncond_concat_latent, target_shape, sd::ops::InterpolateMode::Bilinear);
 +                    }
 +                    if (!latents.denoise_mask.empty()) {
-+                        upscaled_denoise_mask = sd::ops::interpolate(latents.denoise_mask, target_shape, sd::ops::InterpolateMode::Nearest);
++                        upscaled_denoise_mask = sd::ops::interpolate(latents.denoise_mask, target_shape, sd::ops::InterpolateMode::Bilinear);
 +                    }
 +                }
 +
@@ -479,6 +650,9 @@ index 42ed2d4..82cd5aa 100644
 +                LOG_INFO("[HiRes Fix] Second phase: latent %dx%d, strength=%.2f, sigma_range=[%.4f, %.4f]",
 +                         target_w, target_h, hires_strength, hires_sigmas[0], hires_sigmas[hires_sigmas.size() - 1]);
 +
++                // 强制释放 diffusion model 的计算缓冲区，避免复用 Phase 1 的尺寸
++                sd_ctx->sd->diffusion_model->free_compute_buffer();
++
 +                int64_t hires_sampling_start = ggml_time_ms();
 +                sd::Tensor<float> hires_x0   = sd_ctx->sd->sample(sd_ctx->sd->diffusion_model,
 +                                                                  true,
@@ -520,7 +694,7 @@ index 42ed2d4..82cd5aa 100644
              final_latents.push_back(std::move(x_0));
              continue;
          }
-@@ -3230,6 +3466,32 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+@@ -3256,6 +3504,32 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
      return result;
  }
  
@@ -553,7 +727,7 @@ index 42ed2d4..82cd5aa 100644
  static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
                                                                                const sd_vid_gen_params_t* sd_vid_gen_params,
                                                                                GenerationRequest* request) {
-@@ -3625,3 +3887,470 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
+@@ -3651,3 +3925,470 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
      LOG_INFO("generate_video completed in %.2fs", (t1 - t0) * 1.0f / 1000);
      return result;
  }
@@ -1024,3 +1198,134 @@ index 42ed2d4..82cd5aa 100644
 +        free(output);
 +    }
 +}
+diff --git a/src/tensor.hpp b/src/tensor.hpp
+index 33302b0..afac607 100644
+--- a/src/tensor.hpp
++++ b/src/tensor.hpp
+@@ -818,6 +818,7 @@ namespace sd {
+             NearestMax,
+             NearestMin,
+             NearestAvg,
++            Bilinear,
+         };
+ 
+         inline int64_t normalize_slice_bound(int64_t index, int64_t dim_size) {
+@@ -1019,11 +1020,11 @@ namespace sd {
+                                                mode == InterpolateMode::NearestMax ||
+                                                mode == InterpolateMode::NearestMin ||
+                                                mode == InterpolateMode::NearestAvg);
+-            if (!is_nearest_like_mode) {
+-                tensor_throw_invalid_argument("Only nearest-like interpolate modes are implemented, got mode=" +
++            if (mode != InterpolateMode::Bilinear && !is_nearest_like_mode) {
++                tensor_throw_invalid_argument("Only nearest-like and bilinear interpolate modes are implemented, got mode=" +
+                                               std::to_string(static_cast<int>(mode)));
+             }
+-            if (align_corners) {
++            if (align_corners && mode != InterpolateMode::Bilinear) {
+                 tensor_throw_invalid_argument("align_corners is not supported for nearest-like interpolate: input_shape=" +
+                                               tensor_shape_to_string(input.shape()) + ", output_shape=" +
+                                               tensor_shape_to_string(output_shape));
+@@ -1060,6 +1061,70 @@ namespace sd {
+             }
+ 
+             Tensor<T> output(std::move(output_shape));
++            if (mode == InterpolateMode::Bilinear) {
++                // Bilinear interpolation for tensors - only interpolate first 2 spatial dims
++                if (input.dim() < 2) {
++                    tensor_throw_invalid_argument("Bilinear interpolation requires at least 2D tensor");
++                }
++                const int64_t in_w = input.shape()[0];
++                const int64_t in_h = input.shape()[1];
++                const int64_t out_w = output.shape()[0];
++                const int64_t out_h = output.shape()[1];
++                
++                for (int64_t flat = 0; flat < output.numel(); ++flat) {
++                    std::vector<int64_t> coord = tensor_unravel_index(flat, output.shape());
++                    
++                    float x = align_corners ? 
++                        (out_w == 1) ? 0.f : coord[0] * (in_w - 1) / float(out_w - 1) :
++                        (out_w == 1) ? 0.f : coord[0] * in_w / float(out_w);
++                    float y = align_corners ? 
++                        (out_h == 1) ? 0.f : coord[1] * (in_h - 1) / float(out_h - 1) :
++                        (out_h == 1) ? 0.f : coord[1] * in_h / float(out_h);
++                    
++                    int x0 = static_cast<int>(std::floor(x));
++                    int y0 = static_cast<int>(std::floor(y));
++                    int x1 = std::min(x0 + 1, static_cast<int>(in_w - 1));
++                    int y1 = std::min(y0 + 1, static_cast<int>(in_h - 1));
++                    x0 = std::max(x0, 0);
++                    y0 = std::max(y0, 0);
++                    
++                    float dx = x - x0;
++                    float dy = y - y0;
++                    
++                    // For remaining dims, clamp to input bounds (handle different channel/batch sizes)
++                    std::vector<int64_t> c0 = coord;
++                    std::vector<int64_t> c1 = coord;
++                    std::vector<int64_t> c2 = coord;
++                    std::vector<int64_t> c3 = coord;
++                    c0[0] = x0; c0[1] = y0;
++                    c1[0] = x1; c1[1] = y0;
++                    c2[0] = x0; c2[1] = y1;
++                    c3[0] = x1; c3[1] = y1;
++                    
++                    // Clamp remaining dimensions to input bounds
++                    for (size_t d = 2; d < coord.size(); ++d) {
++                        int64_t in_dim = input.shape()[d];
++                        c0[d] = std::min(c0[d], in_dim - 1);
++                        c1[d] = std::min(c1[d], in_dim - 1);
++                        c2[d] = std::min(c2[d], in_dim - 1);
++                        c3[d] = std::min(c3[d], in_dim - 1);
++                    }
++                    
++                    T v00 = input.index(c0);
++                    T v10 = input.index(c1);
++                    T v01 = input.index(c2);
++                    T v11 = input.index(c3);
++                    
++                    output[flat] = static_cast<T>(
++                        v00 * (1 - dx) * (1 - dy) +
++                        v10 * dx * (1 - dy) +
++                        v01 * (1 - dx) * dy +
++                        v11 * dx * dy
++                    );
++                }
++                return output;
++            }
++            
+             if (mode == InterpolateMode::Nearest || !has_downsampling) {
+                 for (int64_t flat = 0; flat < output.numel(); ++flat) {
+                     std::vector<int64_t> output_coord = tensor_unravel_index(flat, output.shape());
+@@ -1162,11 +1227,11 @@ namespace sd {
+                                                mode == InterpolateMode::NearestMax ||
+                                                mode == InterpolateMode::NearestMin ||
+                                                mode == InterpolateMode::NearestAvg);
+-            if (!is_nearest_like_mode) {
+-                tensor_throw_invalid_argument("Only nearest-like interpolate modes are implemented, got mode=" +
++            if (mode != InterpolateMode::Bilinear && !is_nearest_like_mode) {
++                tensor_throw_invalid_argument("Only nearest-like and bilinear interpolate modes are implemented, got mode=" +
+                                               std::to_string(static_cast<int>(mode)));
+             }
+-            if (align_corners) {
++            if (align_corners && mode != InterpolateMode::Bilinear) {
+                 tensor_throw_invalid_argument("align_corners is not supported for nearest-like interpolate: input_shape=" +
+                                               tensor_shape_to_string(input.shape()));
+             }
+diff --git a/src/vae.hpp b/src/vae.hpp
+index dc69535..f561568 100644
+--- a/src/vae.hpp
++++ b/src/vae.hpp
+@@ -172,8 +172,12 @@ public:
+             float tile_overlap;
+             int tile_size_x, tile_size_y;
+             get_tile_sizes(tile_size_x, tile_size_y, tile_overlap, tiling_params, input.shape()[0], input.shape()[1]);
++            // get_tile_sizes returns pixel-space tile sizes, but process_tiles_2d expects latent-space sizes
++            // when small_width is derived from input.shape (latent dimensions).
++            tile_size_x /= scale_factor;
++            tile_size_y /= scale_factor;
+             if (!silent) {
+-                LOG_DEBUG("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
++                LOG_DEBUG("VAE Tile size: %dx%d (latent)", tile_size_x, tile_size_y);
+             }
+             output = tiled_compute(
+                 input,

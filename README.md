@@ -352,7 +352,64 @@ cd ~/my-img/build
 cmake .. && make -j$(nproc)
 ```
 
-修改的备份文件存放在 `~/my-img/stable-diffusion.cpp-patched/` 目录下。
+修改的备份文件存放在 `~/my-img/patches/stable-diffusion.cpp-patched/` 目录下。
+
+### Patch 验证流程
+
+为了确保 patch 文件可以在 `git clone` 后完美重现代码，执行以下验证：
+
+```bash
+# 1. 查看当前修改状态
+cd ~/stable-diffusion.cpp
+git diff --stat
+
+# 2. 保存当前工作区
+git stash
+
+# 3. 恢复到干净状态
+git checkout -- .
+
+# 4. 从 patch 重新应用修改
+git apply ~/my-img/patches/hires-fix-stable-diffusion.patch
+
+# 5. 验证 patch 后的代码与备份完全一致
+for f in src/stable-diffusion.cpp src/tensor.hpp src/ggml_extend.hpp \
+         src/vae.hpp src/denoiser.hpp include/stable-diffusion.h \
+         examples/common/common.cpp examples/common/common.h; do
+    backup="~/my-img/patches/stable-diffusion.cpp-patched/$(basename $f)"
+    diff -q "$f" "$backup" && echo "✅ $f" || echo "❌ $f 不匹配"
+done
+```
+
+**验证结果示例：**
+```
+✅ src/stable-diffusion.cpp
+✅ src/tensor.hpp
+✅ src/ggml_extend.hpp
+✅ src/vae.hpp
+✅ src/denoiser.hpp
+✅ include/stable-diffusion.h
+✅ examples/common/common.cpp
+✅ examples/common/common.h
+🎉 所有文件匹配！Patch 可以完美重现代码
+```
+
+**patch 目录结构：**
+```
+patches/
+├── hires-fix-stable-diffusion.patch     # 最新完整 patch（63KB）
+├── hires-fix-myimg.patch                # my-img 项目部分
+├── stable-diffusion.cpp-patched/        # 修改后完整文件备份
+│   ├── stable-diffusion.cpp
+│   ├── tensor.hpp
+│   ├── ggml_extend.hpp
+│   ├── vae.hpp
+│   ├── denoiser.hpp
+│   ├── stable-diffusion.h
+│   ├── common.cpp
+│   └── common.h
+└── apply-to-4090d.sh                    # 自动应用脚本
+```
 
 ---
 

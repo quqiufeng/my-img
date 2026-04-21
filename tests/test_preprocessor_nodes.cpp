@@ -25,7 +25,7 @@ TEST_CASE("ImageRemoveBackground rejects null image", "[preprocessor_nodes]") {
 
     NodeInputs inputs;
     inputs["image"] = ImagePtr{};                    // null
-    inputs["model"] = std::shared_ptr<RemBGModel>{}; // null
+    inputs["model"] = std::shared_ptr<void>{}; // null (RemBGModel when HAS_ONNXRUNTIME)
 
     NodeOutputs outputs;
     sd_error_t err = node->execute(inputs, outputs);
@@ -48,7 +48,7 @@ TEST_CASE("LineArtPreprocessor rejects null image", "[preprocessor_nodes]") {
 
     NodeInputs inputs;
     inputs["image"] = ImagePtr{};                                     // null
-    inputs["lineart_model"] = std::shared_ptr<LineArtPreprocessor>{}; // null
+    inputs["lineart_model"] = std::shared_ptr<void>{}; // null (LineArtPreprocessor when HAS_ONNXRUNTIME)
 
     NodeOutputs outputs;
     sd_error_t err = node->execute(inputs, outputs);

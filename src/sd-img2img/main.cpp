@@ -214,7 +214,7 @@ static sd_image_t* generate_single(sd_ctx_t* ctx, const sd_image_t* init_image, 
     params.strength = strength;
     params.seed = args.seed + seed_offset;
     params.sample_params.sample_steps = steps;
-    params.sample_params.sample_method = EULER_A_SAMPLE_METHOD;
+    params.sample_params.sample_method = EULER_SAMPLE_METHOD;
     params.sample_params.scheduler = KARRAS_SCHEDULER;
     params.sample_params.guidance.txt_cfg = args.cfg_scale;
 
