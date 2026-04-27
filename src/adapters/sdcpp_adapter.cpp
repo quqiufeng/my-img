@@ -4,8 +4,11 @@
 #include <cstring>
 #include <chrono>
 #include <cctype>
+#include <filesystem>
 
 #include <stb_image_write.h>
+
+namespace fs = std::filesystem;
 
 // 日志回调函数
 static void sd_log_callback(enum sd_log_level_t level, const char* text, void* data) {
@@ -159,6 +162,34 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     // VAE 设置
     sd_params.vae_decode_only = false;
     sd_params.keep_vae_on_cpu = false;
+    
+    // Embeddings (Textual Inversion)
+    std::vector<sd_embedding_t> embeddings;
+    std::vector<std::string> embedding_names;
+    std::vector<std::string> embedding_paths;
+    if (!params.embedding_dir.empty() && fs::exists(params.embedding_dir)) {
+        std::cout << "[SDCPPAdapter] Scanning embeddings from: " << params.embedding_dir << std::endl;
+        for (const auto& entry : fs::directory_iterator(params.embedding_dir)) {
+            if (!entry.is_regular_file()) continue;
+            std::string ext = entry.path().extension().string();
+            for (auto& c : ext) c = std::tolower(c);
+            if (ext == ".pt" || ext == ".safetensors" || ext == ".bin") {
+                std::string name = entry.path().stem().string();
+                std::string path = entry.path().string();
+                embedding_names.push_back(name);
+                embedding_paths.push_back(path);
+                std::cout << "  - Embedding: " << name << " (" << path << ")" << std::endl;
+            }
+        }
+        if (!embedding_names.empty()) {
+            embeddings.reserve(embedding_names.size());
+            for (size_t i = 0; i < embedding_names.size(); ++i) {
+                embeddings.push_back({embedding_names[i].c_str(), embedding_paths[i].c_str()});
+            }
+            sd_params.embeddings = embeddings.data();
+            sd_params.embedding_count = embeddings.size();
+        }
+    }
     
     std::cout << "[SDCPPAdapter] Loading model from: " << params.model_path << std::endl;
     std::cout << "[SDCPPAdapter] Using " << sd_params.n_threads << " threads" << std::endl;

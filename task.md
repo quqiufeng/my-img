@@ -73,11 +73,13 @@
 - **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 6.5: Textual Inversion / Embeddings
-- [ ] 加载 .pt/.safetensors embedding 文件
+- [x] 加载 .pt/.safetensors/.bin embedding 文件
 - [ ] 在 prompt 中识别 `embedding:name` 语法
-- [ ] 注入到文本编码器
+- [x] 通过 sd.cpp 注入到文本编码器
+- [x] CLI 参数：`--embd-dir PATH`
 - **优先级**: P1
 - **难度**: 低
+- **状态**: ✅ 基础版本已完成（2026-04-27）
 
 ### Phase 7: ControlNet & 控制节点
 

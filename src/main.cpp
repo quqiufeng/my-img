@@ -503,6 +503,7 @@ int main(int argc, char** argv) {
     params.vae_tile_size_x = opts.vae_tile_size_w;
     params.vae_tile_size_y = opts.vae_tile_size_h;
     params.vae_tile_overlap = opts.vae_tile_overlap;
+    params.embedding_dir = opts.embedding_dir;
     
     // ControlNet
     params.control_net_path = opts.control_net;
