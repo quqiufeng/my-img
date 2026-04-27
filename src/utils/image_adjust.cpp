@@ -561,4 +561,52 @@ torch::Tensor graduated_filter(const torch::Tensor& image, float angle, float po
     return img.clamp(0, 1);
 }
 
+// Smart sharpen: edge-aware sharpening
+// strength: 0.0-3.0 (sharpening strength)
+// radius: 1-5 (blur radius for edge detection)
+torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radius) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // Sobel edge detection
+    auto sobel_x = torch::tensor({{{-1.0f, 0.0f, 1.0f}, {-2.0f, 0.0f, 2.0f}, {-1.0f, 0.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0); // [1, 1, 3, 3]
+    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    
+    // Convert to grayscale for edge detection
+    auto gray = img.mean(0, true); // [1, H, W]
+    auto grad_x = torch::conv2d(gray.unsqueeze(0), sobel_x, {}, 1, 1);
+    auto grad_y = torch::conv2d(gray.unsqueeze(0), sobel_y, {}, 1, 1);
+    auto edge_magnitude = (grad_x.squeeze().pow(2) + grad_y.squeeze().pow(2)).sqrt();
+    
+    // Normalize edge magnitude to [0, 1]
+    auto edge_max = edge_magnitude.max();
+    auto edge_mask = (edge_magnitude / (edge_max + 1e-6)).clamp(0, 1);
+    
+    // Create sharpening kernel (Laplacian-like)
+    auto kernel = torch::tensor({{{0.0f, -1.0f, 0.0f}, {-1.0f, 5.0f, -1.0f}, {0.0f, -1.0f, 0.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    kernel = kernel.unsqueeze(0).unsqueeze(0);
+    
+    // Apply sharpening to each channel
+    auto sharpened = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0);
+        auto sharp_ch = torch::conv2d(ch, kernel, {}, 1, 1);
+        sharpened[c] = sharp_ch.squeeze(0).squeeze(0);
+    }
+    
+    // Blend based on edge mask: more sharpening on edges, less on smooth areas
+    float blend = std::min(strength / 3.0f, 1.0f);
+    auto mask = edge_mask.unsqueeze(0); // [1, H, W]
+    auto result = img * (1.0f - blend * mask) + sharpened * blend * mask;
+    
+    return result.clamp(0, 1);
+}
+
 } // namespace myimg

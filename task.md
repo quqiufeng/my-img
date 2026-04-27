@@ -272,6 +272,7 @@
 
 #### Task 10.5.4: 锐化与降噪
 - [x] USM 锐化（数量/半径/阈值）
+- [x] 智能锐化（边缘感知，避免噪点放大）
 - [x] 智能降噪（边缘保留）
 - [ ] 边缘蒙版锐化
 - [ ] 亮度降噪
@@ -279,6 +280,8 @@
 - [x] CLI 参数：`--sharpen FLOAT`（amount）
 - [x] CLI 参数：`--sharpen-radius INT`
 - [x] CLI 参数：`--sharpen-threshold FLOAT`
+- [x] CLI 参数：`--smart-sharpen FLOAT`（0.0-3.0）
+- [x] CLI 参数：`--smart-sharpen-radius INT`（1-5）
 - [x] CLI 参数：`--denoise FLOAT`（strength）
 - [x] CLI 参数：`--smart-denoise`
 - **优先级**: 🛒 P1（电商刚需）

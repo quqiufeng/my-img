@@ -92,6 +92,8 @@ struct CliOptions {
     float sharpen_amount = 0.0f;   // 0.0-3.0
     int sharpen_radius = 1;        // 1-5
     float sharpen_threshold = 0.0f; // 0-255
+    float smart_sharpen_strength = 0.0f; // 0.0-3.0
+    int smart_sharpen_radius = 2;   // 1-5
     float denoise_strength = 0.0f;  // 0.0-1.0
     bool smart_denoise_flag = false; // 智能降噪
     
@@ -202,6 +204,8 @@ static void print_usage(const char* argv0) {
     std::cout << "  --sharpen FLOAT           USM sharpen amount 0.0-3.0 (default: 0)\n";
     std::cout << "  --sharpen-radius INT      Sharpen radius 1-5 (default: 1)\n";
     std::cout << "  --sharpen-threshold FLOAT Sharpen threshold 0-255 (default: 0)\n";
+    std::cout << "  --smart-sharpen FLOAT     Smart edge-aware sharpen 0.0-3.0 (default: 0)\n";
+    std::cout << "  --smart-sharpen-radius INT Smart sharpen radius 1-5 (default: 2)\n";
     std::cout << "  --denoise FLOAT           Denoise strength 0.0-1.0 (default: 0)\n";
     std::cout << "  --smart-denoise           Smart denoise (preserve edges)\n";
     std::cout << "\nOutpainting Options:\n";
@@ -402,6 +406,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--sharpen-threshold") {
             if (++i >= argc) { std::cerr << "Missing value for --sharpen-threshold\n"; return false; }
             opts.sharpen_threshold = std::stof(argv[i]);
+        } else if (arg == "--smart-sharpen") {
+            if (++i >= argc) { std::cerr << "Missing value for --smart-sharpen\n"; return false; }
+            opts.smart_sharpen_strength = std::stof(argv[i]);
+        } else if (arg == "--smart-sharpen-radius") {
+            if (++i >= argc) { std::cerr << "Missing value for --smart-sharpen-radius\n"; return false; }
+            opts.smart_sharpen_radius = std::stoi(argv[i]);
         } else if (arg == "--denoise") {
             if (++i >= argc) { std::cerr << "Missing value for --denoise\n"; return false; }
             opts.denoise_strength = std::stof(argv[i]);
@@ -784,7 +794,7 @@ int main(int argc, char** argv) {
                 opts.shadows != 0.0f || opts.auto_enhance ||
                 !opts.curves.empty() ||
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                opts.smart_denoise_flag ||
+                opts.smart_sharpen_strength > 0.0f || opts.smart_denoise_flag ||
                 opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
                 !opts.preset.empty() ||
                 opts.vignette_strength > 0.0f ||
@@ -813,6 +823,11 @@ int main(int argc, char** argv) {
                 }
                 if (opts.sharpen_amount > 0.0f) {
                     tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+                }
+                
+                // Smart sharpen
+                if (opts.smart_sharpen_strength > 0.0f) {
+                    tensor = myimg::smart_sharpen(tensor, opts.smart_sharpen_strength, opts.smart_sharpen_radius);
                 }
                 
                 // RGB curves
@@ -959,7 +974,7 @@ int main(int argc, char** argv) {
                                opts.shadows != 0.0f || opts.auto_enhance ||
                                !opts.curves.empty() ||
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                               opts.smart_denoise_flag ||
+                               opts.smart_sharpen_strength > 0.0f || opts.smart_denoise_flag ||
                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
                                !opts.preset.empty() ||
                                opts.vignette_strength > 0.0f ||
@@ -1001,6 +1016,12 @@ int main(int argc, char** argv) {
             if (opts.sharpen_amount > 0.0f) {
                 std::cout << "Applying USM sharpen...\n";
                 tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+            }
+            
+            // 智能锐化
+            if (opts.smart_sharpen_strength > 0.0f) {
+                std::cout << "Applying smart sharpen...\n";
+                tensor = myimg::smart_sharpen(tensor, opts.smart_sharpen_strength, opts.smart_sharpen_radius);
             }
             
             // RGB 曲线

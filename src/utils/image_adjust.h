@@ -79,4 +79,9 @@ torch::Tensor radial_filter(const torch::Tensor& image, float cx, float cy, floa
 torch::Tensor graduated_filter(const torch::Tensor& image, float angle, float position, float width,
                                float exposure, float contrast, float saturation);
 
+// Smart sharpen: edge-aware sharpening
+// strength: 0.0-3.0 (sharpening strength)
+// radius: 1-5 (blur radius for edge detection)
+torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radius = 2);
+
 } // namespace myimg
