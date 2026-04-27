@@ -138,9 +138,8 @@ endif()
 set(MYIMG_SOURCES
     src/main.cpp
     src/adapters/sdcpp_adapter.cpp
-        src/utils/stb_impl.c
     src/utils/image_utils.cpp
-        src/utils/stb_impl.c
+    src/utils/image_adjust.cpp
     src/utils/stb_impl.c
 )
 

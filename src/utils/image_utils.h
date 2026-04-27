@@ -25,4 +25,8 @@ void save_image(const torch::Tensor& image, const std::string& path);
 // Load image from file to ImageData struct (for img2img)
 ImageData load_image_from_file(const std::string& path);
 
+// Convert ImageData <-> torch::Tensor (CHW, float32, 0-1)
+torch::Tensor image_data_to_tensor(const ImageData& img);
+ImageData tensor_to_image_data(const torch::Tensor& tensor);
+
 } // namespace myimg

@@ -38,4 +38,27 @@ ImageData load_image_from_file(const std::string& path) {
     return img;
 }
 
+torch::Tensor image_data_to_tensor(const ImageData& img) {
+    auto tensor = torch::from_blob(
+        const_cast<uint8_t*>(img.data.data()),
+        {img.height, img.width, img.channels},
+        torch::kUInt8
+    ).clone();
+    tensor = tensor.permute({2, 0, 1}).to(torch::kFloat32) / 255.0f;
+    return tensor;
+}
+
+ImageData tensor_to_image_data(const torch::Tensor& tensor) {
+    ImageData img;
+    auto t = tensor.detach().cpu().clamp(0, 1);
+    img.channels = t.size(0);
+    img.height = t.size(1);
+    img.width = t.size(2);
+    img.data.resize(img.width * img.height * img.channels);
+    
+    auto t_uint8 = (t * 255.0f).to(torch::kUInt8);
+    std::memcpy(img.data.data(), t_uint8.data_ptr<uint8_t>(), img.data.size());
+    return img;
+}
+
 } // namespace myimg

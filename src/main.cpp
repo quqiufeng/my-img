@@ -6,6 +6,7 @@
 #include <filesystem>
 #include "adapters/sdcpp_adapter.h"
 #include "utils/image_utils.h"
+#include "utils/image_adjust.h"
 
 namespace fs = std::filesystem;
 
@@ -66,6 +67,16 @@ struct CliOptions {
     // Embeddings
     std::string embedding_dir;
     
+    // 摄影后期调整
+    float temperature = 0.0f;    // -1.0 ~ 1.0
+    float brightness = 0.0f;     // -1.0 ~ 1.0
+    float contrast = 0.0f;       // -1.0 ~ 1.0
+    float saturation = 0.0f;     // -1.0 ~ 1.0
+    float exposure = 0.0f;       // EV -5.0 ~ 5.0
+    float highlights = 0.0f;     // -100 ~ 100
+    float shadows = 0.0f;        // -100 ~ 100
+    bool auto_enhance = false;   // 一键优化
+    
     // 系统
     int threads = -1;
     bool verbose = false;
@@ -120,6 +131,15 @@ static void print_usage(const char* argv0) {
     std::cout << "  --embd-dir PATH           Embeddings directory (Textual Inversion)\n";
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
+    std::cout << "\nPhoto Adjustment Options:\n";
+    std::cout << "  --temperature FLOAT       Color temperature -1.0(cold) to 1.0(warm)\n";
+    std::cout << "  --brightness FLOAT        Brightness -1.0 to 1.0\n";
+    std::cout << "  --contrast FLOAT          Contrast -1.0 to 1.0\n";
+    std::cout << "  --saturation FLOAT        Saturation -1.0 to 1.0\n";
+    std::cout << "  --exposure FLOAT          Exposure EV -5.0 to 5.0\n";
+    std::cout << "  --highlights FLOAT        Highlights -100 to 100\n";
+    std::cout << "  --shadows FLOAT           Shadows -100 to 100\n";
+    std::cout << "  --auto-enhance            Auto one-click photo enhancement\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
@@ -249,6 +269,29 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--threads") {
             if (++i >= argc) { std::cerr << "Missing value for --threads\n"; return false; }
             opts.threads = std::stoi(argv[i]);
+        } else if (arg == "--temperature") {
+            if (++i >= argc) { std::cerr << "Missing value for --temperature\n"; return false; }
+            opts.temperature = std::stof(argv[i]);
+        } else if (arg == "--brightness") {
+            if (++i >= argc) { std::cerr << "Missing value for --brightness\n"; return false; }
+            opts.brightness = std::stof(argv[i]);
+        } else if (arg == "--contrast") {
+            if (++i >= argc) { std::cerr << "Missing value for --contrast\n"; return false; }
+            opts.contrast = std::stof(argv[i]);
+        } else if (arg == "--saturation") {
+            if (++i >= argc) { std::cerr << "Missing value for --saturation\n"; return false; }
+            opts.saturation = std::stof(argv[i]);
+        } else if (arg == "--exposure") {
+            if (++i >= argc) { std::cerr << "Missing value for --exposure\n"; return false; }
+            opts.exposure = std::stof(argv[i]);
+        } else if (arg == "--highlights") {
+            if (++i >= argc) { std::cerr << "Missing value for --highlights\n"; return false; }
+            opts.highlights = std::stof(argv[i]);
+        } else if (arg == "--shadows") {
+            if (++i >= argc) { std::cerr << "Missing value for --shadows\n"; return false; }
+            opts.shadows = std::stof(argv[i]);
+        } else if (arg == "--auto-enhance") {
+            opts.auto_enhance = true;
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
@@ -490,6 +533,40 @@ int main(int argc, char** argv) {
                 std::cerr << "Upscale failed for image " << (i + 1) << "\n";
                 continue;
             }
+        }
+        
+        // 摄影后期调整
+        bool has_adjustments = opts.temperature != 0.0f || opts.brightness != 0.0f ||
+                               opts.contrast != 0.0f || opts.saturation != 0.0f ||
+                               opts.exposure != 0.0f || opts.highlights != 0.0f ||
+                               opts.shadows != 0.0f || opts.auto_enhance;
+        if (has_adjustments) {
+            std::cout << "Applying photo adjustments...\n";
+            myimg::ImageData img_data;
+            img_data.width = image.width;
+            img_data.height = image.height;
+            img_data.channels = image.channels;
+            img_data.data = std::move(image.data);
+            
+            auto tensor = myimg::image_data_to_tensor(img_data);
+            
+            if (opts.auto_enhance) {
+                tensor = myimg::auto_enhance(tensor);
+            } else {
+                if (opts.temperature != 0.0f) tensor = myimg::adjust_temperature(tensor, opts.temperature);
+                if (opts.brightness != 0.0f) tensor = myimg::adjust_brightness(tensor, opts.brightness);
+                if (opts.contrast != 0.0f) tensor = myimg::adjust_contrast(tensor, opts.contrast);
+                if (opts.saturation != 0.0f) tensor = myimg::adjust_saturation(tensor, opts.saturation);
+                if (opts.exposure != 0.0f) tensor = myimg::adjust_exposure(tensor, opts.exposure);
+                if (opts.highlights != 0.0f) tensor = myimg::adjust_highlights(tensor, opts.highlights);
+                if (opts.shadows != 0.0f) tensor = myimg::adjust_shadows(tensor, opts.shadows);
+            }
+            
+            img_data = myimg::tensor_to_image_data(tensor);
+            image.width = img_data.width;
+            image.height = img_data.height;
+            image.channels = img_data.channels;
+            image.data = std::move(img_data.data);
         }
         
         // 构建输出文件名
