@@ -142,6 +142,7 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.clip_g_path = params.clip_g_path.empty() ? nullptr : params.clip_g_path.c_str();
     sd_params.t5xxl_path = params.t5xxl_path.empty() ? nullptr : params.t5xxl_path.c_str();
     sd_params.llm_path = params.llm_path.empty() ? nullptr : params.llm_path.c_str();
+    sd_params.control_net_path = params.control_net_path.empty() ? nullptr : params.control_net_path.c_str();
     
     // 系统设置
     sd_params.n_threads = params.n_threads > 0 ? params.n_threads : sd_get_num_physical_cores();

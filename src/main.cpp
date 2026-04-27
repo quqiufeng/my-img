@@ -52,11 +52,19 @@ struct CliOptions {
     float strength = 0.75f;
     std::string mask_image;
     
+    // ControlNet
+    std::string control_net;
+    std::string control_image;
+    float control_strength = 0.9f;
+    
     // LoRA
     std::vector<std::string> loras;
     
     // 输出
     std::string output = "output.png";
+    
+    // Embeddings
+    std::string embedding_dir;
     
     // 系统
     int threads = -1;
@@ -90,6 +98,10 @@ static void print_usage(const char* argv0) {
     std::cout << "\nLoRA Options:\n";
     std::cout << "  --lora PATH:weight        LoRA model path and weight (can specify multiple)\n";
     std::cout << "  --lora-model-dir PATH     Directory containing LoRA models\n";
+    std::cout << "\nControlNet Options:\n";
+    std::cout << "  --control-net PATH        ControlNet model path\n";
+    std::cout << "  --control-image PATH      Control image (canny/depth/lineart)\n";
+    std::cout << "  --control-strength FLOAT  Control strength (default: 0.9)\n";
     std::cout << "\nVRAM Optimization:\n";
     std::cout << "  --diffusion-fa            Enable Flash Attention for diffusion\n";
     std::cout << "  --vae-tiling              Enable VAE tiling\n";
@@ -104,6 +116,8 @@ static void print_usage(const char* argv0) {
     std::cout << "\nUpscale Options:\n";
     std::cout << "  --upscale-repeats INT     ESRGAN upscale repeats (default: 1)\n";
     std::cout << "  --upscale-tile-size INT   ESRGAN tile size (default: 1440)\n";
+    std::cout << "\nEmbedding Options:\n";
+    std::cout << "  --embd-dir PATH           Embeddings directory (Textual Inversion)\n";
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
     std::cout << "\nSystem Options:\n";
@@ -138,6 +152,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--upscale-model") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-model\n"; return false; }
             opts.upscale_model = argv[i];
+        } else if (arg == "--embd-dir") {
+            if (++i >= argc) { std::cerr << "Missing value for --embd-dir\n"; return false; }
+            opts.embedding_dir = argv[i];
         } else if (arg == "-p" || arg == "--prompt") {
             if (++i >= argc) { std::cerr << "Missing value for -p/--prompt\n"; return false; }
             opts.prompt = argv[i];
@@ -177,6 +194,15 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--mask") {
             if (++i >= argc) { std::cerr << "Missing value for --mask\n"; return false; }
             opts.mask_image = argv[i];
+        } else if (arg == "--control-net") {
+            if (++i >= argc) { std::cerr << "Missing value for --control-net\n"; return false; }
+            opts.control_net = argv[i];
+        } else if (arg == "--control-image") {
+            if (++i >= argc) { std::cerr << "Missing value for --control-image\n"; return false; }
+            opts.control_image = argv[i];
+        } else if (arg == "--control-strength") {
+            if (++i >= argc) { std::cerr << "Missing value for --control-strength\n"; return false; }
+            opts.control_strength = std::stof(argv[i]);
         } else if (arg == "--diffusion-fa") {
             opts.diffusion_fa = true;
         } else if (arg == "--vae-tiling") {
@@ -321,6 +347,22 @@ int main(int argc, char** argv) {
     params.vae_tile_size_x = opts.vae_tile_size_w;
     params.vae_tile_size_y = opts.vae_tile_size_h;
     params.vae_tile_overlap = opts.vae_tile_overlap;
+    
+    // ControlNet
+    params.control_net_path = opts.control_net;
+    if (!opts.control_image.empty()) {
+        std::cout << "[INFO] Loading control image: " << opts.control_image << "\n";
+        auto ctrl_data = myimg::load_image_from_file(opts.control_image);
+        if (ctrl_data.empty()) {
+            std::cerr << "Error: Failed to load control image: " << opts.control_image << "\n";
+            return 1;
+        }
+        params.control_image.width = ctrl_data.width;
+        params.control_image.height = ctrl_data.height;
+        params.control_image.channels = ctrl_data.channels;
+        params.control_image.data = std::move(ctrl_data.data);
+        params.control_strength = opts.control_strength;
+    }
     
     // HiRes Fix
     params.enable_hires = opts.hires;

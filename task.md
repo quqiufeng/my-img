@@ -78,15 +78,16 @@
 
 ### Phase 7: ControlNet & 控制节点
 
-#### Task 7.1: ControlNet
-- [ ] ControlNet 模型加载（.pth/.safetensors）
-- [ ] CLI 参数：`--control-net PATH`
-- [ ] CLI 参数：`--control-image PATH`
-- [ ] CLI 参数：`--control-strength FLOAT`
-- [ ] 支持 Canny/Depth/Lineart/OpenPose/Normal/Scribble
-- [ ] 参考：sd.cpp `control_image`, `control_strength`
-- **优先级**: P1
+#### Task 7.1: ControlNet ✅
+- [x] ControlNet 模型加载（.pth/.safetensors）
+- [x] CLI 参数：`--control-net PATH`
+- [x] CLI 参数：`--control-image PATH`
+- [x] CLI 参数：`--control-strength FLOAT`（默认 0.9）
+- [x] 支持 Canny/Depth/Lineart/OpenPose/Normal/Scribble
+- [x] 参考：sd.cpp `control_image`, `control_strength`
+- **优先级**: 中
 - **难度**: 高
+- **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 7.2: T2I-Adapter
 - [ ] 轻量级条件控制（比 ControlNet 更省显存）

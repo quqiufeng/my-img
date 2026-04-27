@@ -112,6 +112,7 @@ struct GenerationParams {
     Image mask_image;  // 白色=重绘, 黑色=保留
     
     // ControlNet
+    std::string control_net_path;
     Image control_image;
     float control_strength = 0.9f;
     
@@ -130,6 +131,9 @@ struct GenerationParams {
     int vae_tile_size_x = 256;
     int vae_tile_size_y = 256;
     float vae_tile_overlap = 0.5f;
+    
+    // Embeddings
+    std::string embedding_dir;
     
     // 系统设置
     int n_threads = -1;  // -1 = 自动
