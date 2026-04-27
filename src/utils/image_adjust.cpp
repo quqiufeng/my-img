@@ -100,6 +100,86 @@ torch::Tensor auto_enhance(const torch::Tensor& image) {
     return img.clamp(0, 1);
 }
 
+// 自然饱和度：智能保护肤色
+torch::Tensor adjust_vibrance(const torch::Tensor& image, float strength) {
+    if (strength == 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // Calculate saturation for each pixel
+    auto max_result = torch::max(img, 0);
+    auto max_val = std::get<0>(max_result); // [H, W]
+    auto min_result = torch::min(img, 0);
+    auto min_val = std::get<0>(min_result); // [H, W]
+    auto saturation = (max_val - min_val) / (max_val + 1e-6f); // [H, W]
+    
+    // Skin tone detection: pixels where R > G > B and R is in mid-range
+    auto r = img[0];
+    auto g = img[1];
+    auto b = img[2];
+    auto skin_mask = (r > g) * (g > b) * (r > 0.3f) * (r < 0.85f);
+    
+    // For skin tones, apply less saturation change
+    // For already saturated pixels, apply less saturation change
+    auto protection = skin_mask.to(torch::kFloat32) * 0.7f + (saturation > 0.7f).to(torch::kFloat32) * 0.3f;
+    protection = protection.unsqueeze(0); // [1, H, W]
+    
+    // Blend factor: less effect on protected pixels
+    auto blend = std::abs(strength) * (1.0f - protection * 0.8f);
+    
+    // Apply saturation change
+    auto gray = img.mean(0, true);
+    img = gray + (img - gray) * (1.0f + blend * (strength > 0 ? 1.0f : -1.0f));
+    
+    return img.clamp(0, 1);
+}
+
+// 清晰度/纹理增强：提升中频细节
+torch::Tensor enhance_clarity(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // High-pass filter for mid-frequency details
+    auto blur_kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f},
+                                       {0.125f, 0.25f, 0.125f},
+                                       {0.0625f, 0.125f, 0.0625f}}},
+                                      torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    blur_kernel = blur_kernel.unsqueeze(0).unsqueeze(0);
+    
+    auto blurred = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0);
+        auto blurred_ch = torch::conv2d(ch, blur_kernel, {}, 1, 1);
+        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
+    }
+    
+    // Detail = original - blurred
+    auto detail = img - blurred;
+    
+    // Edge mask to avoid over-enhancing edges
+    auto sobel_x = torch::tensor({{{-1.0f, 0.0f, 1.0f}, {-2.0f, 0.0f, 2.0f}, {-1.0f, 0.0f, 1.0f}}},
+                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
+                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0);
+    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    
+    auto gray = img.mean(0, true);
+    auto grad_x = torch::conv2d(gray.unsqueeze(0), sobel_x, {}, 1, 1);
+    auto grad_y = torch::conv2d(gray.unsqueeze(0), sobel_y, {}, 1, 1);
+    auto edge = (grad_x.squeeze() + grad_y.squeeze()).abs();
+    auto edge_mask = (edge < edge.mean().item<float>() * 1.5f).to(torch::kFloat32);
+    
+    // Apply clarity: boost mid-frequency details on non-edge areas
+    float blend = std::min(strength * 0.5f, 1.0f);
+    auto mask = edge_mask.unsqueeze(0);
+    
+    return (img + detail * blend * mask).clamp(0, 1);
+}
+
 // USM (Unsharp Mask) 锐化
 torch::Tensor usm_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
     if (amount <= 0.0f || radius <= 0) return image.clone();

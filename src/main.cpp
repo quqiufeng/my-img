@@ -81,6 +81,8 @@ struct CliOptions {
     float highlights = 0.0f;     // -100 ~ 100
     float shadows = 0.0f;        // -100 ~ 100
     bool auto_enhance = false;   // 一键优化
+    float vibrance = 0.0f;       // -1.0 ~ 1.0 (smart saturation)
+    float clarity = 0.0f;        // 0.0 ~ 1.0 (texture enhancement)
     std::string curves;          // RGB curves "in,out;in,out"
     std::string preset;          // Filter preset name
     float vignette_strength = 0.0f; // 0.0-1.0
@@ -198,6 +200,9 @@ static void print_usage(const char* argv0) {
     std::cout << "  --highlights FLOAT        Highlights -100 to 100\n";
     std::cout << "  --shadows FLOAT           Shadows -100 to 100\n";
     std::cout << "  --auto-enhance            Auto one-click photo enhancement\n";
+    std::cout << "\nVibrance & Clarity:\n";
+    std::cout << "  --vibrance FLOAT          Vibrance -1.0 to 1.0 (smart saturation)\n";
+    std::cout << "  --clarity FLOAT           Clarity/texture enhancement 0.0-1.0\n";
     std::cout << "\nCurves Options:\n";
     std::cout << "  --curves \"in,out;in,out\"  RGB curves (0-255, e.g. \"0,0;128,140;255,255\")\n";
     std::cout << "\nVignette Options:\n";
@@ -372,6 +377,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.shadows = std::stof(argv[i]);
         } else if (arg == "--auto-enhance") {
             opts.auto_enhance = true;
+        } else if (arg == "--vibrance") {
+            if (++i >= argc) { std::cerr << "Missing value for --vibrance\n"; return false; }
+            opts.vibrance = std::stof(argv[i]);
+        } else if (arg == "--clarity") {
+            if (++i >= argc) { std::cerr << "Missing value for --clarity\n"; return false; }
+            opts.clarity = std::stof(argv[i]);
         } else if (arg == "--curves") {
             if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
             opts.curves = argv[i];
@@ -800,7 +811,8 @@ int main(int argc, char** argv) {
                 !opts.radial_filter.empty() ||
                 !opts.graduated_filter.empty() ||
                 !opts.lut_path.empty() ||
-                opts.dehaze_strength > 0.0f) {
+                opts.dehaze_strength > 0.0f ||
+                opts.vibrance != 0.0f || opts.clarity > 0.0f) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -875,6 +887,16 @@ int main(int argc, char** argv) {
                 // 去雾
                 if (opts.dehaze_strength > 0.0f) {
                     tensor = myimg::dehaze(tensor, opts.dehaze_strength);
+                }
+                
+                // Vibrance
+                if (opts.vibrance != 0.0f) {
+                    tensor = myimg::adjust_vibrance(tensor, opts.vibrance);
+                }
+                
+                // Clarity
+                if (opts.clarity > 0.0f) {
+                    tensor = myimg::enhance_clarity(tensor, opts.clarity);
                 }
                 
                 // Portrait retouching
@@ -989,6 +1011,7 @@ int main(int argc, char** argv) {
                                opts.contrast != 0.0f || opts.saturation != 0.0f ||
                                opts.exposure != 0.0f || opts.highlights != 0.0f ||
                                opts.shadows != 0.0f || opts.auto_enhance ||
+                               opts.vibrance != 0.0f || opts.clarity > 0.0f ||
                                !opts.curves.empty() ||
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                                opts.smart_sharpen_strength > 0.0f || opts.smart_denoise_flag ||
@@ -1047,6 +1070,18 @@ int main(int argc, char** argv) {
             if (!opts.curves.empty()) {
                 std::cout << "Applying curves: " << opts.curves << "\n";
                 tensor = myimg::apply_curves(tensor, opts.curves);
+            }
+
+            // Vibrance (smart saturation)
+            if (opts.vibrance != 0.0f) {
+                std::cout << "Applying vibrance: " << opts.vibrance << "\n";
+                tensor = myimg::adjust_vibrance(tensor, opts.vibrance);
+            }
+
+            // Clarity (mid-frequency detail enhancement)
+            if (opts.clarity > 0.0f) {
+                std::cout << "Applying clarity: " << opts.clarity << "\n";
+                tensor = myimg::enhance_clarity(tensor, opts.clarity);
             }
             
             // 滤镜预设

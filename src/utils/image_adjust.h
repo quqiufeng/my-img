@@ -28,6 +28,14 @@ torch::Tensor adjust_shadows(const torch::Tensor& image, float shadows);
 // Auto enhance (one-click fix)
 torch::Tensor auto_enhance(const torch::Tensor& image);
 
+// Vibrance: smart saturation that protects skin tones
+// strength: -1.0 to 1.0
+torch::Tensor adjust_vibrance(const torch::Tensor& image, float strength);
+
+// Clarity/Texture enhancement: boost mid-frequency details
+// strength: 0.0-1.0
+torch::Tensor enhance_clarity(const torch::Tensor& image, float strength);
+
 // USM Sharpening
 // amount: 0.0-3.0 (strength)
 // radius: 1-5 (blur radius in pixels)

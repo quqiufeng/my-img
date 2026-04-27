@@ -258,13 +258,13 @@
 
 #### Task 10.5.3: 对比度与色彩
 - [x] 对比度调整
-- [ ] 清晰度/纹理增强（中频细节）
-- [ ] 自然饱和度（Vibrance，智能保护肤色）
+- [x] 清晰度/纹理增强（中频细节）
+- [x] 自然饱和度（Vibrance，智能保护肤色）
 - [x] 饱和度（Saturation，全局调整）
 - [x] 去雾/除霾（暗通道先验算法）
 - [x] CLI 参数：`--contrast FLOAT`
-- [ ] CLI 参数：`--clarity +20`
-- [ ] CLI 参数：`--vibrance +15`
+- [x] CLI 参数：`--clarity FLOAT`（0.0-1.0）
+- [x] CLI 参数：`--vibrance FLOAT`（-1.0-1.0）
 - [x] CLI 参数：`--saturation FLOAT`
 - [x] CLI 参数：`--dehaze FLOAT`（0.0-1.0）
 - **优先级**: 🛒 P1（电商刚需）
