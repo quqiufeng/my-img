@@ -142,6 +142,7 @@ set(MYIMG_SOURCES
     src/utils/image_adjust.cpp
     src/utils/png_metadata.cpp
     src/utils/lut_loader.cpp
+    src/utils/dehaze.cpp
     src/utils/stb_impl.c
 )
 
@@ -167,11 +168,27 @@ target_include_directories(myimg-cli PRIVATE
 # 查找 zlib
 find_package(ZLIB REQUIRED)
 
+# 查找 libjpeg
+find_library(JPEG_LIBRARY jpeg PATHS /usr/lib/x86_64-linux-gnu)
+if(NOT JPEG_LIBRARY)
+    message(WARNING "libjpeg not found, JPEG output will not be available")
+endif()
+
+# 查找 libwebp
+find_library(WEBP_LIBRARY webp PATHS /usr/lib/x86_64-linux-gnu)
+find_library(WEBPMUX_LIBRARY webpmux PATHS /usr/lib/x86_64-linux-gnu)
+if(NOT WEBP_LIBRARY)
+    message(WARNING "libwebp not found, WebP output will not be available")
+endif()
+
 # 链接库
     target_link_libraries(myimg-cli PRIVATE
         ${TORCH_LIBRARIES}
         nlohmann_json::nlohmann_json
         ZLIB::ZLIB
+        ${JPEG_LIBRARY}
+        ${WEBP_LIBRARY}
+        ${WEBPMUX_LIBRARY}
         ${SDCPP_LINK_START}
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}

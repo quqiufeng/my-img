@@ -217,7 +217,7 @@
   - CLI 参数：`--crop-ratio width:height`（按比例裁剪，如 16:9, 4:3, 1:1）
 - [x] 图像翻转（水平/垂直）
 - [x] 图像旋转（90°/180°/270°）
-- [x] 图像格式转换（PNG/BMP/TGA，自动检测扩展名）
+- [x] 图像格式转换（PNG/BMP/TGA/JPG/WEBP，自动检测扩展名）
 - **优先级**: P2
 - **难度**: 低
 - **用途**: 
@@ -261,12 +261,12 @@
 - [ ] 清晰度/纹理增强（中频细节）
 - [ ] 自然饱和度（Vibrance，智能保护肤色）
 - [x] 饱和度（Saturation，全局调整）
-- [ ] 去雾/除霾
+- [x] 去雾/除霾（暗通道先验算法）
 - [x] CLI 参数：`--contrast FLOAT`
 - [ ] CLI 参数：`--clarity +20`
 - [ ] CLI 参数：`--vibrance +15`
 - [x] CLI 参数：`--saturation FLOAT`
-- [ ] CLI 参数：`--dehaze +30`
+- [x] CLI 参数：`--dehaze FLOAT`（0.0-1.0）
 - **优先级**: 🛒 P1（电商刚需）
 - **难度**: 低
 

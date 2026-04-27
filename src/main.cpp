@@ -11,6 +11,7 @@
 #include "utils/image_adjust.h"
 #include "utils/png_metadata.h"
 #include "utils/lut_loader.h"
+#include "utils/dehaze.h"
 
 namespace fs = std::filesystem;
 
@@ -89,6 +90,9 @@ struct CliOptions {
     float whiten_strength = 0.0f;    // 0.0-1.0
     float skin_smooth_strength = 0.0f; // 0.0-1.0
     
+    // 图像修复
+    float dehaze_strength = 0.0f;  // 0.0-1.0
+    
     // 锐化与降噪
     float sharpen_amount = 0.0f;   // 0.0-3.0
     int sharpen_radius = 1;        // 1-5
@@ -111,6 +115,9 @@ struct CliOptions {
     bool flip_h = false;
     bool flip_v = false;
     int rotate = 0;           // 90, 180, 270
+    
+    // Output quality
+    int jpeg_quality = 95;  // JPEG quality (1-100)
     
     // LUT / Color grading
     std::string lut_path;  // 3D LUT file (.cube)
@@ -181,6 +188,7 @@ static void print_usage(const char* argv0) {
     std::cout << "  --embd-dir PATH           Embeddings directory (Textual Inversion)\n";
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
+    std::cout << "  --quality INT             JPEG quality 1-100 (default: 95)\n";
     std::cout << "\nPhoto Adjustment Options:\n";
     std::cout << "  --temperature FLOAT       Color temperature -1.0(cold) to 1.0(warm)\n";
     std::cout << "  --brightness FLOAT        Brightness -1.0 to 1.0\n";
@@ -203,6 +211,8 @@ static void print_usage(const char* argv0) {
     std::cout << "                            cool, dramatic, japanese, film, cyberpunk, cinematic\n";
     std::cout << "\nColor Grading:\n";
     std::cout << "  --lut PATH                Load 3D LUT file (.cube format)\n";
+    std::cout << "\nImage Restoration:\n";
+    std::cout << "  --dehaze FLOAT            Dehaze strength 0.0-1.0 (default: 0)\n";
     std::cout << "\nImage Interrogation:\n";
     std::cout << "  --interrogate PATH        Image path for caption/description\n";
     std::cout << "                            (requires JoyCaption model - placeholder)\n";
@@ -333,6 +343,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "-o" || arg == "--output") {
             if (++i >= argc) { std::cerr << "Missing value for -o/--output\n"; return false; }
             opts.output = argv[i];
+        } else if (arg == "--quality") {
+            if (++i >= argc) { std::cerr << "Missing value for --quality\n"; return false; }
+            opts.jpeg_quality = std::stoi(argv[i]);
         } else if (arg == "--threads") {
             if (++i >= argc) { std::cerr << "Missing value for --threads\n"; return false; }
             opts.threads = std::stoi(argv[i]);
@@ -380,6 +393,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--skin-smooth") {
             if (++i >= argc) { std::cerr << "Missing value for --skin-smooth\n"; return false; }
             opts.skin_smooth_strength = std::stof(argv[i]);
+        } else if (arg == "--dehaze") {
+            if (++i >= argc) { std::cerr << "Missing value for --dehaze\n"; return false; }
+            opts.dehaze_strength = std::stof(argv[i]);
         } else if (arg == "--sharpen") {
             if (++i >= argc) { std::cerr << "Missing value for --sharpen\n"; return false; }
             opts.sharpen_amount = std::stof(argv[i]);
@@ -783,7 +799,8 @@ int main(int argc, char** argv) {
                 opts.vignette_strength > 0.0f ||
                 !opts.radial_filter.empty() ||
                 !opts.graduated_filter.empty() ||
-                !opts.lut_path.empty()) {
+                !opts.lut_path.empty() ||
+                opts.dehaze_strength > 0.0f) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -855,6 +872,11 @@ int main(int argc, char** argv) {
                     }
                 }
                 
+                // 去雾
+                if (opts.dehaze_strength > 0.0f) {
+                    tensor = myimg::dehaze(tensor, opts.dehaze_strength);
+                }
+                
                 // Portrait retouching
                 if (opts.whiten_strength > 0.0f) {
                     tensor = myimg::whiten(tensor, opts.whiten_strength);
@@ -910,6 +932,9 @@ int main(int argc, char** argv) {
     std::cout << "Seed: " << opts.seed << "\n";
     std::cout << "Output: " << opts.output << "\n";
     std::cout << "========================================\n\n";
+    
+    // 设置 JPEG 质量
+    myimg::set_jpeg_quality(opts.jpeg_quality);
     
     // 初始化适配器
     myimg::SDCPPAdapter adapter;
@@ -972,7 +997,8 @@ int main(int argc, char** argv) {
                                opts.vignette_strength > 0.0f ||
                                !opts.radial_filter.empty() ||
                                !opts.graduated_filter.empty() ||
-                               !opts.lut_path.empty();
+                               !opts.lut_path.empty() ||
+                               opts.dehaze_strength > 0.0f;
         if (has_adjustments) {
             std::cout << "Applying photo adjustments...\n";
             myimg::ImageData img_data;
@@ -1064,6 +1090,12 @@ int main(int argc, char** argv) {
                 if (lut.load_from_file(opts.lut_path)) {
                     tensor = lut.apply(tensor);
                 }
+            }
+            
+            // 去雾
+            if (opts.dehaze_strength > 0.0f) {
+                std::cout << "Applying dehaze...\n";
+                tensor = myimg::dehaze(tensor, opts.dehaze_strength);
             }
             
             // 人像修饰

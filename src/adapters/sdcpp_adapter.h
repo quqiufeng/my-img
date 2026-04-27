@@ -21,9 +21,13 @@ struct Image {
     bool empty() const { return data.empty(); }
     size_t size() const { return width * height * channels; }
 
-    // 保存图像到文件 (PNG 格式)
+    // 保存图像到文件 (支持 PNG/BMP/TGA/JPG，自动检测扩展名)
     bool save_to_file(const std::string& path) const;
 };
+
+// JPEG 质量设置 (1-100, 默认 95)
+void set_jpeg_quality(int quality);
+int get_jpeg_quality();
 
 // 采样方法
 enum class SampleMethod {

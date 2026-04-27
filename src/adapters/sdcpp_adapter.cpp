@@ -7,8 +7,15 @@
 #include <filesystem>
 
 #include <stb_image_write.h>
+#include <jpeglib.h>
+#include <setjmp.h>
+#include <webp/encode.h>
+#include <webp/mux.h>
 
 namespace fs = std::filesystem;
+
+// JPEG quality (0-100, default 95)
+static int g_jpeg_quality = 95;
 
 // 日志回调函数
 static void sd_log_callback(enum sd_log_level_t level, const char* text, void* data) {
@@ -24,6 +31,17 @@ static void sd_log_callback(enum sd_log_level_t level, const char* text, void* d
 }
 
 namespace myimg {
+
+// ============================================================
+// JPEG 质量设置
+// ============================================================
+void set_jpeg_quality(int quality) {
+    g_jpeg_quality = std::max(1, std::min(100, quality));
+}
+
+int get_jpeg_quality() {
+    return g_jpeg_quality;
+}
 
 // ============================================================
 // 辅助函数：枚举转换
@@ -424,6 +442,94 @@ bool Image::save_to_file(const std::string& path) const {
         success = stbi_write_bmp(path.c_str(), width, height, channels, data.data());
     } else if (ext == "tga") {
         success = stbi_write_tga(path.c_str(), width, height, channels, data.data());
+    } else if (ext == "webp") {
+        // Use libwebp for WebP output
+        WebPConfig config;
+        WebPPicture picture;
+        if (!WebPConfigInit(&config) || !WebPPictureInit(&picture)) {
+            std::cerr << "[Image] Failed to init WebP" << std::endl;
+            return false;
+        }
+        config.quality = g_jpeg_quality; // Reuse quality setting (0-100)
+        picture.width = width;
+        picture.height = height;
+        picture.use_argb = 1;
+        if (!WebPPictureAlloc(&picture)) {
+            std::cerr << "[Image] Failed to alloc WebP picture" << std::endl;
+            return false;
+        }
+        
+        // Import RGB/RGBA data
+        if (channels == 3) {
+            WebPPictureImportRGB(&picture, data.data(), width * channels);
+        } else if (channels == 4) {
+            WebPPictureImportRGBA(&picture, data.data(), width * channels);
+        } else {
+            // Convert grayscale to RGB
+            std::vector<uint8_t> rgb_data(width * height * 3);
+            for (int i = 0; i < width * height; ++i) {
+                rgb_data[i * 3] = data[i];
+                rgb_data[i * 3 + 1] = data[i];
+                rgb_data[i * 3 + 2] = data[i];
+            }
+            WebPPictureImportRGB(&picture, rgb_data.data(), width * 3);
+        }
+        
+        WebPMemoryWriter writer;
+        WebPMemoryWriterInit(&writer);
+        picture.writer = WebPMemoryWrite;
+        picture.custom_ptr = &writer;
+        
+        if (!WebPEncode(&config, &picture)) {
+            std::cerr << "[Image] Failed to encode WebP" << std::endl;
+            WebPMemoryWriterClear(&writer);
+            WebPPictureFree(&picture);
+            return false;
+        }
+        
+        FILE* fp = fopen(path.c_str(), "wb");
+        if (fp) {
+            fwrite(writer.mem, 1, writer.size, fp);
+            fclose(fp);
+            success = 1;
+        }
+        
+        WebPMemoryWriterClear(&writer);
+        WebPPictureFree(&picture);
+    } else if (ext == "jpg" || ext == "jpeg") {
+        // Use libjpeg for JPEG output
+        struct jpeg_compress_struct cinfo;
+        struct jpeg_error_mgr jerr;
+        FILE* outfile = fopen(path.c_str(), "wb");
+        if (!outfile) {
+            std::cerr << "[Image] Failed to open file for writing: " << path << std::endl;
+            return false;
+        }
+        
+        cinfo.err = jpeg_std_error(&jerr);
+        jpeg_create_compress(&cinfo);
+        jpeg_stdio_dest(&cinfo, outfile);
+        
+        cinfo.image_width = width;
+        cinfo.image_height = height;
+        cinfo.input_components = channels;
+        cinfo.in_color_space = (channels == 3) ? JCS_RGB : JCS_GRAYSCALE;
+        
+        jpeg_set_defaults(&cinfo);
+        jpeg_set_quality(&cinfo, g_jpeg_quality, TRUE);
+        jpeg_start_compress(&cinfo, TRUE);
+        
+        int row_stride = width * channels;
+        const uint8_t* image_data = data.data();
+        while (cinfo.next_scanline < cinfo.image_height) {
+            JSAMPROW row_pointer = (JSAMPROW)&image_data[cinfo.next_scanline * row_stride];
+            jpeg_write_scanlines(&cinfo, &row_pointer, 1);
+        }
+        
+        jpeg_finish_compress(&cinfo);
+        fclose(outfile);
+        jpeg_destroy_compress(&cinfo);
+        success = 1;
     } else {
         success = stbi_write_png(path.c_str(), width, height, channels, data.data(), width * channels);
     }
