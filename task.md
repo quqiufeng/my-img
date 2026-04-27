@@ -381,12 +381,14 @@
 
 ### Phase 12: 模型管理
 
-#### Task 12.1: Checkpoint 加载（大模型）
-- [ ] 加载完整 .ckpt/.safetensors 模型
-- [ ] 自动检测模型类型（SD1.5/SDXL/Flux/SD3）
-- [ ] CLI 参数：`--model PATH`
+#### Task 12.1: Checkpoint 加载（大模型） ✅
+- [x] 加载完整 .ckpt/.safetensors 模型
+- [x] CLI 参数：`--model PATH`（替代 --diffusion-model）
+- [x] 支持单独使用完整模型（无需 --vae --llm）
+- [x] 与 --diffusion-model 模式互斥
 - **优先级**: P1
-- **难度**: 中
+- **难度**: 低（sd.cpp 原生支持）
+- **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 12.2: Model Merging（模型融合）
 - [ ] 两个模型权重插值合并
@@ -418,13 +420,15 @@
 - **优先级**: P2
 - **难度**: 高
 
-#### Task 13.2: Batch 生成优化
-- [ ] 多图连续生成
-- [ ] 共享模型加载（不重复加载）
-- [ ] 种子自动递增
-- [ ] CLI 参数：`--batch-count INT`
+#### Task 13.2: Batch 生成优化 ✅
+- [x] 多图连续生成
+- [x] 共享模型加载（不重复加载）
+- [x] 种子自动递增
+- [x] CLI 参数：`--batch-count INT`
+- [x] 输出文件名序列化（output_001.png, output_002.png...）
 - **优先级**: P1
 - **难度**: 低
+- **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 13.3: Prompt 调度（Schedule Prompt）
 - [ ] 按步数切换提示词

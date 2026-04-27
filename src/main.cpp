@@ -11,7 +11,8 @@ namespace fs = std::filesystem;
 
 struct CliOptions {
     // 模型路径
-    std::string diffusion_model;
+    std::string model;                    // 完整模型 (ckpt/safetensors)
+    std::string diffusion_model;          // 独立扩散模型 (GGUF)
     std::string vae;
     std::string llm;
     std::string upscale_model;
@@ -65,6 +66,7 @@ static void print_usage(const char* argv0) {
     std::cout << "my-img - Pure C++ ComfyUI Implementation\n\n";
     std::cout << "Usage: " << argv0 << " [options]\n\n";
     std::cout << "Model Options:\n";
+    std::cout << "  -m, --model PATH          Full model path (ckpt/safetensors)\n";
     std::cout << "  --diffusion-model PATH    Diffusion model path (GGUF)\n";
     std::cout << "  --vae PATH                VAE model path\n";
     std::cout << "  --llm PATH                LLM / text encoder path\n";
@@ -79,6 +81,7 @@ static void print_usage(const char* argv0) {
     std::cout << "  --sampling-method NAME    Sampling method: euler, dpm++2m, etc. (default: euler)\n";
     std::cout << "  --scheduler NAME          Scheduler: discrete, karras, etc. (default: discrete)\n";
     std::cout << "  -s, --seed INT            Seed, -1 for random (default: -1)\n";
+    std::cout << "  --batch-count INT         Number of images to generate (default: 1)\n";
     std::cout << "\nimg2img Options:\n";
     std::cout << "  -i, --init-img PATH       Initial image for img2img (default: none)\n";
     std::cout << "  --strength FLOAT          Denoising strength 0.0-1.0 (default: 0.75)\n";
@@ -118,6 +121,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             std::cout << "my-img version: 0.1.0\n";
             std::cout << "sd.cpp version: " << myimg::SDCPPAdapter::get_version() << "\n";
             exit(0);
+        } else if (arg == "-m" || arg == "--model") {
+            if (++i >= argc) { std::cerr << "Missing value for -m/--model\n"; return false; }
+            opts.model = argv[i];
         } else if (arg == "--diffusion-model") {
             if (++i >= argc) { std::cerr << "Missing value for --diffusion-model\n"; return false; }
             opts.diffusion_model = argv[i];
@@ -157,6 +163,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "-s" || arg == "--seed") {
             if (++i >= argc) { std::cerr << "Missing value for -s/--seed\n"; return false; }
             opts.seed = std::stoll(argv[i]);
+        } else if (arg == "--batch-count") {
+            if (++i >= argc) { std::cerr << "Missing value for --batch-count\n"; return false; }
+            opts.batch_count = std::stoi(argv[i]);
         } else if (arg == "-i" || arg == "--init-img") {
             if (++i >= argc) { std::cerr << "Missing value for -i/--init-img\n"; return false; }
             opts.init_image = argv[i];
@@ -262,17 +271,20 @@ int main(int argc, char** argv) {
     }
     
     // 检查必要参数
-    if (opts.diffusion_model.empty()) {
-        std::cerr << "Error: --diffusion-model is required\n";
+    if (opts.model.empty() && opts.diffusion_model.empty()) {
+        std::cerr << "Error: --model or --diffusion-model is required\n";
         return 1;
     }
-    if (opts.vae.empty()) {
-        std::cerr << "Error: --vae is required\n";
-        return 1;
-    }
-    if (opts.llm.empty()) {
-        std::cerr << "Error: --llm is required\n";
-        return 1;
+    // 如果使用 diffusion-model 模式，需要 vae 和 llm
+    if (!opts.diffusion_model.empty()) {
+        if (opts.vae.empty()) {
+            std::cerr << "Error: --vae is required when using --diffusion-model\n";
+            return 1;
+        }
+        if (opts.llm.empty()) {
+            std::cerr << "Error: --llm is required when using --diffusion-model\n";
+            return 1;
+        }
     }
     
     // 随机种子
@@ -282,6 +294,9 @@ int main(int argc, char** argv) {
     
     // 构建生成参数
     myimg::GenerationParams params;
+    if (!opts.model.empty()) {
+        params.model_path = opts.model;
+    }
     params.diffusion_model_path = opts.diffusion_model;
     params.vae_path = opts.vae;
     params.llm_path = opts.llm;
@@ -374,40 +389,74 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // 生成图像
-    myimg::Image image = adapter.generate_single(params);
-    if (image.empty()) {
-        std::cerr << "Generation failed\n";
-        return 1;
+    // 批量生成
+    fs::path out_path = opts.output;
+    std::string output_dir = out_path.parent_path().string();
+    std::string output_name = out_path.stem().string();
+    std::string output_ext = out_path.extension().string();
+    if (output_ext.empty()) output_ext = ".png";
+    
+    if (!output_dir.empty()) {
+        fs::create_directories(output_dir);
     }
     
-    // ESRGAN 放大（如果指定了模型）
-    if (!opts.upscale_model.empty()) {
-        std::cout << "\nApplying ESRGAN upscaling...\n";
-        image = myimg::SDCPPAdapter::upscale_with_esrgan(image, opts.upscale_model, opts.upscale_repeats, opts.upscale_tile_size);
+    std::cout << "\nGenerating " << opts.batch_count << " image(s)...\n\n";
+    
+    for (int i = 0; i < opts.batch_count; ++i) {
+        if (opts.batch_count > 1) {
+            std::cout << "--- Image " << (i + 1) << "/" << opts.batch_count << " ---\n";
+        }
+        
+        // 递增种子
+        if (i > 0) {
+            params.seed = opts.seed + i;
+            std::cout << "Seed: " << params.seed << "\n";
+        }
+        
+        // 生成图像
+        myimg::Image image = adapter.generate_single(params);
         if (image.empty()) {
-            std::cerr << "Upscale failed\n";
-            return 1;
+            std::cerr << "Generation failed for image " << (i + 1) << "\n";
+            continue;
+        }
+        
+        // ESRGAN 放大
+        if (!opts.upscale_model.empty()) {
+            std::cout << "Applying ESRGAN upscaling...\n";
+            image = myimg::SDCPPAdapter::upscale_with_esrgan(image, opts.upscale_model, opts.upscale_repeats, opts.upscale_tile_size);
+            if (image.empty()) {
+                std::cerr << "Upscale failed for image " << (i + 1) << "\n";
+                continue;
+            }
+        }
+        
+        // 构建输出文件名
+        std::string output_file;
+        if (opts.batch_count > 1) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "%s_%03d%s", output_name.c_str(), i + 1, output_ext.c_str());
+            output_file = (output_dir.empty() ? "" : output_dir + "/") + buf;
+        } else {
+            output_file = opts.output;
+        }
+        
+        // 保存图像
+        if (!image.save_to_file(output_file)) {
+            std::cerr << "Failed to save image " << (i + 1) << "\n";
+            continue;
+        }
+        
+        if (opts.batch_count > 1) {
+            std::cout << "Saved: " << output_file << "\n\n";
         }
     }
     
-    // 创建输出目录
-    fs::path out_path = opts.output;
-    if (!out_path.parent_path().empty()) {
-        fs::create_directories(out_path.parent_path());
+    std::cout << "========================================\n";
+    std::cout << "Generation complete!\n";
+    if (opts.batch_count > 1) {
+        std::cout << "Generated " << opts.batch_count << " images\n";
     }
-    
-    // 保存图像
-    if (!image.save_to_file(opts.output)) {
-        std::cerr << "Failed to save image\n";
-        return 1;
-    }
-    
-    std::cout << "\n========================================\n";
-    std::cout << "Generation successful!\n";
-    std::cout << "File: " << opts.output << "\n";
-    std::cout << "Size: " << image.width << "x" << image.height << "\n";
-    std::cout << "Seed: " << opts.seed << "\n";
+    std::cout << "Seed start: " << opts.seed << "\n";
     std::cout << "========================================\n";
     
     return 0;
