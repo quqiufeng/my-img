@@ -63,11 +63,14 @@
 - **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 6.4: Outpainting（图像外扩）
-- [ ] 扩展现有图像边界
-- [ ] 保持原图内容，生成新区域
-- [ ] 支持指定外扩方向（上/下/左/右）
+- [x] 扩展现有图像边界
+- [x] 保持原图内容，生成新区域
+- [x] 支持指定外扩方向（上/下/左/右）
+- [x] CLI 参数：`--outpaint N`（所有方向）
+- [x] CLI 参数：`--outpaint-top N`, `--outpaint-bottom N`, `--outpaint-left N`, `--outpaint-right N`
 - **优先级**: P1
 - **难度**: 中
+- **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 6.5: Textual Inversion / Embeddings
 - [ ] 加载 .pt/.safetensors embedding 文件

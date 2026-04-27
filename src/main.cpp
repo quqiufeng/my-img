@@ -84,6 +84,12 @@ struct CliOptions {
     float denoise_strength = 0.0f;  // 0.0-1.0
     bool smart_denoise_flag = false; // 智能降噪
     
+    // Outpainting
+    int outpaint_top = 0;
+    int outpaint_bottom = 0;
+    int outpaint_left = 0;
+    int outpaint_right = 0;
+    
     // 系统
     int threads = -1;
     bool verbose = false;
@@ -153,6 +159,12 @@ static void print_usage(const char* argv0) {
     std::cout << "  --sharpen-threshold FLOAT Sharpen threshold 0-255 (default: 0)\n";
     std::cout << "  --denoise FLOAT           Denoise strength 0.0-1.0 (default: 0)\n";
     std::cout << "  --smart-denoise           Smart denoise (preserve edges)\n";
+    std::cout << "\nOutpainting Options:\n";
+    std::cout << "  --outpaint-top INT        Expand canvas top by N pixels\n";
+    std::cout << "  --outpaint-bottom INT     Expand canvas bottom by N pixels\n";
+    std::cout << "  --outpaint-left INT       Expand canvas left by N pixels\n";
+    std::cout << "  --outpaint-right INT      Expand canvas right by N pixels\n";
+    std::cout << "  --outpaint INT            Expand all directions by N pixels\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
@@ -319,6 +331,22 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.denoise_strength = std::stof(argv[i]);
         } else if (arg == "--smart-denoise") {
             opts.smart_denoise_flag = true;
+        } else if (arg == "--outpaint-top") {
+            if (++i >= argc) { std::cerr << "Missing value for --outpaint-top\n"; return false; }
+            opts.outpaint_top = std::stoi(argv[i]);
+        } else if (arg == "--outpaint-bottom") {
+            if (++i >= argc) { std::cerr << "Missing value for --outpaint-bottom\n"; return false; }
+            opts.outpaint_bottom = std::stoi(argv[i]);
+        } else if (arg == "--outpaint-left") {
+            if (++i >= argc) { std::cerr << "Missing value for --outpaint-left\n"; return false; }
+            opts.outpaint_left = std::stoi(argv[i]);
+        } else if (arg == "--outpaint-right") {
+            if (++i >= argc) { std::cerr << "Missing value for --outpaint-right\n"; return false; }
+            opts.outpaint_right = std::stoi(argv[i]);
+        } else if (arg == "--outpaint") {
+            if (++i >= argc) { std::cerr << "Missing value for --outpaint\n"; return false; }
+            int val = std::stoi(argv[i]);
+            opts.outpaint_top = opts.outpaint_bottom = opts.outpaint_left = opts.outpaint_right = val;
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
@@ -443,8 +471,50 @@ int main(int argc, char** argv) {
         params.hires_sample_steps = opts.hires_steps;
     }
     
+    // Outpainting
+    bool has_outpaint = opts.outpaint_top > 0 || opts.outpaint_bottom > 0 ||
+                        opts.outpaint_left > 0 || opts.outpaint_right > 0;
+    if (has_outpaint) {
+        if (opts.init_image.empty()) {
+            std::cerr << "Error: --init-img is required for outpainting\n";
+            return 1;
+        }
+        std::cout << "[INFO] Outpainting mode: top=" << opts.outpaint_top
+                  << " bottom=" << opts.outpaint_bottom
+                  << " left=" << opts.outpaint_left
+                  << " right=" << opts.outpaint_right << "\n";
+        
+        auto orig = myimg::load_image_from_file(opts.init_image);
+        if (orig.empty()) {
+            std::cerr << "Error: Failed to load image for outpainting: " << opts.init_image << "\n";
+            return 1;
+        }
+        
+        auto [canvas, mask] = myimg::create_outpaint_canvas(
+            orig, opts.outpaint_top, opts.outpaint_bottom, opts.outpaint_left, opts.outpaint_right
+        );
+        
+        params.init_image.width = canvas.width;
+        params.init_image.height = canvas.height;
+        params.init_image.channels = canvas.channels;
+        params.init_image.data = std::move(canvas.data);
+        
+        params.mask_image.width = mask.width;
+        params.mask_image.height = mask.height;
+        params.mask_image.channels = mask.channels;
+        params.mask_image.data = std::move(mask.data);
+        
+        // Update target size to expanded canvas
+        params.width = params.init_image.width;
+        params.height = params.init_image.height;
+        
+        // Outpainting usually needs higher strength
+        params.strength = 1.0f;
+        std::cout << "[INFO] Outpaint canvas: " << params.width << "x" << params.height << "\n";
+    }
+    
     // img2img
-    if (!opts.init_image.empty()) {
+    if (!opts.init_image.empty() && !has_outpaint) {
         std::cout << "[INFO] Loading init image: " << opts.init_image << "\n";
         auto img_data = myimg::load_image_from_file(opts.init_image);
         if (img_data.empty()) {
@@ -460,7 +530,7 @@ int main(int argc, char** argv) {
     }
     
     // Inpainting
-    if (!opts.mask_image.empty()) {
+    if (!opts.mask_image.empty() && !has_outpaint) {
         std::cout << "[INFO] Loading mask: " << opts.mask_image << "\n";
         auto mask_data = myimg::load_image_from_file(opts.mask_image);
         if (mask_data.empty()) {

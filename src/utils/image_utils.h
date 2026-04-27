@@ -29,4 +29,12 @@ ImageData load_image_from_file(const std::string& path);
 torch::Tensor image_data_to_tensor(const ImageData& img);
 ImageData tensor_to_image_data(const torch::Tensor& tensor);
 
+// Outpainting: expand canvas and create mask
+// top/bottom/left/right: pixels to expand in each direction
+// Returns: {expanded_image, mask} where mask white = generate, black = keep
+std::pair<ImageData, ImageData> create_outpaint_canvas(
+    const ImageData& original,
+    int top, int bottom, int left, int right
+);
+
 } // namespace myimg

@@ -61,4 +61,47 @@ ImageData tensor_to_image_data(const torch::Tensor& tensor) {
     return img;
 }
 
+std::pair<ImageData, ImageData> create_outpaint_canvas(
+    const ImageData& original,
+    int top, int bottom, int left, int right
+) {
+    int new_width = original.width + left + right;
+    int new_height = original.height + top + bottom;
+    
+    ImageData canvas;
+    canvas.width = new_width;
+    canvas.height = new_height;
+    canvas.channels = original.channels;
+    canvas.data.assign(new_width * new_height * original.channels, 0);
+    
+    ImageData mask;
+    mask.width = new_width;
+    mask.height = new_height;
+    mask.channels = 3;
+    mask.data.assign(new_width * new_height * 3, 255); // white = generate
+    
+    // Copy original image to canvas
+    for (int y = 0; y < original.height; ++y) {
+        for (int x = 0; x < original.width; ++x) {
+            int src_idx = (y * original.width + x) * original.channels;
+            int dst_idx = ((y + top) * new_width + (x + left)) * original.channels;
+            for (int c = 0; c < original.channels; ++c) {
+                canvas.data[dst_idx + c] = original.data[src_idx + c];
+            }
+        }
+    }
+    
+    // Mark original area as black in mask (keep)
+    for (int y = 0; y < original.height; ++y) {
+        for (int x = 0; x < original.width; ++x) {
+            int mask_idx = ((y + top) * new_width + (x + left)) * 3;
+            mask.data[mask_idx + 0] = 0;
+            mask.data[mask_idx + 1] = 0;
+            mask.data[mask_idx + 2] = 0;
+        }
+    }
+    
+    return {std::move(canvas), std::move(mask)};
+}
+
 } // namespace myimg
