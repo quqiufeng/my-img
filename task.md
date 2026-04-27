@@ -327,13 +327,14 @@
   - 电商：去除边缘暗角，使产品图均匀
 
 #### Task 10.5.8: 局部调整
-- [ ] 径向滤镜（Radial Filter）
-- [ ] 渐变滤镜（Graduated Filter）
-- [ ] 画笔调整（Brush Adjustments）
-- [ ] CLI 参数：`--radial-filter x,y,radius,exposure:+1.0`
-- [ ] CLI 参数：`--graduated-filter angle,position,exposure:-0.5`
+- [x] 径向滤镜（Radial Filter）- 圆形区域调整曝光/对比度/饱和度
+- [x] 渐变滤镜（Graduated Filter）- 线性渐变调整
+- [ ] 画笔调整（Brush Adjustments）- 需要 UI 支持
+- [x] CLI 参数：`--radial-filter cx,cy,radius,exp,cont,sat`（如 `0.5,0.5,0.3,0.5,0,0`）
+- [x] CLI 参数：`--graduated-filter angle,pos,width,exp,cont,sat`（如 `0,0.5,0.2,0.3,0,0`）
 - **优先级**: P2
 - **难度**: 中
+- **状态**: ✅ 径向/渐变滤镜已完成（2026-04-27）
 
 #### Task 10.5.9: 肤色优化（电商/人像刚需）
 - [x] 智能磨皮（皮肤区域高斯模糊 + 边缘保留）

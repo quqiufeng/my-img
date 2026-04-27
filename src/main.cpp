@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <random>
 #include <filesystem>
+#include <sstream>
+#include <cmath>
 #include "adapters/sdcpp_adapter.h"
 #include "utils/image_utils.h"
 #include "utils/image_adjust.h"
@@ -114,6 +116,10 @@ struct CliOptions {
     // Image interrogation / metadata
     std::string interrogate_image;   // Image to interrogate (JoyCaption placeholder)
     std::string read_metadata_image; // Image to read PNG metadata from
+    
+    // Local adjustments
+    std::string radial_filter;      // cx,cy,radius,exp,cont,sat
+    std::string graduated_filter;   // angle,pos,width,exp,cont,sat
     
     // 系统
     int threads = -1;
@@ -447,6 +453,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--read-metadata") {
             if (++i >= argc) { std::cerr << "Missing value for --read-metadata\n"; return false; }
             opts.read_metadata_image = argv[i];
+        } else if (arg == "--radial-filter") {
+            if (++i >= argc) { std::cerr << "Missing value for --radial-filter\n"; return false; }
+            opts.radial_filter = argv[i];
+        } else if (arg == "--graduated-filter") {
+            if (++i >= argc) { std::cerr << "Missing value for --graduated-filter\n"; return false; }
+            opts.graduated_filter = argv[i];
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
@@ -775,7 +787,9 @@ int main(int argc, char** argv) {
                 opts.smart_denoise_flag ||
                 opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
                 !opts.preset.empty() ||
-                opts.vignette_strength > 0.0f) {
+                opts.vignette_strength > 0.0f ||
+                !opts.radial_filter.empty() ||
+                !opts.graduated_filter.empty()) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -814,6 +828,24 @@ int main(int argc, char** argv) {
                 // Vignette
                 if (opts.vignette_strength > 0.0f) {
                     tensor = myimg::vignette(tensor, opts.vignette_strength, opts.vignette_radius);
+                }
+                
+                // 径向滤镜
+                if (!opts.radial_filter.empty()) {
+                    std::stringstream ss(opts.radial_filter);
+                    float cx, cy, radius, exp_val, cont_val, sat_val;
+                    char comma;
+                    ss >> cx >> comma >> cy >> comma >> radius >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
+                    tensor = myimg::radial_filter(tensor, cx, cy, radius, exp_val, cont_val, sat_val);
+                }
+                
+                // 渐变滤镜
+                if (!opts.graduated_filter.empty()) {
+                    std::stringstream ss(opts.graduated_filter);
+                    float angle, pos, width, exp_val, cont_val, sat_val;
+                    char comma;
+                    ss >> angle >> comma >> pos >> comma >> width >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
+                    tensor = myimg::graduated_filter(tensor, angle, pos, width, exp_val, cont_val, sat_val);
                 }
                 
                 // Portrait retouching
@@ -930,7 +962,9 @@ int main(int argc, char** argv) {
                                opts.smart_denoise_flag ||
                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
                                !opts.preset.empty() ||
-                               opts.vignette_strength > 0.0f;
+                               opts.vignette_strength > 0.0f ||
+                               !opts.radial_filter.empty() ||
+                               !opts.graduated_filter.empty();
         if (has_adjustments) {
             std::cout << "Applying photo adjustments...\n";
             myimg::ImageData img_data;
@@ -985,6 +1019,28 @@ int main(int argc, char** argv) {
             if (opts.vignette_strength > 0.0f) {
                 std::cout << "Applying vignette...\n";
                 tensor = myimg::vignette(tensor, opts.vignette_strength, opts.vignette_radius);
+            }
+            
+            // 径向滤镜
+            if (!opts.radial_filter.empty()) {
+                std::cout << "Applying radial filter: " << opts.radial_filter << "\n";
+                // 格式: cx,cy,radius,exposure,contrast,saturation
+                std::stringstream ss(opts.radial_filter);
+                float cx, cy, radius, exp_val, cont_val, sat_val;
+                char comma;
+                ss >> cx >> comma >> cy >> comma >> radius >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
+                tensor = myimg::radial_filter(tensor, cx, cy, radius, exp_val, cont_val, sat_val);
+            }
+            
+            // 渐变滤镜
+            if (!opts.graduated_filter.empty()) {
+                std::cout << "Applying graduated filter: " << opts.graduated_filter << "\n";
+                // 格式: angle,position,width,exposure,contrast,saturation
+                std::stringstream ss(opts.graduated_filter);
+                float angle, pos, width, exp_val, cont_val, sat_val;
+                char comma;
+                ss >> angle >> comma >> pos >> comma >> width >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
+                tensor = myimg::graduated_filter(tensor, angle, pos, width, exp_val, cont_val, sat_val);
             }
             
             // 人像修饰
