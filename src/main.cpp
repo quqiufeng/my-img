@@ -98,6 +98,10 @@ struct CliOptions {
     bool flip_v = false;
     int rotate = 0;           // 90, 180, 270
     
+    // Batch processing (post-processing only)
+    std::string batch_input_dir;
+    std::string batch_output_dir;
+    
     // 系统
     int threads = -1;
     bool verbose = false;
@@ -179,6 +183,9 @@ static void print_usage(const char* argv0) {
     std::cout << "  --flip-h                  Flip horizontally\n";
     std::cout << "  --flip-v                  Flip vertically\n";
     std::cout << "  --rotate DEG              Rotate by 90, 180, or 270 degrees\n";
+    std::cout << "\nBatch Processing Options:\n";
+    std::cout << "  --batch-input-dir PATH    Input directory for batch processing\n";
+    std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
@@ -379,6 +386,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--rotate") {
             if (++i >= argc) { std::cerr << "Missing value for --rotate\n"; return false; }
             opts.rotate = std::stoi(argv[i]);
+        } else if (arg == "--batch-input-dir") {
+            if (++i >= argc) { std::cerr << "Missing value for --batch-input-dir\n"; return false; }
+            opts.batch_input_dir = argv[i];
+        } else if (arg == "--batch-output-dir") {
+            if (++i >= argc) { std::cerr << "Missing value for --batch-output-dir\n"; return false; }
+            opts.batch_output_dir = argv[i];
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
@@ -592,6 +605,117 @@ int main(int argc, char** argv) {
             params.loras.push_back(lora);
             std::cout << "  - " << lora.path << " (weight: " << lora.multiplier << ")\n";
         }
+    }
+    
+    // Batch processing mode (post-processing only)
+    if (!opts.batch_input_dir.empty()) {
+        if (opts.batch_output_dir.empty()) {
+            std::cerr << "Error: --batch-output-dir is required when using --batch-input-dir\n";
+            return 1;
+        }
+        
+        std::cout << "========================================\n";
+        std::cout << "  my-img Batch Processing\n";
+        std::cout << "========================================\n";
+        std::cout << "Input: " << opts.batch_input_dir << "\n";
+        std::cout << "Output: " << opts.batch_output_dir << "\n";
+        std::cout << "========================================\n\n";
+        
+        fs::create_directories(opts.batch_output_dir);
+        
+        int processed = 0;
+        int failed = 0;
+        
+        for (const auto& entry : fs::directory_iterator(opts.batch_input_dir)) {
+            if (!entry.is_regular_file()) continue;
+            
+            std::string ext = entry.path().extension().string();
+            for (auto& c : ext) c = std::tolower(c);
+            if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".bmp" && ext != ".tga")
+                continue;
+            
+            std::string input_file = entry.path().string();
+            std::string output_file = opts.batch_output_dir + "/" + entry.path().filename().string();
+            
+            std::cout << "Processing: " << entry.path().filename().string() << "\n";
+            
+            auto img_data = myimg::load_image_from_file(input_file);
+            if (img_data.empty()) {
+                std::cerr << "  Failed to load\n";
+                failed++;
+                continue;
+            }
+            
+            // Apply transformations
+            if (opts.resize_width > 0 && opts.resize_height > 0) {
+                img_data = myimg::resize_image(img_data, opts.resize_width, opts.resize_height, opts.resize_mode);
+            }
+            if (opts.flip_h) {
+                img_data = myimg::flip_image(img_data, true);
+            }
+            if (opts.flip_v) {
+                img_data = myimg::flip_image(img_data, false);
+            }
+            if (opts.rotate != 0) {
+                img_data = myimg::rotate_image(img_data, opts.rotate);
+            }
+            
+            // Apply photo adjustments
+            if (opts.temperature != 0.0f || opts.brightness != 0.0f ||
+                opts.contrast != 0.0f || opts.saturation != 0.0f ||
+                opts.exposure != 0.0f || opts.highlights != 0.0f ||
+                opts.shadows != 0.0f || opts.auto_enhance ||
+                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
+                opts.smart_denoise_flag) {
+                
+                auto tensor = myimg::image_data_to_tensor(img_data);
+                
+                if (opts.auto_enhance) {
+                    tensor = myimg::auto_enhance(tensor);
+                } else {
+                    if (opts.temperature != 0.0f) tensor = myimg::adjust_temperature(tensor, opts.temperature);
+                    if (opts.brightness != 0.0f) tensor = myimg::adjust_brightness(tensor, opts.brightness);
+                    if (opts.contrast != 0.0f) tensor = myimg::adjust_contrast(tensor, opts.contrast);
+                    if (opts.saturation != 0.0f) tensor = myimg::adjust_saturation(tensor, opts.saturation);
+                    if (opts.exposure != 0.0f) tensor = myimg::adjust_exposure(tensor, opts.exposure);
+                    if (opts.highlights != 0.0f) tensor = myimg::adjust_highlights(tensor, opts.highlights);
+                    if (opts.shadows != 0.0f) tensor = myimg::adjust_shadows(tensor, opts.shadows);
+                }
+                
+                if (opts.denoise_strength > 0.0f) {
+                    tensor = myimg::denoise(tensor, opts.denoise_strength);
+                }
+                if (opts.smart_denoise_flag) {
+                    tensor = myimg::smart_denoise(tensor, 0.5f);
+                }
+                if (opts.sharpen_amount > 0.0f) {
+                    tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+                }
+                
+                img_data = myimg::tensor_to_image_data(tensor);
+            }
+            
+            myimg::Image image;
+            image.width = img_data.width;
+            image.height = img_data.height;
+            image.channels = img_data.channels;
+            image.data = std::move(img_data.data);
+            
+            if (!image.save_to_file(output_file)) {
+                std::cerr << "  Failed to save\n";
+                failed++;
+                continue;
+            }
+            
+            processed++;
+        }
+        
+        std::cout << "\n========================================\n";
+        std::cout << "Batch processing complete!\n";
+        std::cout << "Processed: " << processed << "\n";
+        if (failed > 0) std::cout << "Failed: " << failed << "\n";
+        std::cout << "========================================\n";
+        return 0;
     }
     
     std::cout << "========================================\n";

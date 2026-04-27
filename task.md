@@ -299,9 +299,9 @@
 - [x] 自动对比度优化
 - [x] 自动色彩增强
 - [x] AI 智能优化（一键让图片更好看）
-- [ ] 批量自动优化目录下所有图片
+- [x] 批量自动优化目录下所有图片
 - [x] CLI 参数：`--auto-enhance`
-- [ ] CLI 参数：`--auto-enhance-dir /path/to/images`
+- [x] CLI 参数：`--batch-input-dir /path/to/images --batch-output-dir /path/out`
 - **优先级**: 🛒 P1（电商刚需）
 - **难度**: 中
 - **用途**:
