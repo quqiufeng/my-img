@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstring>
 #include <chrono>
+#include <cctype>
 
 #include <stb_image_write.h>
 
@@ -381,7 +382,20 @@ bool Image::save_to_file(const std::string& path) const {
         std::cerr << "[Image] Cannot save empty image" << std::endl;
         return false;
     }
-    int success = stbi_write_png(path.c_str(), width, height, channels, data.data(), width * channels);
+    int success = 0;
+    std::string ext = "";
+    size_t dot = path.rfind('.');
+    if (dot != std::string::npos) {
+        ext = path.substr(dot + 1);
+        for (auto& c : ext) c = std::tolower(c);
+    }
+    if (ext == "bmp") {
+        success = stbi_write_bmp(path.c_str(), width, height, channels, data.data());
+    } else if (ext == "tga") {
+        success = stbi_write_tga(path.c_str(), width, height, channels, data.data());
+    } else {
+        success = stbi_write_png(path.c_str(), width, height, channels, data.data(), width * channels);
+    }
     if (success) {
         std::cout << "[Image] Saved to " << path << " (" << width << "x" << height << ")" << std::endl;
         return true;
