@@ -1,348 +1,426 @@
-cmake_minimum_required(VERSION 3.15)
-project(my-img)
+cmake_minimum_required(VERSION 3.18)
+project(my-img VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# 启用 LTO 以与 sd.cpp 兼容
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
 # ============================================================
-# Sanitizer 支持（Debug/RelWithDebInfo 可选）
+# 1. 查找 libtorch
 # ============================================================
-option(ENABLE_SANITIZERS "Enable AddressSanitizer and UBSan" OFF)
-if(ENABLE_SANITIZERS AND NOT CMAKE_BUILD_TYPE STREQUAL "Release")
-    message(STATUS "[my-img] Sanitizers enabled: address, undefined")
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address,undefined)
-endif()
-
-# ============================================================
-# 1. 读取 .env 配置文件
-# ============================================================
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.env)
-    file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/.env ENV_FILE)
-    foreach(line ${ENV_FILE})
-        if(line MATCHES "^SD_PATH=(.*)$")
-            set(SD_PATH_FROM_ENV ${CMAKE_MATCH_1})
-        endif()
-        if(line MATCHES "^CUDA_PATH=(.*)$")
-            set(CUDA_PATH_FROM_ENV ${CMAKE_MATCH_1})
-        endif()
-    endforeach()
-    if(SD_PATH_FROM_ENV AND NOT SD_PATH)
-        set(SD_PATH ${SD_PATH_FROM_ENV})
+# 从环境变量、conda 环境或默认路径查找 libtorch
+set(LIBTORCH_ROOT "")
+if(DEFINED ENV{LIBTORCH_ROOT})
+    set(LIBTORCH_ROOT $ENV{LIBTORCH_ROOT})
+elseif(DEFINED ENV{CONDA_PREFIX})
+    # Conda 环境中的 torch
+    set(CONDA_TORCH_CMAKE "$ENV{CONDA_PREFIX}/lib/python3.10/site-packages/torch/share/cmake")
+    if(EXISTS ${CONDA_TORCH_CMAKE}/Torch/TorchConfig.cmake)
+        set(LIBTORCH_ROOT "$ENV{CONDA_PREFIX}/lib/python3.10/site-packages/torch")
+        message(STATUS "[my-img] Found libtorch in conda environment")
     endif()
-    if(CUDA_PATH_FROM_ENV AND NOT CUDA_PATH)
-        set(CUDA_PATH ${CUDA_PATH_FROM_ENV})
+elseif(EXISTS /opt/libtorch)
+    set(LIBTORCH_ROOT /opt/libtorch)
+elseif(EXISTS /usr/local/libtorch)
+    set(LIBTORCH_ROOT /usr/local/libtorch)
+endif()
+
+# 如果还没找到，尝试从 python torch 包获取路径
+if(NOT LIBTORCH_ROOT)
+    execute_process(
+        COMMAND python3 -c "import torch; print(torch.utils.cmake_prefix_path)"
+        OUTPUT_VARIABLE PYTHON_TORCH_CMAKE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(PYTHON_TORCH_CMAKE AND EXISTS "${PYTHON_TORCH_CMAKE}/Torch/TorchConfig.cmake")
+        get_filename_component(LIBTORCH_ROOT "${PYTHON_TORCH_CMAKE}" DIRECTORY)
+        get_filename_component(LIBTORCH_ROOT "${LIBTORCH_ROOT}" DIRECTORY)
+        message(STATUS "[my-img] Found libtorch via python: ${LIBTORCH_ROOT}")
     endif()
 endif()
 
-if(SD_PATH)
-    string(REPLACE "~" "$ENV{HOME}" SD_PATH ${SD_PATH})
+if(NOT LIBTORCH_ROOT)
+    message(FATAL_ERROR "未找到 libtorch。请设置 LIBTORCH_ROOT 环境变量或安装 libtorch。\n"
+        "conda 安装: conda install pytorch pytorch-cuda=12.1 -c pytorch -c nvidia\n"
+        "pip 安装: pip install torch --index-url https://download.pytorch.org/whl/cu121")
 endif()
 
-message(STATUS "CUDA_PATH: ${CUDA_PATH}")
+message(STATUS "[my-img] LIBTORCH_ROOT: ${LIBTORCH_ROOT}")
 
-if(NOT SD_PATH OR NOT EXISTS ${SD_PATH}/CMakeLists.txt)
-    message(FATAL_ERROR "SD_PATH 路径无效或未设置。当前路径: ${SD_PATH}")
-endif()
-
-message(STATUS "[my-img] Using SD_PATH: ${SD_PATH}")
+list(APPEND CMAKE_PREFIX_PATH ${LIBTORCH_ROOT})
+find_package(Torch REQUIRED)
+message(STATUS "[my-img] Torch version: ${Torch_VERSION}")
 
 # ============================================================
-# 2. 查找 ONNX Runtime（可选依赖，用于 RemBG 背景抠图）
+# 2. 查找 CUDA（如果 libtorch 启用了 CUDA）
 # ============================================================
-set(ONNXRUNTIME_ROOT "")
-if(DEFINED ENV{ONNXRUNTIME_ROOT})
-    set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})
-elseif(EXISTS /home/dministrator/onnxruntime-linux-x64-1.20.1)
-    set(ONNXRUNTIME_ROOT /home/dministrator/onnxruntime-linux-x64-1.20.1)
-endif()
-
-if(ONNXRUNTIME_ROOT)
-    find_library(ONNXRUNTIME_LIB NAMES onnxruntime PATHS ${ONNXRUNTIME_ROOT}/lib NO_DEFAULT_PATH)
-    find_path(ONNXRUNTIME_INCLUDE_DIR NAMES onnxruntime_cxx_api.h PATHS ${ONNXRUNTIME_ROOT}/include NO_DEFAULT_PATH)
-    if(ONNXRUNTIME_LIB AND ONNXRUNTIME_INCLUDE_DIR)
-        set(HAS_ONNXRUNTIME ON)
-        message(STATUS "[my-img] ONNX Runtime found: ${ONNXRUNTIME_LIB}")
-        message(STATUS "[my-img] ONNX Runtime include: ${ONNXRUNTIME_INCLUDE_DIR}")
-    else()
-        message(WARNING "[my-img] ONNX Runtime root set but library/headers not found. RemBG will be disabled.")
-    endif()
+include(CheckLanguage)
+check_language(CUDA)
+if(CMAKE_CUDA_COMPILER)
+    message(STATUS "[my-img] CUDA compiler found: ${CMAKE_CUDA_COMPILER}")
 else()
-    message(STATUS "[my-img] ONNX Runtime not found. RemBG background removal will be disabled.")
-    message(STATUS "[my-img] To enable: download onnxruntime-linux-x64-*.tgz and set ONNXRUNTIME_ROOT")
+    message(STATUS "[my-img] CUDA compiler not found, using CPU only")
 endif()
 
 # ============================================================
-# 3. 链接已有的 stable-diffusion.cpp 编译产物
+# 3. 第三方依赖（子目录）
 # ============================================================
-# 直接链接 ~/stable-diffusion.cpp/bin 中的库，不重新编译
+set(THIRDPARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-# 设置库路径
-set(SD_LIB_PATH "${SD_PATH}/build")
-set(SD_BIN_PATH "${SD_PATH}/bin")
+# nlohmann/json（头文件-only）
+add_subdirectory(${THIRDPARTY_DIR}/json)
 
-# 查找 ggml 库 (优先 build 目录静态库，fallback bin 目录动态库)
-find_library(GGML_CUDA_LIB NAMES ggml-cuda PATHS ${SD_LIB_PATH}/ggml/src/ggml-cuda ${SD_BIN_PATH} NO_DEFAULT_PATH)
-find_library(GGML_CPU_LIB NAMES ggml-cpu PATHS ${SD_LIB_PATH}/ggml/src ${SD_BIN_PATH} NO_DEFAULT_PATH)
-find_library(GGML_BASE_LIB NAMES ggml-base PATHS ${SD_LIB_PATH}/ggml/src ${SD_BIN_PATH} NO_DEFAULT_PATH)
-find_library(GGML_LIB NAMES ggml PATHS ${SD_LIB_PATH}/ggml/src ${SD_BIN_PATH} NO_DEFAULT_PATH)
+# GGML（仅用于 GGUF 解析，不参与推理）
+# 配置：关闭所有后端，仅保留基础功能用于文件解析
+set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+set(GGML_METAL OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
+add_subdirectory(${THIRDPARTY_DIR}/ggml)
 
-# 查找 stable-diffusion 静态库 (在 build 目录)
-find_library(SD_LIB NAMES stable-diffusion PATHS ${SD_LIB_PATH} NO_DEFAULT_PATH)
+# stb_image（头文件-only，不需要 add_subdirectory）
+set(STB_IMAGE_INCLUDE ${THIRDPARTY_DIR}/stb)
 
-message(STATUS "[my-img] GGML_CUDA_LIB: ${GGML_CUDA_LIB}")
-message(STATUS "[my-img] GGML_CPU_LIB: ${GGML_CPU_LIB}")
-message(STATUS "[my-img] GGML_BASE_LIB: ${GGML_BASE_LIB}")
-message(STATUS "[my-img] SD_LIB: ${SD_LIB}")
+# ============================================================
+# 4. stable-diffusion.cpp 集成
+# ============================================================
+set(SDCPP_DIR /opt/stable-diffusion.cpp)
+set(SDCPP_BUILD_DIR ${SDCPP_DIR}/build)
 
-if(NOT SD_LIB)
-    message(FATAL_ERROR "未找到预编译的库，请先运行 scripts/build_sd_cpp_*.sh 编译 stable-diffusion.cpp")
+# 检查 sd.cpp 是否已编译
+if(EXISTS "${SDCPP_BUILD_DIR}/libstable-diffusion.a")
+    message(STATUS "[my-img] Found stable-diffusion.cpp at ${SDCPP_DIR}")
+    set(SDCPP_FOUND TRUE)
+else()
+    message(FATAL_ERROR "stable-diffusion.cpp not found at ${SDCPP_BUILD_DIR}/libstable-diffusion.a. Please build sd.cpp first.")
 endif()
 
-# ============================================================
-# 3. 编译你的程序
-# ============================================================
-# 第三方库路径
-set(THIRDPARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty")
+# 手动指定 sd.cpp 的库路径和依赖
+# 注意：链接顺序非常重要！
+# 使用链接组来解决循环依赖
+set(SDCPP_LINK_START "-Wl,--start-group")
+set(SDCPP_LINK_END "-Wl,--end-group")
 
-# 特殊处理 sd-engine：编译为静态库
-set(SD_ENGINE_SRC 
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/node.cpp"
-)
-if(EXISTS ${SD_ENGINE_SRC})
-    set(SD_ENGINE_FACE_SRC)
-    if(HAS_ONNXRUNTIME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_detect.cpp")
-        set(SD_ENGINE_FACE_SRC
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_detect.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_align.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_utils.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_restore.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/face/face_swap.cpp"
-        )
-        message(STATUS "[my-img] Face module enabled with ONNX Runtime")
-    endif()
-
-    set(SD_ENGINE_PREPROCESSOR_SRC)
-    if(HAS_ONNXRUNTIME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/preprocessors/lineart.cpp")
-        set(SD_ENGINE_PREPROCESSOR_SRC
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/preprocessors/lineart.cpp"
-        )
-        message(STATUS "[my-img] Preprocessor module enabled with ONNX Runtime")
-    endif()
-
-    add_library(sd-engine STATIC 
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/node.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/cache.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/executor.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/init.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/workflow_builder.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/core/log.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/test_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/node_utils.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/loader_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/model_loader_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/lora_loader_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/upscale_loader_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/ipadapter_loader_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/onnx_loader_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/conditioning_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/clip_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/conditioning_combine_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/controlnet_ipadapter_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/latent_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/empty_latent_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/vae_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/sampler_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/deep_hires_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_io_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_transform_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_filter_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_blend_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_adjust_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/image_effect_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/preprocessor_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/preprocessor_cpu_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/preprocessor_onnx_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_detect_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_restore_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/face_swap_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/inpaint_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/animatediff_nodes.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/nodes/core_nodes.cpp"
-        ${SD_ENGINE_FACE_SRC}
-        ${SD_ENGINE_PREPROCESSOR_SRC}
-    )
-    target_include_directories(sd-engine PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/preprocessors
-        ${THIRDPARTY_DIR}
-        ${SD_PATH}
-        ${SD_PATH}/include
-        ${SD_PATH}/thirdparty
-        ${SD_PATH}/ggml/include
-        ${SD_PATH}/src
-    )
-    if(HAS_ONNXRUNTIME)
-        target_compile_definitions(sd-engine PRIVATE HAS_ONNXRUNTIME=1)
-        target_include_directories(sd-engine PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
-        target_link_libraries(sd-engine PRIVATE ${ONNXRUNTIME_LIB})
-    endif()
-    message(STATUS "[my-img] Created library: sd-engine")
-endif()
-
-# 显式列出需要编译为可执行文件的源文件（避免 GLOB_RECURSE 反模式）
-set(SRC_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine/tools/sd-workflow.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-hires/main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-img2img/main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/sd-upscale/main.cpp"
+# sd.cpp 的库路径
+set(SDCPP_LINK_LIBRARIES
+    ${SDCPP_BUILD_DIR}/libstable-diffusion.a
+    ${SDCPP_BUILD_DIR}/ggml/src/libggml.a
+    ${SDCPP_BUILD_DIR}/ggml/src/libggml-cpu.a
+    ${SDCPP_BUILD_DIR}/ggml/src/libggml-base.a
 )
 
-# 其他目录编译为可执行文件
-foreach(src ${SRC_FILES})
-    get_filename_component(name ${src} NAME_WE)
-    get_filename_component(dir ${src} PATH)
-    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src/" "" rel_dir ${dir})
-    
-    # 跳过 sd-engine 库中的源文件（避免被 GLOB_RECURSE 当成可执行文件）
-    # 但保留 sd-engine/tools 目录下的可执行文件
-    if(rel_dir MATCHES "^sd-engine/core" OR rel_dir MATCHES "^sd-engine/nodes" OR rel_dir MATCHES "^sd-engine/face" OR rel_dir MATCHES "^sd-engine/preprocessors")
-        continue()
+# 如果有 CUDA 支持，添加 CUDA 库
+if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
+    message(STATUS "[my-img] Found GGML CUDA backend")
+    list(APPEND SDCPP_LINK_LIBRARIES ${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a)
+    find_package(CUDAToolkit)
+    if(CUDAToolkit_FOUND)
+        list(APPEND SDCPP_LINK_LIBRARIES CUDA::cudart CUDA::cuda_driver CUDA::cublas)
     endif()
-    
-    string(REPLACE "/" "-" dir ${rel_dir})
-    
-    if(dir STREQUAL "")
-        set(final_name ${name})
-    else()
-        set(final_name ${dir})
-    endif()
-    
-    # 特殊处理 sd-engine-tools -> sd-workflow
-    if(final_name STREQUAL "sd-engine-tools")
-        set(final_name "sd-workflow")
-    endif()
-
-    add_executable(${final_name} ${src})
-    list(APPEND ALL_TARGETS ${final_name})
-    
-    # 链接 sd-engine 库（必须在 SD_LIB 之前，因为 sd-engine 依赖 SD_LIB）
-    if(TARGET sd-engine)
-        target_link_libraries(${final_name} PRIVATE sd-engine)
-    endif()
-    
-    # 链接 stable-diffusion 和 ggml（必须在 sd-engine 之后）
-    target_link_libraries(${final_name} PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
-    
-    # 链接 CUDA 运行时
-    if(CUDA_PATH)
-        target_link_libraries(${final_name} PRIVATE 
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcudart.so
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublas.so
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
-            /usr/lib/x86_64-linux-gnu/libcuda.so
-        )
-    else()
-        # 自动检测常见 CUDA 路径
-        if(EXISTS /usr/local/cuda/lib64/libcudart.so)
-            target_link_libraries(${final_name} PRIVATE 
-                /usr/local/cuda/lib64/libcudart.so
-                /usr/local/cuda/lib64/libcublas.so
-                /usr/local/cuda/lib64/libcublasLt.so
-                /usr/lib/x86_64-linux-gnu/libcuda.so
-            )
-        endif()
-    endif()
-
-    target_include_directories(${final_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    
-    target_include_directories(${final_name} PRIVATE 
-        ${SD_PATH}
-        ${SD_PATH}/include
-        ${SD_PATH}/thirdparty
-        ${SD_PATH}/ggml/include
-        ${SD_PATH}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
-        ${THIRDPARTY_DIR}
-    )
-    if(HAS_ONNXRUNTIME)
-        target_compile_definitions(${final_name} PRIVATE HAS_ONNXRUNTIME=1)
-        target_include_directories(${final_name} PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
-        target_link_libraries(${final_name} PRIVATE ${ONNXRUNTIME_LIB})
-    endif()
-
-    message(STATUS "[my-img] Created target: ${final_name}")
-endforeach()
-
-# ============================================================
-# 4. 单元测试
-# ============================================================
-enable_testing()
-
-# Catch2 amalgamated 源文件
-set(CATCH2_SRC "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/catch2/catch_amalgamated.cpp")
-set(CATCH2_INC "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/catch2")
-
-# 收集测试源文件
-file(GLOB TEST_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp")
-
-if(EXISTS ${CATCH2_SRC} AND TEST_SRC_FILES)
-    add_executable(sd-engine-tests ${TEST_SRC_FILES} ${CATCH2_SRC})
-    target_include_directories(sd-engine-tests PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/sd-engine
-        ${THIRDPARTY_DIR}
-        ${SD_PATH}
-        ${SD_PATH}/include
-        ${SD_PATH}/thirdparty
-        ${SD_PATH}/ggml/include
-        ${SD_PATH}/src
-        ${CATCH2_INC}
-    )
-    if(HAS_ONNXRUNTIME)
-        target_compile_definitions(sd-engine-tests PRIVATE HAS_ONNXRUNTIME=1)
-        target_include_directories(sd-engine-tests PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
-        target_link_libraries(sd-engine-tests PRIVATE ${ONNXRUNTIME_LIB})
-    endif()
-    if(TARGET sd-engine)
-        target_link_libraries(sd-engine-tests PRIVATE sd-engine)
-    endif()
-    target_link_libraries(sd-engine-tests PRIVATE ${SD_LIB} ${GGML_CUDA_LIB} ${GGML_CPU_LIB} ${GGML_BASE_LIB} gomp pthread m)
-    if(CUDA_PATH)
-        target_link_libraries(sd-engine-tests PRIVATE 
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcudart.so
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublas.so
-            ${CUDA_PATH}/lib/x86_64-linux-gnu/libcublasLt.so
-            /usr/lib/x86_64-linux-gnu/libcuda.so
-        )
-    else()
-        if(EXISTS /usr/local/cuda/lib64/libcudart.so)
-            target_link_libraries(sd-engine-tests PRIVATE 
-                /usr/local/cuda/lib64/libcudart.so
-                /usr/local/cuda/lib64/libcublas.so
-                /usr/local/cuda/lib64/libcublasLt.so
-                /usr/lib/x86_64-linux-gnu/libcuda.so
-            )
-        endif()
-    endif()
-    add_test(NAME sd-engine-tests COMMAND sd-engine-tests)
-    list(APPEND ALL_TARGETS sd-engine-tests)
-    message(STATUS "[my-img] Created target: sd-engine-tests")
-else()
-    message(STATUS "[my-img] Tests disabled: Catch2 or test sources not found")
 endif()
 
-# 自动复制二进制到 SD_PATH/bin
-if(SD_PATH)
-    set(OUTPUT_DIR "${SD_PATH}/bin")
-    message(STATUS "[my-img] Copying binaries to ${OUTPUT_DIR}")
-    foreach(target ${ALL_TARGETS})
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy
-                $<TARGET_FILE:${target}>
-                ${OUTPUT_DIR}/
-        )
-    endforeach()
+# 添加 OpenMP 支持
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    list(APPEND SDCPP_LINK_LIBRARIES OpenMP::OpenMP_CXX)
+endif()
+
+# ============================================================
+# 5. 源文件
+# ============================================================
+set(MYIMG_SOURCES
+    src/main.cpp
+    src/adapters/sdcpp_adapter.cpp
+)
+
+# ============================================================
+# 5. 创建可执行文件
+# ============================================================
+add_executable(myimg-cli ${MYIMG_SOURCES})
+
+# 包含目录
+target_include_directories(myimg-cli PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/backend
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
+    ${STB_IMAGE_INCLUDE}
+    ${THIRDPARTY_DIR}/ggml/include
+    ${SDCPP_DIR}/include
+    ${SDCPP_DIR}/ggml/include
+)
+
+# 链接库
+    target_link_libraries(myimg-cli PRIVATE
+        ${TORCH_LIBRARIES}
+        nlohmann_json::nlohmann_json
+        ${SDCPP_LINK_START}
+        ${SDCPP_LINK_LIBRARIES}
+        ${SDCPP_LINK_END}
+        ${CMAKE_THREAD_LIBS_INIT}
+    )
+    if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
+    else()
+    endif()
+
+# ============================================================
+# 6. 编译选项
+# ============================================================
+if(MSVC)
+    target_compile_options(myimg-cli PRIVATE /W4 /WX-)
+else()
+    target_compile_options(myimg-cli PRIVATE 
+        -Wall 
+        -Wextra 
+        -Wno-unused-parameter
+        -Wno-unused-variable
+        -O3
+        -march=native
+    )
+endif()
+
+# 禁用 LTO 以避免与 sd.cpp 的 LTO 版本冲突
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_target_properties(myimg-cli PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
+endif()
+
+# 设置 RPATH，使二进制能找到 libtorch 库
+if(UNIX)
+    set_target_properties(myimg-cli PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+# ============================================================
+# 7. 安装
+# ============================================================
+install(TARGETS myimg-cli DESTINATION bin)
+
+# ============================================================
+# 8. 信息输出
+# ============================================================
+message(STATUS "")
+message(STATUS "========================================")
+message(STATUS "  my-img Configuration")
+message(STATUS "========================================")
+message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
+message(STATUS "  libtorch: ${LIBTORCH_ROOT}")
+message(STATUS "  CUDA: ${CMAKE_CUDA_COMPILER}")
+message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "========================================")
+message(STATUS "")
+
+# ============================================================
+# 9. 测试
+# ============================================================
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gguf_loader.cpp")
+    add_executable(test_gguf_loader 
+        tests/test_gguf_loader.cpp
+        src/utils/gguf_loader.cpp
+    )
+    target_include_directories(test_gguf_loader PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${THIRDPARTY_DIR}/ggml/include
+    )
+    target_link_libraries(test_gguf_loader PRIVATE
+        ${TORCH_LIBRARIES}
+        ggml
+    )
+    set_target_properties(test_gguf_loader PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vae.cpp")
+    add_executable(test_vae 
+        tests/test_vae.cpp
+        src/backend/vae.cpp
+        src/backend/model.cpp
+        src/utils/image_utils.cpp
+        src/utils/gguf_loader.cpp
+        src/utils/safetensors.cpp
+    )
+    target_include_directories(test_vae PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${STB_IMAGE_INCLUDE}
+        ${THIRDPARTY_DIR}/ggml/include
+    )
+    target_link_libraries(test_vae PRIVATE
+        ${TORCH_LIBRARIES}
+        ggml
+    )
+    set_target_properties(test_vae PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix.cpp")
+    add_executable(test_hires_fix
+        tests/test_hires_fix.cpp
+        src/backend/vae.cpp
+        src/backend/model.cpp
+        src/utils/image_utils.cpp
+        src/utils/gguf_loader.cpp
+        src/utils/safetensors.cpp
+    )
+    target_include_directories(test_hires_fix PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes
+        ${STB_IMAGE_INCLUDE}
+        ${THIRDPARTY_DIR}/ggml/include
+    )
+    target_link_libraries(test_hires_fix PRIVATE
+        ${TORCH_LIBRARIES}
+        ggml
+    )
+    set_target_properties(test_hires_fix PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_model.cpp")
+    add_executable(test_z_image_model
+        tests/test_z_image_model.cpp
+        src/backend/z_image_model.cpp
+        src/backend/model.cpp
+        src/utils/gguf_loader.cpp
+        src/utils/safetensors.cpp
+    )
+    target_include_directories(test_z_image_model PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${STB_IMAGE_INCLUDE}
+        ${THIRDPARTY_DIR}/ggml/include
+    )
+    target_link_libraries(test_z_image_model PRIVATE
+        ${TORCH_LIBRARIES}
+        ggml
+    )
+    set_target_properties(test_z_image_model PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_quick.cpp")
+    add_executable(test_z_image_quick
+        tests/test_z_image_quick.cpp
+        src/backend/z_image_model.cpp
+        src/backend/model.cpp
+        src/utils/gguf_loader.cpp
+        src/utils/safetensors.cpp
+    )
+    target_include_directories(test_z_image_quick PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${STB_IMAGE_INCLUDE}
+        ${THIRDPARTY_DIR}/ggml/include
+    )
+    target_link_libraries(test_z_image_quick PRIVATE
+        ${TORCH_LIBRARIES}
+        ggml
+    )
+    set_target_properties(test_z_image_quick PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
+    add_executable(test_sdcpp_adapter
+        tests/test_sdcpp_adapter.cpp
+        src/adapters/sdcpp_adapter.cpp
+    )
+    target_include_directories(test_sdcpp_adapter PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
+        ${STB_IMAGE_INCLUDE}
+        ${SDCPP_DIR}/include
+        ${SDCPP_DIR}/ggml/include
+    )
+    target_link_libraries(test_sdcpp_adapter PRIVATE
+        ${SDCPP_LINK_START}
+        ${SDCPP_LINK_LIBRARIES}
+        ${SDCPP_LINK_END}
+        ${CMAKE_THREAD_LIBS_INIT}
+    )
+    if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
+    else()
+    endif()
+    set_target_properties(test_sdcpp_adapter PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INTERPROCEDURAL_OPTIMIZATION FALSE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
+    add_executable(test_txt2img
+        tests/test_txt2img.cpp
+        src/adapters/sdcpp_adapter.cpp
+    )
+    target_include_directories(test_txt2img PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
+        ${STB_IMAGE_INCLUDE}
+        ${SDCPP_DIR}/include
+        ${SDCPP_DIR}/ggml/include
+    )
+    target_link_libraries(test_txt2img PRIVATE
+        ${SDCPP_LINK_START}
+        ${SDCPP_LINK_LIBRARIES}
+        ${SDCPP_LINK_END}
+        ${CMAKE_THREAD_LIBS_INIT}
+    )
+    set_target_properties(test_txt2img PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INTERPROCEDURAL_OPTIMIZATION FALSE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
+    add_executable(test_hires_fix_real
+        tests/test_hires_fix_real.cpp
+        src/adapters/sdcpp_adapter.cpp
+    )
+    target_include_directories(test_hires_fix_real PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
+        ${STB_IMAGE_INCLUDE}
+        ${SDCPP_DIR}/include
+        ${SDCPP_DIR}/ggml/include
+    )
+    target_link_libraries(test_hires_fix_real PRIVATE
+        ${SDCPP_LINK_START}
+        ${SDCPP_LINK_LIBRARIES}
+        ${SDCPP_LINK_END}
+        ${CMAKE_THREAD_LIBS_INIT}
+    )
+    set_target_properties(test_hires_fix_real PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INTERPROCEDURAL_OPTIMIZATION FALSE
+    )
 endif()

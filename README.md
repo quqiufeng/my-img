@@ -1,676 +1,386 @@
-# my-img
+# my-img - 纯 C++ 版 ComfyUI
 
-**GGUF 模型下载**: https://huggingface.co/leejet
-
-复刻 ComfyUI 生态理念，但无需麻烦的 Python 依赖。只有**干净的 C++ 二进制程序**和**命令管道**。
-
-> 📖 **文档索引**
-> - [架构设计文档](docs/sd-engine-design.md) — C++ 版 ComfyUI 工作流执行引擎详细设计
-> - [人脸修复与换脸方案](docs/face-onnx-design.md) — 基于 ONNX Runtime 的 Face Restore / Face Swap 完整技术方案
-
-## 已完成的工具
-
-| 工具 | 功能 | 状态 |
-|------|------|------|
-| `sd-workflow` | **C++ 版 ComfyUI 工作流引擎**：解析 JSON 工作流，执行 DAG 拓扑排序，支持 txt2img/img2img/图像处理/LoRA/人脸修复/换脸 | ✅ |
-| `sd-hires` | AI 高清修复：ESRGAN 放大 + Deep HighRes Fix 分阶段重绘 | ✅ |
-| `sd-img2img` | 图生图重绘（支持普通 img2img 和 Deep HighRes Fix） | ✅ |
-| `sd-upscale` | ESRGAN 独立超分放大 | ✅ |
+> **📖 详细设计文档**：[design.md](design.md) - 架构设计、技术细节、实现路线图
 
 ---
 
-## 项目架构
+## 项目简介
+
+**my-img** 是一个纯 C++ 实现的 ComfyUI 替代方案，旨在彻底摆脱 Python 依赖，提供一个轻量、高效、可独立部署的 AI 图像生成工具。
+
+### 设计初衷
+
+在使用 ComfyUI 的过程中，我们发现 Python 环境带来了很多痛点：
+
+1. **环境依赖复杂**：需要 Python 3.10+、PyTorch、transformers、diffusers 等数百个依赖包，环境配置容易出错
+2. **启动速度慢**：Python 解释器 + 大量模块导入，启动需要数秒甚至更久
+3. **部署困难**：需要 conda/venv 环境，Docker 镜像体积巨大（>10GB）
+4. **GIL 限制**：Python 全局解释器锁限制了多线程性能
+5. **内存开销大**：Python 对象头开销显著，同样模型占用更多内存
+
+**my-img 的目标**：保留 ComfyUI 的所有生成能力，但用纯 C++ 重写，实现：
+- **零 Python 依赖** - 不嵌入 Python 解释器，不依赖任何 Python 包
+- **快速启动** - 直接运行二进制文件，毫秒级启动
+- **轻量部署** - 单个可执行文件 + 模型文件即可运行
+- **高效内存** - C++ 对象紧凑，内存占用显著降低
+- **完整功能** - txt2img、img2img、HiRes Fix、LoRA、ControlNet、IPAdapter 等
+
+---
+
+## 核心架构
+
+### 混合架构：sd.cpp + libtorch
+
+my-img 采用混合架构，结合了 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) 和 [libtorch](https://pytorch.org/cppdocs/) 两者的优势：
+
+```
+用户输入（CLI 参数 / JSON 工作流）
+    │
+    ▼
+┌─────────────────────────────────────┐
+│  my-img CLI / Workflow Engine       │  ← C++ 工作流编排
+│  - 参数解析                         │
+│  - 节点调度                         │
+│  - 图像 I/O                         │
+└──────────────┬──────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    ▼                     ▼
+┌──────────────────┐  ┌──────────────────┐
+│ SDCPPAdapter     │  │ libtorch 扩展    │
+│ (适配层)         │  │ (图像处理等)     │
+└────────┬─────────┘  └──────────────────┘
+         │
+    ┌────┴─────────────────────────────────┐
+    ▼                                      ▼
+┌──────────────────────┐      ┌──────────────────────┐
+│ stable-diffusion.cpp │      │ libtorch (PyTorch C++)│
+│ (GGML 推理引擎)      │      │ (张量计算库)          │
+│                      │      │                      │
+│ - 模型加载           │      │ - 张量操作           │
+│ - GGUF 量化推理      │      │ - 图像预处理         │
+│ - 文本编码           │      │ - 高级功能扩展       │
+│ - 采样器             │      │ - 自定义算子         │
+│ - VAE 编解码         │      │                      │
+└──────────────────────┘      └──────────────────────┘
+```
+
+### 为什么这样设计？
+
+#### 1. stable-diffusion.cpp（推理引擎）
+
+**用途**：负责所有 AI 模型的加载和推理
+
+**为什么选择它**：
+- ✅ **成熟稳定**：完整支持 Z-Image、Flux、SDXL、SD3 等主流模型
+- ✅ **GGUF 原生支持**：直接加载量化模型，无需转换
+- ✅ **高效推理**：基于 GGML 框架，支持 CPU/GPU 混合推理
+- ✅ **显存友好**：Q4_K/Q5_K 量化显著降低显存占用（RTX 3080 10GB 可跑 2560x1440）
+- ✅ **C API**：提供稳定 C 接口，易于 C++ 封装
+
+**在 my-img 中的角色**：
+- 扩散模型加载与推理（DiT/UNet）
+- 文本编码器（CLIP/Qwen3/T5）
+- VAE 编码器/解码器
+- 采样器实现（Euler、DPM++、Heun 等 15 种）
+- 噪声调度器（Discrete、Karras、AYS 等 11 种）
+- LoRA 权重注入
+- ControlNet 推理
+- ESRGAN 图像放大
+
+#### 2. libtorch（PyTorch C++ 前端）
+
+**用途**：提供张量计算和图像处理能力，用于扩展功能
+
+**为什么选择它**：
+- ✅ **完整 PyTorch 生态**：支持自动求导、自定义算子、CUDA 加速
+- ✅ **图像处理**：torchvision 风格的图像变换、张量操作
+- ✅ **高级功能**：IPAdapter 特征提取、ControlNet 预处理等
+- ✅ **与 Python 互通**：可加载 Python 训练的模型权重
+
+**在 my-img 中的角色**：
+- 图像预处理（缩放、裁剪、归一化）
+- 张量工具函数
+- 未来扩展：IPAdapter 图像特征提取、ControlNet 预处理器
+- 自定义采样器实现
+
+#### 3. SDCPPAdapter（适配层）
+
+**用途**：隔离 sd.cpp 的 C API，提供类型安全的 C++ 接口
+
+**设计原则**：
+- **封装隔离**：所有 sd.cpp C API 调用都通过适配层
+- **RAII 资源管理**：自动管理 sd_ctx_t 生命周期
+- **类型转换**：C 结构体 ↔ C++ 对象（Image、GenerationParams）
+- **版本兼容**：sd.cpp 升级时只需修改适配层实现
+
+```cpp
+// 使用示例
+myimg::SDCPPAdapter adapter;
+myimg::GenerationParams params;
+params.diffusion_model_path = "model.gguf";
+params.prompt = "a beautiful landscape";
+params.width = 1280;
+params.height = 720;
+
+adapter.initialize(params);
+myimg::Image image = adapter.generate_single(params);
+image.save_to_file("output.png");
+```
+
+---
+
+## 功能模块
+
+### 已完成功能 ✅
+
+#### 1. txt2img（文本到图像）
+- 完整文本编码 → 扩散去噪 → VAE 解码管线
+- 支持 Z-Image（GGUF）、Flux、SDXL 等模型
+- 支持 Qwen3/CLIP/T5 文本编码器
+
+#### 2. 采样方法（15 种）
+- Euler、Euler Ancestral
+- DPM++ 2M、DPM++ 2M v2、DPM++ 2S a
+- Heun、DPM2
+- IPNDM、IPNDM-V
+- LCM、DDIM Trailing
+- TCD、RES Multistep、RES 2S
+- ER-SDE
+
+#### 3. 调度器（11 种）
+- Discrete、Karras、Exponential
+- AYS、GITS、SGM Uniform
+- Simple、Smoothstep
+- KL Optimal、LCM、Bong Tangent
+
+#### 4. HiRes Fix（高分辨率修复）
+- 两阶段生成：低分辨率基础图 + latent 放大 refine
+- 自动计算低分辨率（保持宽高比）
+- 支持自定义 hires_strength 和 hires_steps
+- 实测：1280×720 → 2560×1440，RTX 3080 10GB 可跑
+
+#### 5. VAE Tiling（显存优化）
+- 大分辨率图像分块解码
+- 可配置 tile_size 和 overlap
+- 解决 2560×1440+ 分辨率 OOM 问题
+
+#### 6. Flash Attention
+- 加速注意力计算
+- 降低显存占用
+
+#### 7. ESRGAN 放大
+- 2×/4× AI 超分辨率
+- 支持 tile 模式（省显存）
+
+#### 8. 图像 I/O
+- PNG/JPG 加载和保存
+- 元数据嵌入（预留）
+
+### 开发中功能 🚧
+
+#### 1. img2img（图像到图像）
+- 加载参考图
+- 根据 strength 控制保留程度
+- VAE encode → 加噪 → 去噪
+
+#### 2. LoRA 集成
+- 加载 LoRA 权重（.safetensors）
+- 运行时权重注入
+- 支持多个 LoRA 叠加
+
+#### 3. Inpainting（局部重绘）
+- 加载 mask 图像
+- 保留未遮罩区域
+- 仅重绘遮罩区域
+
+#### 4. ControlNet
+- ControlNet 模型加载
+- Canny/Depth/Lineart/OpenPose 预处理
+- 精确控制构图
+
+### 计划中功能 📋
+
+#### 1. IPAdapter（图像提示词）
+- 参考图像风格/人脸迁移
+- CLIP Vision 特征提取
+
+#### 2. Workflow JSON 支持
+- 解析 ComfyUI workflow JSON
+- 批量生成
+- 工作流复用
+
+#### 3. Server 模式
+- HTTP API 服务
+- 兼容 SD WebUI API
+- 队列管理
+
+#### 4. 图像预处理节点
+- Canny 边缘检测
+- Depth 深度估计
+- Lineart 线条提取
+
+---
+
+## 目录结构
 
 ```
 my-img/
-├── CMakeLists.txt          # 通用编译模板
-├── README.md               # 本文档
-├── docs/
-│   ├── sd-engine-design.md # 架构设计文档
-│   └── face-onnx-design.md # 人脸修复与换脸方案设计
-├── claude.md               # AI 开发指南
-├── apply_patches.sh        # 应用 stable-diffusion.cpp 补丁
-├── build/
-│   └── build_sd_cpp.sh     # 编译 stable-diffusion.cpp 脚本（自动打补丁）
-├── src/                    # 源代码
-│   ├── sd-core/            # 核心扩展库（Deep HighRes Fix 原生实现）
-│   │   ├── deep_hires.h
-│   │   └── deep_hires.cpp
-│   ├── sd-engine/          # C++ 版 ComfyUI 工作流引擎
-│   │   ├── core/           # 引擎核心（Workflow/DAGExecutor/Cache）
-│   │   ├── face/           # 人脸检测/修复/换脸 ONNX 推理模块
-│   │   ├── nodes/          # 节点实现
-│   │   └── tools/          # CLI 工具
-│   ├── sd-hires/
-│   ├── sd-img2img/
-│   └── sd-upscale/
-├── stable-diffusion.cpp-patched/   # 修改备份（升级后覆盖用）
-│   ├── src/stable-diffusion.cpp
-│   └── include/stable-diffusion-ext.h
-└── bin/                    # 编译后的二进制
+├── CMakeLists.txt              # 构建配置
+├── README.md                   # 本文档
+├── design.md                   # 详细设计文档
+├── task.md                     # 开发任务表
+├── img1.sh                     # RTX 3080 10G 出图脚本
+├── img2.sh                     # RTX 4090D 24G 出图脚本
+├── src/
+│   ├── main.cpp               # CLI 入口
+│   ├── adapters/
+│   │   ├── sdcpp_adapter.h    # sd.cpp 适配器
+│   │   └── sdcpp_adapter.cpp
+│   ├── engine/                # 工作流引擎（预留）
+│   ├── nodes/                 # 节点实现（预留）
+│   ├── backend/               # 推理后端（预留）
+│   └── utils/                 # 工具
+│       ├── image_utils.h      # 图像 I/O
+│       └── gguf_loader.h      # GGUF 加载
+├── tests/                      # 测试
+│   ├── test_gguf_loader.cpp
+│   ├── test_txt2img.cpp
+│   ├── test_hires_fix_real.cpp
+│   └── ...
+└── third_party/               # 第三方依赖
+    ├── json/                  # nlohmann/json
+    ├── stb/                   # stb_image
+    └── ggml/                  # GGML（GGUF 解析）
 ```
 
 ---
 
-## 编译
+## 快速开始
 
-### 1. 编译 stable-diffusion.cpp（自动应用补丁）
+### 环境要求
 
-```bash
-cd ~/my-img/build
-./build_sd.sh
-```
+- **OS**: Linux (Ubuntu 20.04+)
+- **GPU**: NVIDIA GPU with CUDA 12.0+
+- **显存**: 8GB+（推荐 10GB+）
+- **编译器**: GCC 11+ 或 Clang 14+
+- **CMake**: 3.18+
 
-这个脚本会自动调用 `apply_patches.sh`，将 my-img 所需的修改应用到 `stable-diffusion.cpp` 源码中，然后编译。
-
-**build_sd.sh 选项：**
-```bash
-./build_sd.sh --help              # 显示帮助
-./build_sd.sh --no-cuda           # 仅 CPU 编译
-./build_sd.sh --clean --jobs 8    # 清理后使用 8 线程编译
-```
-
-### 2. 编译 my-img
+### 构建
 
 ```bash
-cd ~/my-img
-rm -rf build && mkdir build && cd build
-cmake .. -DSD_PATH=/home/dministrator/stable-diffusion.cpp
+# 1. 克隆仓库
+git clone https://github.com/yourname/my-img.git
+cd my-img
+
+# 2. 创建构建目录
+mkdir build && cd build
+
+# 3. 配置（自动检测 libtorch）
+cmake ..
+
+# 4. 编译
 make -j$(nproc)
 ```
 
-### 3. 安装
+### 运行
 
 ```bash
-cp sd-workflow sd-hires sd-img2img sd-upscale ../bin/
+# 基础 txt2img
+./myimg-cli \
+  --diffusion-model /path/to/z_image_turbo-Q5_K_M.gguf \
+  --vae /path/to/ae.safetensors \
+  --llm /path/to/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  -p "a beautiful landscape" \
+  -o output.png
 
-sudo ln -sf ~/my-img/bin/sd-workflow /usr/local/bin/sd-workflow
-sudo ln -sf ~/my-img/bin/sd-hires /usr/local/bin/sd-hires
-sudo ln -sf ~/my-img/bin/sd-img2img /usr/local/bin/sd-img2img
-sudo ln -sf ~/my-img/bin/sd-upscale /usr/local/bin/sd-upscale
+# 带 HiRes Fix 的 2560x1440 人像
+./myimg-cli \
+  --diffusion-model /path/to/z_image_turbo-Q5_K_M.gguf \
+  --vae /path/to/ae.safetensors \
+  --llm /path/to/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  -p "portrait of a young woman, soft lighting" \
+  -W 1280 -H 720 \
+  --hires --hires-width 2560 --hires-height 1440 \
+  --hires-strength 0.30 --hires-steps 60 \
+  --diffusion-fa --vae-tiling \
+  -o portrait_2k.png
+
+# 查看所有参数
+./myimg-cli --help
+```
+
+### 使用脚本
+
+```bash
+# RTX 3080 10G（自动优化）
+./img1.sh "prompt here" ~/output.png 2560 1440
+
+# RTX 4090D 24G（更高基础分辨率）
+./img2.sh "prompt here" ~/output.png 2560 1440
 ```
 
 ---
 
-## sd-workflow：C++ 版 ComfyUI 工作流引擎
+## 技术栈
 
-### 双模式设计
-
-`sd-workflow` 支持两种使用方式：
-
-1. **JSON 工作流模式**：执行 ComfyUI 风格的 JSON 工作流
-2. **快速命令行模式**：无需 JSON，直接通过命令行参数生成并执行
-
-### 快速模式
-
-#### txt2img 快速生成
-
-```bash
-sd-workflow --txt2img \
-  --model /path/to/model.gguf \
-  --prompt "masterpiece, best quality, a cat" \
-  --negative "bad quality" \
-  --width 512 --height 512 \
-  --seed 42 --steps 20 --cfg 7.5 \
-  --output mycat
-
-# 保存为 JSON 供后续复用
-sd-workflow --txt2img ... --save-json workflow.json
-```
-
-#### img2img 快速生成
-
-```bash
-sd-workflow --img2img \
-  --model /path/to/model.gguf \
-  --input input.png \
-  --prompt "add details" \
-  --denoise 0.75 \
-  --seed 42 --steps 20
-```
-
-#### 图像处理
-
-```bash
-sd-workflow --process \
-  --input photo.png \
-  --scale-w 1024 --scale-h 1024 \
-  --crop-x 256 --crop-y 256 --crop-w 512 --crop-h 512 \
-  --output processed
-```
-
-#### Deep HighRes Fix（高清修复）
-
-```bash
-# txt2img + Deep HighRes Fix（从小分辨率生成高清大图）
-sd-workflow --deep-hires \
-  --model /path/to/model.gguf \
-  --prompt "masterpiece, best quality, extremely detailed" \
-  --target-width 1024 \
-  --target-height 1024 \
-  --seed 42 --steps 30 \
-  --output hires_output
-
-# img2img + Deep HighRes Fix（从输入图高清重绘）
-sd-workflow --deep-hires \
-  --model /path/to/model.gguf \
-  --input input_512.png \
-  --prompt "masterpiece, best quality" \
-  --target-width 1024 \
-  --target-height 1024 \
-  --denoise 0.45 \
-  --seed 42 --steps 30 \
-  --output hires_output
-```
-
-### JSON 工作流模式
-
-```bash
-# 执行工作流
-sd-workflow --workflow my_workflow.json --verbose
-
-# 仅验证不执行
-sd-workflow --workflow my_workflow.json --dry-run
-
-# 查看支持的节点
-sd-workflow --list-nodes
-```
-
-### 支持的节点（47个）
-
-| 类别 | 节点 | 说明 |
-|------|------|------|
-| **加载器** | `CheckpointLoaderSimple` | 加载 SD 模型 |
-| **加载器** | `LoRALoader` | 加载 LoRA 权重 |
-| **加载器** | `LoRAStack` | 多 LoRA 堆叠 |
-| **加载器** | `UpscaleModelLoader` | ESRGAN 模型加载 |
-| **加载器** | `ControlNetLoader` | ControlNet 模型加载 |
-| **加载器** | `RemBGModelLoader` | 背景抠图 ONNX 模型加载 |
-| **加载器** | `FaceDetectModelLoader` | YuNet 人脸检测 ONNX 模型加载 |
-| **加载器** | `FaceRestoreModelLoader` | GFPGAN/CodeFormer 修复模型加载 |
-| **加载器** | `FaceSwapModelLoader` | inswapper_128 + ArcFace 换脸模型加载 |
-| **加载器** | `IPAdapterLoader` | IPAdapter 模型加载 |
-| **条件编码** | `CLIPTextEncode` | 文本编码为 conditioning |
-| **条件编码** | `CLIPSetLastLayer` | 设置 CLIP 跳过层（clip_skip） |
-| **条件编码** | `ConditioningCombine` | 条件合并（token 拼接） |
-| **条件编码** | `ConditioningConcat` | 条件拼接 |
-| **条件编码** | `ConditioningAverage` | 条件加权平均 |
-| **条件编码** | `ControlNetApply` | 应用 ControlNet |
-| **条件编码** | `IPAdapterApply` | 应用 IPAdapter |
-| **CLIP Vision** | `CLIPVisionEncode` | CLIP Vision 图像编码 |
-| **Latent** | `EmptyLatentImage` | 创建空 latent |
-| **Latent** | `VAEEncode` | 图像编码为 latent（img2img） |
-| **Latent** | `VAEDecode` | latent 解码为图像 |
-| **采样** | `KSampler` | 执行扩散采样（支持 LoRA/ControlNet/IPAdapter/Mask） |
-| **采样** | `KSamplerAdvanced` | 高级采样器（start/end step / add_noise） |
-| **采样** | `DeepHighResFix` | **原生 Deep HighRes Fix**，单次采样动态改变分辨率 |
-| **图像** | `LoadImage` | 加载图像 |
-| **图像** | `SaveImage` | 保存 PNG |
-| **图像** | `ImageScale` | 图像缩放（bilinear/nearest/lanczos） |
-| **图像** | `ImageCrop` | 图像裁剪 |
-| **图像** | `ImageBlend` | 图像混合（normal/add/multiply/screen） |
-| **图像** | `ImageCompositeMasked` | 蒙版合成 |
-| **图像** | `ImageUpscaleWithModel` | ESRGAN 模型放大 |
-| **图像** | `ImageRemoveBackground` | 背景抠图（输出 RGBA + Mask） |
-| **图像** | `FaceDetect` | 人脸检测（输出检测框和关键点） |
-| **图像** | `FaceRestoreWithModel` | 人脸修复（GFPGAN / CodeFormer） |
-| **图像** | `FaceSwap` | 人脸换脸（inswapper_128 + ArcFace） |
-| **图像** | `ImageInvert` | 颜色反转 |
-| **图像** | `ImageColorAdjust` | 亮度/对比度/饱和度调整 |
-| **图像** | `ImageBlur` | 盒式模糊 |
-| **图像** | `ImageGrayscale` | 灰度转换 |
-| **图像** | `ImageThreshold` | 二值化 |
-| **图像** | `CannyEdgePreprocessor` | Canny 边缘检测预处理 |
-| **图像** | `MiDaS-DepthMapPreprocessor` | MiDaS 深度图预处理（⚠️ 占位符，需 ONNX 模型） |
-| **图像** | `OpenPosePreprocessor` | OpenPose 姿态预处理（⚠️ 占位符，需 ONNX 模型） |
-| **图像** | `LoadImageMask` | 加载 mask |
-| **图像** | `PreviewImage` | 终端预览 |
-| **修复** | `INPAINT_LoadInpaintModel` | 加载 Inpaint 模型（⚠️ 占位符） |
-| **修复** | `INPAINT_ApplyInpaint` | 应用 Inpaint（⚠️ 占位符） |
-| **视频** | `AnimateDiffLoader` | 加载 AnimateDiff 运动模块（⚠️ 占位符） |
-| **视频** | `AnimateDiffSampler` | AnimateDiff 采样器（⚠️ 占位符） |
-| **测试** | `ConstantInt` / `AddInt` / `MultiplyInt` / `PrintInt` | 测试节点 |
-
-### 核心特性
-
-- **真正的中间 latent/conditioning 传递**：通过扩展 `stable-diffusion.cpp` C API 实现
-- **DAG 拓扑排序执行**：自动计算节点依赖顺序
-- **节点结果缓存**：只重新执行变化的节点
-- **命令行 ↔ 节点桥接**：`WorkflowBuilder` 支持程序化构建工作流
-
----
-
-## sd-hires：AI 高清修复
-
-**流程**：ESRGAN 像素级放大 → Deep HighRes Fix 分阶段重绘
-
-```bash
-sd-hires \
-  --diffusion-model /opt/image/z_image_turbo-Q6_K.gguf \
-  --vae /opt/image/ae.safetensors \
-  --llm /opt/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
-  --upscale-model /opt/image/RealESRGAN_x2plus.bin \
-  --input input.png \
-  --output output.png \
-  --prompt "masterpiece, best quality, extremely detailed" \
-  --scale 2 \
-  --steps 30 \
-  --deep-hires
-```
-
-**参数说明**：
-- `--diffusion-model`：扩散模型（.gguf）
-- `--vae`：VAE 模型
-- `--llm`：LLM / CLIP 模型
-- `--upscale-model`：ESRGAN 模型（.bin）
-- `--scale`：ESRGAN 放大倍数（2 或 4，默认 2）
-- `--strength`：img2img 强度（默认 0.40）
-- `--steps`：总采样步数（默认 30）
-- `--deep-hires`：启用 Deep HighRes Fix（默认开启）
-- `--no-deep-hires`：禁用，只用单次 img2img
-- `--target-width/--target-height`：指定输出尺寸
-- `--vae-tiling`：大图启用 VAE 分块解码
-- `--flash-attn`：启用 Flash Attention
-- `--cpu`：强制 CPU 运行
-
-**Deep HighRes Fix 流程**（原生实现，单次采样中动态改变分辨率）：
-
-| 阶段 | 分辨率 | 步数 | 作用 |
-|------|--------|------|------|
-| Phase 1 | 低分辨率（如 512x512） | 总步数 × 25% | 确定构图 |
-| Phase 2 | 中分辨率（如 768x768） | 总步数 × 25% | 过渡细化 |
-| Phase 3 | 目标分辨率 | 总步数 × 50% | 细节增强 |
-
-**核心优势**：
-- ✅ **单次采样过程**：不是多次调用 `generate_image()`
-- ✅ **Latent 空间过渡**：在采样过程中直接对 latent 插值上采样
-- ✅ **只 VAE decode 一次**：信息损失最小化
-
-> 实现方式：通过在 `stable-diffusion.cpp` 源码中添加 `sd_latent_hook_t` hook，在 `sample()` 函数的每个采样步骤前调用，动态改变 latent 分辨率。
-
-> 💡 **节点化支持**：Deep HighRes Fix 的核心逻辑也已封装为 `DeepHighResFix` 节点，可以在 `sd-workflow` 的工作流中灵活组合使用（见下文 `--deep-hires` 快速模式）。
-
----
-
-## sd-img2img：图生图
-
-```bash
-# 普通 img2img
-sd-img2img \
-  --diffusion-model /opt/image/z_image_turbo-Q6_K.gguf \
-  --vae /opt/image/ae.safetensors \
-  --llm /opt/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
-  --input input.png \
-  --output output.png \
-  --prompt "masterpiece, best quality" \
-  --strength 0.45 \
-  --steps 20
-
-# Deep HighRes Fix（从小图生成大图）
-sd-img2img \
-  --diffusion-model /opt/image/z_image_turbo-Q6_K.gguf \
-  --vae /opt/image/ae.safetensors \
-  --llm /opt/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
-  --input input_512.png \
-  --output output_1024.png \
-  --prompt "masterpiece, best quality" \
-  --deep-hires \
-  --target-width 1024 \
-  --target-height 1024 \
-  --steps 30
-```
-
----
-
-## sd-upscale：ESRGAN 独立放大
-
-```bash
-sd-upscale \
-  --model /opt/image/RealESRGAN_x2plus.bin \
-  --input input.png \
-  --output output.png \
-  --scale 2
-```
-
----
-
-## 升级 stable-diffusion.cpp
-
-由于 my-img 修改了 `stable-diffusion.cpp` 源码（添加了 latent hook、分离式 C API、LoRA 支持等），升级后需要重新应用修改：
-
-```bash
-cd ~/stable-diffusion.cpp
-git pull
-
-cd ~/my-img
-./apply_patches.sh
-
-cd ~/my-img/build
-./build_sd.sh
-
-cd ~/my-img/build
-cmake .. && make -j$(nproc)
-```
-
-修改的备份文件存放在 `~/my-img/patches/stable-diffusion.cpp-patched/` 目录下。
-
-### Patch 验证流程
-
-为了确保 patch 文件可以在 `git clone` 后完美重现代码，执行以下验证：
-
-```bash
-# 1. 查看当前修改状态
-cd ~/stable-diffusion.cpp
-git diff --stat
-
-# 2. 保存当前工作区
-git stash
-
-# 3. 恢复到干净状态
-git checkout -- .
-
-# 4. 从 patch 重新应用修改
-git apply ~/my-img/patches/hires-fix-stable-diffusion.patch
-
-# 5. 验证 patch 后的代码与备份完全一致
-for f in src/stable-diffusion.cpp src/tensor.hpp src/ggml_extend.hpp \
-         src/vae.hpp src/denoiser.hpp include/stable-diffusion.h \
-         examples/common/common.cpp examples/common/common.h; do
-    backup="~/my-img/patches/stable-diffusion.cpp-patched/$(basename $f)"
-    diff -q "$f" "$backup" && echo "✅ $f" || echo "❌ $f 不匹配"
-done
-```
-
-**验证结果示例：**
-```
-✅ src/stable-diffusion.cpp
-✅ src/tensor.hpp
-✅ src/ggml_extend.hpp
-✅ src/vae.hpp
-✅ src/denoiser.hpp
-✅ include/stable-diffusion.h
-✅ examples/common/common.cpp
-✅ examples/common/common.h
-🎉 所有文件匹配！Patch 可以完美重现代码
-```
-
-**patch 目录结构：**
-```
-patches/
-├── hires-fix-stable-diffusion.patch     # 最新完整 patch（63KB）
-├── hires-fix-myimg.patch                # my-img 项目部分
-├── stable-diffusion.cpp-patched/        # 修改后完整文件备份
-│   ├── stable-diffusion.cpp
-│   ├── tensor.hpp
-│   ├── ggml_extend.hpp
-│   ├── vae.hpp
-│   ├── denoiser.hpp
-│   ├── stable-diffusion.h
-│   ├── common.cpp
-│   └── common.h
-└── apply-to-4090d.sh                    # 自动应用脚本
-```
-
----
-
-## 3080 (10GB) 高清修复方案
-
-### 核心原理
-
-显存隔离策略：不要直接把 2K 大图传给 SD。在 C++ 业务层手动将大图切成 1024x1024 的小块（Tile），分批次送入 GPU。
-
-### 关键技术
-
-1. **分块处理 (Tiled Processing)**
-   - 将大图切成 1024x1024 小块
-   - 分批次送入 GPU 处理
-   - 显存占用约 5GB
-
-2. **线性羽化融合 (Linear Feathering)**
-   - 相邻分块必须有 64 像素重叠区
-   - 拼接时使用 Alpha 混合消除接缝
-
-3. **尺寸对齐 (64-bit Alignment)**
-   - Stable Diffusion 要求宽高必须是 64 的倍数
-   - 使用 `(w + 63) & ~63` 强制对齐
-
-4. **VAE 卸载**
-   - 开启 `keep_vae_on_cpu = true` 减少显存压力
-   - VAE 在 CPU 跑，显存全力供给 U-Net
-
-### 参数建议
-
-| 参数 | 值 | 说明 |
+| 组件 | 库 | 用途 |
 |------|-----|------|
-| TILE_SIZE | 1024 | 10GB 显存最稳尺寸 |
-| OVERLAP | 64 | 重叠区域，必须≥64 |
-| strength | 0.35-0.45 | 保持结构，修复细节 |
-| steps | 30 | 足够步数压实细节 |
-| cfg_scale | 4.5-7.0 | 根据模型调整 |
-| VAE tile_size | 128 | 防爆显存 |
+| **推理引擎** | [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) | 模型加载、GGUF 推理、采样 |
+| **张量计算** | [libtorch](https://pytorch.org/cppdocs/) | 图像处理、高级功能扩展 |
+| **JSON 解析** | [nlohmann/json](https://github.com/nlohmann/json) | 配置和工作流解析 |
+| **图像 I/O** | [stb_image](https://github.com/nothings/stb) | PNG/JPG 加载保存 |
+| **构建系统** | CMake 3.18+ | 跨平台构建 |
 
 ---
 
-## 提示词处理逻辑
+## 与 ComfyUI 的对比
 
-**核心原则**：
-- 保留原始主题关键词，否则分块可能产生风格不符的内容
-- 增加细节增强词，引导 AI 细化纹理
-
-**推荐结构**：
-```
-正向: (Masterpiece:1.2), (Best quality:1.2), (Highres:1.2), [原始提示词], extremely detailed, sharp focus, intricate textures.
-负向: (low quality, worst quality:1.4), blurry, noise, grain, distorted.
-```
-
----
-
-## 模型准备
-
-### Stable Diffusion 模型
-
-下载 `.safetensors` 或 `.ckpt`，转换为 GGUF 格式。
-
-### ESRGAN 超分模型
-
-- https://github.com/xinntao/Real-ESRGAN/releases
-- `RealESRGAN_x2plus.bin` - 2x 放大
-- `RealESRGAN_x4plus.bin` - 4x 放大
-
-### TAESD 轻量级 VAE（可选）
-
-适合高分辨率或低显存：
-```bash
-wget https://huggingface.co/leejet/taesd/resolve/main/taesd_encoder.static.gguf -P /opt/image/
-wget https://huggingface.co/leejet/taesd/resolve/main/taesd_decoder.static.gguf -P /opt/image/
-```
+| 特性 | ComfyUI (Python) | my-img (C++) |
+|------|------------------|--------------|
+| **Python 依赖** | 需要 Python 3.10+ | ❌ 零 Python |
+| **启动速度** | 慢（数秒） | ⚡ 毫秒级 |
+| **部署体积** | >10GB (Docker) | ~100MB (二进制) |
+| **内存占用** | 高（Python 对象） | 低（C++ 紧凑） |
+| **模型支持** | Safetensors 为主 | GGUF + Safetensors |
+| **功能完整度** | 完整 | 🚧 核心功能已支持 |
+| **工作流** | JSON 可视化 | CLI / JSON（开发中） |
+| **插件生态** | 丰富 | 计划中 |
 
 ---
 
-## 依赖说明
+## 设计哲学
 
-### 必需依赖
-编译后运行只需系统自带库：
-- `libgomp.so.1` - GCC OpenMP
-- `libstdc++.so.6` - C++ 标准库
-- `libm.so.6` - 数学库
-- `libc.so.6` - C 库
-
-### 可选第三方依赖
-
-#### ONNX Runtime（用于 RemBG / Face Restore / Face Swap）
-
-`RemBGModelLoader`、`ImageRemoveBackground`、`FaceDetectModelLoader`、`FaceRestoreModelLoader`、`FaceSwapModelLoader` 等人脸相关节点需要 ONNX Runtime。如果不需要这些功能，可以跳过此步骤，其他所有功能不受影响。
-
-**Linux x64 安装方法：**
-
-```bash
-# 方法 1：自动下载并解压到用户目录
-cd ~
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz
-tar -xzf onnxruntime-linux-x64-1.20.1.tgz
-
-# 方法 2：自定义路径（下载后解压到任意位置）
-# 假设解压到 /opt/onnxruntime-linux-x64-1.20.1
-export ONNXRUNTIME_ROOT=/opt/onnxruntime-linux-x64-1.20.1
-```
-
-**CMake 自动检测规则：**
-1. 优先读取环境变量 `ONNXRUNTIME_ROOT`
-2. 如果未设置，自动回退到 `~/onnxruntime-linux-x64-1.20.1`
-3. 如果都找不到，RemBG 节点会被编译为占位符（运行时提示不可用），其他所有功能不受影响
-
-**模型下载：**
-
-```bash
-# BRIA-RMBG ONNX 模型（约 40MB，开源可商用）
-wget https://huggingface.co/briaai/RMBG-1-4/resolve/main/onnx/model.onnx -P ~/models/
-mv ~/models/model.onnx ~/models/bria-rmbg.onnx
-
-# YuNet 人脸检测（OpenCV Zoo）
-# 通常随 OpenCV 分发，或从 OpenCV Zoo 下载
-
-# GFPGAN v1.4 人脸修复
-wget https://huggingface.co/neurobytemind/GFPGANv1.4.onnx/resolve/main/GFPGANv1.4.onnx -P ~/models/
-
-# CodeFormer 人脸修复
-wget https://huggingface.co/bluefoxcreation/Codeformer-ONNX/resolve/main/codeformer.onnx -P ~/models/
-
-# InsightFace inswapper_128 换脸
-wget https://huggingface.co/ezioruan/inswapper_128.onnx/resolve/main/inswapper_128.onnx -P ~/models/
-
-# ArcFace 人脸特征提取（换脸配套）
-wget https://huggingface.co/onnx-community/arcface-onnx/resolve/main/arcface.onnx -P ~/models/
-```
-
-工作流中使用示例：
-```json
-{
-  "1": { "class_type": "RemBGModelLoader", "inputs": { "model_path": "~/models/bria-rmbg.onnx" } },
-  "2": { "class_type": "FaceDetectModelLoader", "inputs": { "model_path": "~/models/yunet_320_320.onnx" } },
-  "3": { "class_type": "FaceRestoreModelLoader", "inputs": { "model_path": "~/models/GFPGANv1.4.onnx", "model_type": "gfpgan" } },
-  "4": { "class_type": "FaceSwapModelLoader", "inputs": { "inswapper_path": "~/models/inswapper_128.onnx", "arcface_path": "~/models/arcface.onnx" } }
-}
-```
+1. **零 Python**：不是 Python-lite，而是彻底零依赖
+2. **混合架构**：sd.cpp 负责推理（成熟），libtorch 负责扩展（灵活）
+3. **适配层隔离**：sd.cpp 升级不影响上层代码
+4. **功能对等**：ComfyUI 能做的，my-img 最终都要能做
+5. **性能优先**：C++ 的性能，Python 的便捷（最终目标）
 
 ---
 
-## 代码索引
+## 贡献
 
-本项目提供高性能代码符号索引，用于快速探索 `stable-diffusion.cpp` 等第三方项目源码。
+欢迎提交 Issue 和 PR！
 
-```bash
-# 构建索引
-python3 code_index.py ~/stable-diffusion.cpp ~/stable-diffusion-cpp.bin
-
-# 搜索符号
-python3 code_search.py ~/stable-diffusion-cpp.bin --find generate_image --json
-python3 code_search.py ~/stable-diffusion-cpp.bin --search "upscale" --json --limit 10
-```
-
-详见 [claude.md](claude.md) 中的 Code Index 章节。
+### 当前最需要帮助的方向
+- img2img 实现
+- LoRA 权重注入
+- ControlNet 支持
+- Workflow JSON 解析
+- 文档完善
 
 ---
 
-## 待复刻的 ComfyUI 生态
+## 许可证
 
-### 已完成的独立工具
-
-| # | 项目 | 进度 |
-|---|------|------|
-| 1 | `sd-workflow` | ✅ 支持 JSON 工作流 + 快速命令行模式 |
-| 2 | `sd-hires` | ✅ |
-| 3 | `sd-img2img` | ✅ |
-| 4 | `sd-upscale` | ✅ |
-
-### 已完成的 sd-engine 节点
-
-| # | 节点类别 | 具体节点 | 进度 |
-|---|---------|---------|------|
-| 1 | **加载器** | CheckpointLoaderSimple | ✅ |
-| 2 | **加载器** | LoRALoader / LoRAStack | ✅ |
-| 3 | **加载器** | UpscaleModelLoader | ✅ |
-| 4 | **加载器** | ControlNetLoader | ✅ |
-| 5 | **加载器** | RemBGModelLoader | ✅ |
-| 6 | **加载器** | IPAdapterLoader | ✅ |
-| 7 | **加载器** | FaceDetectModelLoader | ✅ |
-| 8 | **加载器** | FaceRestoreModelLoader | ✅ |
-| 9 | **加载器** | FaceSwapModelLoader | ✅ |
-| 10 | **条件编码** | CLIPTextEncode / CLIPSetLastLayer | ✅ |
-| 11 | **条件编码** | ConditioningCombine / Concat / Average | ✅ |
-| 12 | **条件编码** | ControlNetApply / IPAdapterApply | ✅ |
-| 13 | **CLIP Vision** | CLIPVisionEncode | ✅ |
-| 14 | **Latent** | EmptyLatentImage / VAEEncode / VAEDecode | ✅ |
-| 15 | **采样** | KSampler / KSamplerAdvanced | ✅ |
-| 16 | **采样** | DeepHighResFix | ✅ |
-| 17 | **图像** | LoadImage / SaveImage / PreviewImage | ✅ |
-| 18 | **图像** | ImageScale / ImageCrop / ImageBlend / ImageCompositeMasked | ✅ |
-| 19 | **图像** | ImageUpscaleWithModel / ImageRemoveBackground | ✅ |
-| 20 | **图像** | ImageInvert / ImageColorAdjust / ImageBlur / ImageGrayscale / ImageThreshold | ✅ |
-| 21 | **图像** | CannyEdgePreprocessor / LoadImageMask | ✅ |
-| 22 | **人脸** | FaceDetect / FaceRestoreWithModel / FaceSwap | ✅ |
-| 23 | **引擎** | sd-workflow CLI + DAG 执行器 + 缓存 | ✅ |
-| 24 | **引擎** | WorkflowBuilder（命令行桥接） | ✅ |
-
-### 计划中的节点
-
-| # | 节点类别 | 具体节点 | 进度 |
-|---|---------|---------|------|
-| 1 | **条件编码** | ConditioningCombine / ConditioningConcat / ConditioningAverage | ✅ |
-| 2 | **Latent** | LatentUpscale / LatentComposite | ✅ |
-| 3 | **采样** | KSamplerAdvanced / SamplerCustom | ✅ |
-| 4 | **图像** | ImageBlend / ImageCompositeMasked / ImageRemoveBackground | ✅ |
-| 5 | **超分** | UpscaleModelLoader / ImageUpscaleWithModel | ✅ |
-| 6 | **人脸** | FaceDetect / FaceRestoreWithModel / FaceSwap | ✅ |
-| 7 | **ControlNet** | ControlNetLoader / ControlNetApply / CannyEdgePreprocessor | ✅ |
-| 8 | **ControlNet** | MiDaS-DepthMapPreprocessor / OpenPosePreprocessor | ⚠️ 占位符（需 ONNX 模型） |
-| 9 | **IPAdapter** | IPAdapterLoader / IPAdapterApply | ✅ |
-| 10 | **修复** | INPAINT_LoadInpaintModel / INPAINT_ApplyInpaint | ⚠️ 占位符（需 inpaint UNet 支持） |
-| 11 | **视频** | AnimateDiff Loader / Sampler | ⚠️ 占位符（需 motion module 支持） |
+MIT License
 
 ---
 
----
+## 致谢
 
-## 项目评估
-
-### 总体评分：A-（结构清晰，性能优良，持续迭代中）
-
-| 维度 | 评分 | 说明 |
-|------|------|------|
-| **功能完整性** | B+ | 46+ 节点覆盖核心功能；MiDaS/OpenPose/Inpaint/AnimateDiff 为占位符（运行时返回错误而非假结果） |
-| **架构设计** | A- | DAG 执行引擎 + 缓存 + 多线程并行 + 对象池，设计清晰 |
-| **代码质量** | A- | `core_nodes.cpp` 已拆分为 6 个模块，公共代码提取到 `node_utils`，ONNX 占位符使用宏统一生成 |
-| **测试覆盖** | B+ | 25 个 test cases / 123 assertions，新增 Cache LRU、ImageScale、ImageCrop 测试 |
-| **性能优化** | A- | 无 GIL、DAG 同层并行、Cache O(1) LRU、人脸修复 ONNX 多线程并行、latent 插值和 Executor 锁优化 |
-| **生产就绪度** | B+ | 修复了 sd_ctx 泄漏、缓存哈希碰撞、对象池失效，新增统一日志系统 |
-| **文档完整性** | A- | README、架构设计文档、人脸方案文档、编译脚本齐全 |
-
-### 核心优势
-
-1. **零 Python 依赖**：单二进制部署，彻底摆脱 ComfyUI 的依赖地狱
-2. **性能领先**：C++ 原生执行，无 GIL，DAG 同层节点多线程并行
-3. **功能丰富**：46 个节点，涵盖从基础生成到人脸修复/换脸的高级 pipeline
-4. **扩展性强**：基于 `stable-diffusion.cpp` + 模块化补丁，新增节点只需继承 `Node` 基类
-5. **双模式使用**：既支持 ComfyUI JSON 工作流，也支持命令行快速模式
-
-### 已知短板与风险
-
-1. **测试未覆盖核心生成链路**：`KSampler`、`VAEDecode` 等关键节点缺乏端到端测试（需要大模型，测试成本高）
-2. **ONNX 模型需自备**：LineArt、人脸修复等节点需要用户自行转换/下载 ONNX 模型
-3. **部分高级预处理器为占位符**：MiDaS Depth、OpenPose 为占位符（运行时返回错误）；LineArt 需 ONNX 模型
-4. **日志系统已引入但未全面替换**：`log.h` 已创建，后续需逐步替换所有 `printf` 调用
-
-### 生产部署建议
-
-- ✅ **适合**：批量图像生成服务、API 后端、无头服务器部署
-- ⚠️ **注意**：长进程服务务必在工作流末尾添加 `UnloadModel` 节点释放模型上下文
-- ⚠️ **注意**：大显存场景建议开启 VAE tiling 和分块处理
-
----
-
-## 参考
-
-- [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
-- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
-- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+- [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) - 核心推理引擎
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) / [ggml](https://github.com/ggerganov/ggml) - GGUF 格式和量化推理
+- [PyTorch](https://pytorch.org/) - libtorch C++ 前端
+- [ComfyUI](https://github.com/comfyanonymous/ComfyUI) - 灵感来源和工作流设计

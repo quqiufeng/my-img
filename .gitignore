@@ -4,6 +4,7 @@ bin/
 *.o
 *.a
 *.so
+*.exe
 
 # Environment files
 .env
@@ -18,5 +19,24 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
-stable-diffusion.cpp
+
+# Logs
 *.log
+
+# Model files (large)
+*.gguf
+*.safetensors
+*.ckpt
+*.pth
+*.onnx
+
+# Test artifacts
+Testing/
+*.tmp
+
+# Third-party libraries (managed separately)
+/third_party/
+
+# Submodules
+*.submodule
+.gitmodules
