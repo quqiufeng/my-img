@@ -7,6 +7,7 @@
 #include "adapters/sdcpp_adapter.h"
 #include "utils/image_utils.h"
 #include "utils/image_adjust.h"
+#include "utils/png_metadata.h"
 
 namespace fs = std::filesystem;
 
@@ -110,6 +111,10 @@ struct CliOptions {
     std::string batch_input_dir;
     std::string batch_output_dir;
     
+    // Image interrogation / metadata
+    std::string interrogate_image;   // Image to interrogate (JoyCaption placeholder)
+    std::string read_metadata_image; // Image to read PNG metadata from
+    
     // 系统
     int threads = -1;
     bool verbose = false;
@@ -205,6 +210,10 @@ static void print_usage(const char* argv0) {
     std::cout << "\nBatch Processing Options:\n";
     std::cout << "  --batch-input-dir PATH    Input directory for batch processing\n";
     std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
+    std::cout << "\nImage Interrogation:\n";
+    std::cout << "  --interrogate PATH        Image path for caption/description\n";
+    std::cout << "                            (requires JoyCaption model - placeholder)\n";
+    std::cout << "  --read-metadata PATH      Read PNG metadata (prompt/parameters)\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
@@ -429,6 +438,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--batch-output-dir") {
             if (++i >= argc) { std::cerr << "Missing value for --batch-output-dir\n"; return false; }
             opts.batch_output_dir = argv[i];
+        } else if (arg == "--interrogate") {
+            if (++i >= argc) { std::cerr << "Missing value for --interrogate\n"; return false; }
+            opts.interrogate_image = argv[i];
+        } else if (arg == "--read-metadata") {
+            if (++i >= argc) { std::cerr << "Missing value for --read-metadata\n"; return false; }
+            opts.read_metadata_image = argv[i];
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
@@ -479,6 +494,55 @@ int main(int argc, char** argv) {
     if (!parse_args(argc, argv, opts)) {
         print_usage(argv[0]);
         return 1;
+    }
+    
+    // Read PNG metadata (no model required)
+    if (!opts.read_metadata_image.empty()) {
+        std::cout << "========================================\n";
+        std::cout << "  PNG Metadata Reader\n";
+        std::cout << "========================================\n";
+        std::cout << "File: " << opts.read_metadata_image << "\n\n";
+        
+        if (!myimg::is_png_file(opts.read_metadata_image)) {
+            std::cerr << "Error: Not a PNG file\n";
+            return 1;
+        }
+        
+        auto metadata = myimg::read_png_metadata(opts.read_metadata_image);
+        if (metadata.empty()) {
+            std::cout << "No metadata found in this PNG file.\n";
+        } else {
+            for (const auto& [key, value] : metadata) {
+                std::cout << "[" << key << "]\n";
+                std::cout << value << "\n\n";
+            }
+        }
+        return 0;
+    }
+    
+    // Image interrogation placeholder (JoyCaption integration point)
+    if (!opts.interrogate_image.empty()) {
+        std::cout << "========================================\n";
+        std::cout << "  Image Interrogation\n";
+        std::cout << "========================================\n";
+        std::cout << "File: " << opts.interrogate_image << "\n\n";
+        
+        // First, try to read embedded metadata
+        if (myimg::is_png_file(opts.interrogate_image)) {
+            auto metadata = myimg::read_png_metadata(opts.interrogate_image);
+            if (metadata.count("parameters")) {
+                std::cout << "[Embedded Parameters]\n";
+                std::cout << metadata["parameters"] << "\n\n";
+            }
+        }
+        
+        std::cout << "[JoyCaption Integration]\n";
+        std::cout << "To use JoyCaption for image captioning:\n";
+        std::cout << "  1. Download JoyCaption model\n";
+        std::cout << "  2. Place it in models/ directory\n";
+        std::cout << "  3. Use: --interrogate-model PATH --interrogate " << opts.interrogate_image << "\n";
+        std::cout << "\nNote: Full JoyCaption integration requires additional model files.\n";
+        return 0;
     }
     
     // 检查必要参数

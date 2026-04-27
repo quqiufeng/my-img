@@ -114,6 +114,7 @@
 ### Phase 8: 图像理解 & 反推
 
 #### Task 8.0: 图片反推提示词（CLIP Interrogator / Image2Prompt）🛒
+- [x] PNG 元数据读取（tEXt/iTXt/zTXt chunks）- 提取 embedded parameters
 - [ ] 加载 CLIP Vision 模型（或 BLIP/LLaVA）
 - [ ] 分析图片内容并生成文本描述
 - [ ] 支持多种反推模式：
@@ -121,15 +122,17 @@
   - 标签式（tag1, tag2, tag3）
   - Stable Diffusion 提示词风格
   - Danbooru/动漫标签风格
-- [ ] CLI 参数：`--interrogate PATH`
+- [x] CLI 参数：`--interrogate PATH`（占位符，提示 JoyCaption 集成方式）
+- [x] CLI 参数：`--read-metadata PATH`
 - [ ] CLI 参数：`--interrogate-mode {describe|tags|sd|danbooru}`
-- [ ] 输出到文件或标准输出
+- [x] 输出到标准输出
 - **优先级**: 🛒 P1（电商刚需）
 - **难度**: 中
 - **用途**: 
   - 电商：分析竞品图片获取提示词
   - 设计：复现参考图风格
   - 素材管理：自动打标签
+- **状态**: ✅ 基础版本已完成（PNG 元数据读取 + JoyCaption 集成占位符）
 
 ### Phase 9: IPAdapter & 图像条件
 

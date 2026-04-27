@@ -140,6 +140,7 @@ set(MYIMG_SOURCES
     src/adapters/sdcpp_adapter.cpp
     src/utils/image_utils.cpp
     src/utils/image_adjust.cpp
+    src/utils/png_metadata.cpp
     src/utils/stb_impl.c
 )
 
@@ -162,10 +163,14 @@ target_include_directories(myimg-cli PRIVATE
     ${SDCPP_DIR}/ggml/include
 )
 
+# 查找 zlib
+find_package(ZLIB REQUIRED)
+
 # 链接库
     target_link_libraries(myimg-cli PRIVATE
         ${TORCH_LIBRARIES}
         nlohmann_json::nlohmann_json
+        ZLIB::ZLIB
         ${SDCPP_LINK_START}
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
