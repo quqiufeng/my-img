@@ -183,6 +183,9 @@ static void print_usage(const char* argv0) {
     std::cout << "\nVignette Options:\n";
     std::cout << "  --vignette FLOAT          Vignette strength 0.0-1.0\n";
     std::cout << "  --vignette-radius FLOAT   Vignette radius 0.0-1.0 (default: 0.75)\n";
+    std::cout << "\nLocal Adjustment Options:\n";
+    std::cout << "  --radial-filter cx,cy,radius,exp,cont,sat  Radial filter (e.g. 0.5,0.5,0.3,0.5,0,0)\n";
+    std::cout << "  --graduated-filter angle,pos,width,exp,cont,sat  Graduated filter (e.g. 0,0.5,0.2,0.3,0,0)\n";
     std::cout << "\nFilter Presets:\n";
     std::cout << "  --preset NAME             Apply filter preset: bw, sepia, vintage, warm,\n";
     std::cout << "                            cool, dramatic, japanese, film, cyberpunk, cinematic\n";

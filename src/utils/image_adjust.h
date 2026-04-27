@@ -64,4 +64,19 @@ torch::Tensor apply_preset(const torch::Tensor& image, const std::string& name);
 // radius: 0.0-1.0 (0.5 = half image size)
 torch::Tensor vignette(const torch::Tensor& image, float strength, float radius = 0.75f);
 
+// Radial filter: apply adjustments within a circular region
+// cx, cy: center coordinates (0.0-1.0, relative to image size)
+// radius: radius (0.0-1.0, relative to image size)
+// exposure, contrast, saturation: adjustment values
+torch::Tensor radial_filter(const torch::Tensor& image, float cx, float cy, float radius,
+                            float exposure, float contrast, float saturation);
+
+// Graduated filter: apply adjustments along a linear gradient
+// angle: gradient angle in degrees (0 = top to bottom, 90 = left to right)
+// position: gradient center position (0.0-1.0)
+// width: gradient width (0.0-1.0)
+// exposure, contrast, saturation: adjustment values
+torch::Tensor graduated_filter(const torch::Tensor& image, float angle, float position, float width,
+                               float exposure, float contrast, float saturation);
+
 } // namespace myimg

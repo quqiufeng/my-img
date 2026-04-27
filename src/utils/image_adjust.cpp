@@ -465,4 +465,100 @@ torch::Tensor vignette(const torch::Tensor& image, float strength, float radius)
     return (img * mask).clamp(0, 1);
 }
 
+// 径向滤镜
+torch::Tensor radial_filter(const torch::Tensor& image, float cx, float cy, float radius,
+                            float exposure_val, float contrast_val, float saturation_val) {
+    if (radius <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    int h = img.size(1);
+    int w = img.size(2);
+    auto device = img.device();
+    
+    // 创建坐标网格
+    auto y = torch::linspace(0.0f, 1.0f, h, torch::TensorOptions().dtype(torch::kFloat32).device(device));
+    auto x = torch::linspace(0.0f, 1.0f, w, torch::TensorOptions().dtype(torch::kFloat32).device(device));
+    auto yy = y.unsqueeze(1).expand({h, w});
+    auto xx = x.unsqueeze(0).expand({h, w});
+    
+    // 计算到中心的距离
+    auto dx = xx - cx;
+    auto dy = yy - cy;
+    auto dist = (dx * dx + dy * dy).sqrt();
+    
+    // 创建径向 mask（圆形区域内部为 1，外部渐变到 0）
+    auto mask = (1.0f - ((dist - radius * 0.7f) / (radius * 0.3f)).clamp(0, 1)).clamp(0, 1);
+    mask = mask.unsqueeze(0); // [1, H, W]
+    
+    // 应用曝光调整
+    if (exposure_val != 0.0f) {
+        auto adjusted = adjust_exposure(img, exposure_val);
+        img = img * (1.0f - mask) + adjusted * mask;
+    }
+    
+    // 应用对比度调整
+    if (contrast_val != 0.0f) {
+        auto adjusted = adjust_contrast(img, contrast_val);
+        img = img * (1.0f - mask) + adjusted * mask;
+    }
+    
+    // 应用饱和度调整
+    if (saturation_val != 0.0f) {
+        auto adjusted = adjust_saturation(img, saturation_val);
+        img = img * (1.0f - mask) + adjusted * mask;
+    }
+    
+    return img.clamp(0, 1);
+}
+
+// 渐变滤镜
+torch::Tensor graduated_filter(const torch::Tensor& image, float angle, float position, float width,
+                               float exposure_val, float contrast_val, float saturation_val) {
+    if (width <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    int h = img.size(1);
+    int w = img.size(2);
+    auto device = img.device();
+    
+    // 将角度转换为弧度
+    float rad = angle * M_PI / 180.0f;
+    float cos_a = std::cos(rad);
+    float sin_a = std::sin(rad);
+    
+    // 创建坐标网格
+    auto y = torch::linspace(0.0f, 1.0f, h, torch::TensorOptions().dtype(torch::kFloat32).device(device));
+    auto x = torch::linspace(0.0f, 1.0f, w, torch::TensorOptions().dtype(torch::kFloat32).device(device));
+    auto yy = y.unsqueeze(1).expand({h, w});
+    auto xx = x.unsqueeze(0).expand({h, w});
+    
+    // 计算沿梯度方向的距离
+    // 将坐标投影到梯度方向
+    auto proj = xx * cos_a + yy * sin_a;
+    
+    // 创建渐变 mask
+    auto mask = (1.0f - ((proj - position) / width).abs().clamp(0, 1)).clamp(0, 1);
+    mask = mask.unsqueeze(0); // [1, H, W]
+    
+    // 应用曝光调整
+    if (exposure_val != 0.0f) {
+        auto adjusted = adjust_exposure(img, exposure_val);
+        img = img * (1.0f - mask) + adjusted * mask;
+    }
+    
+    // 应用对比度调整
+    if (contrast_val != 0.0f) {
+        auto adjusted = adjust_contrast(img, contrast_val);
+        img = img * (1.0f - mask) + adjusted * mask;
+    }
+    
+    // 应用饱和度调整
+    if (saturation_val != 0.0f) {
+        auto adjusted = adjust_saturation(img, saturation_val);
+        img = img * (1.0f - mask) + adjusted * mask;
+    }
+    
+    return img.clamp(0, 1);
+}
+
 } // namespace myimg
