@@ -354,11 +354,11 @@
   - 人像摄影：快速磨皮美白
 
 #### Task 10.5.10: LUT 预设与滤镜
-- [ ] 加载 LUT 文件（.cube, .3dl）
+- [x] 加载 LUT 文件（.cube 格式）- 3D LUT 颜色分级
 - [x] 内置常用滤镜（复古、日系、胶片、黑白、赛博朋克、电影感等）
 - [ ] 保存/加载自定义预设
 - [x] 批量应用预设（通过 batch processing）
-- [ ] CLI 参数：`--lut /path/to/filter.cube`
+- [x] CLI 参数：`--lut /path/to/filter.cube`
 - [x] CLI 参数：`--preset NAME`（内置预设名）
 - [ ] CLI 参数：`--save-preset my_preset`
 - **优先级**: P2

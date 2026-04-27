@@ -141,6 +141,7 @@ set(MYIMG_SOURCES
     src/utils/image_utils.cpp
     src/utils/image_adjust.cpp
     src/utils/png_metadata.cpp
+    src/utils/lut_loader.cpp
     src/utils/stb_impl.c
 )
 

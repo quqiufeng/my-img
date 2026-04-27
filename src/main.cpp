@@ -10,6 +10,7 @@
 #include "utils/image_utils.h"
 #include "utils/image_adjust.h"
 #include "utils/png_metadata.h"
+#include "utils/lut_loader.h"
 
 namespace fs = std::filesystem;
 
@@ -111,6 +112,9 @@ struct CliOptions {
     bool flip_v = false;
     int rotate = 0;           // 90, 180, 270
     
+    // LUT / Color grading
+    std::string lut_path;  // 3D LUT file (.cube)
+    
     // Batch processing (post-processing only)
     std::string batch_input_dir;
     std::string batch_output_dir;
@@ -197,32 +201,8 @@ static void print_usage(const char* argv0) {
     std::cout << "\nFilter Presets:\n";
     std::cout << "  --preset NAME             Apply filter preset: bw, sepia, vintage, warm,\n";
     std::cout << "                            cool, dramatic, japanese, film, cyberpunk, cinematic\n";
-    std::cout << "\nPortrait Retouching Options:\n";
-    std::cout << "  --whiten FLOAT            Whitening strength 0.0-1.0\n";
-    std::cout << "  --skin-smooth FLOAT       Skin smoothing strength 0.0-1.0\n";
-    std::cout << "\nSharpening & Denoise Options:\n";
-    std::cout << "  --sharpen FLOAT           USM sharpen amount 0.0-3.0 (default: 0)\n";
-    std::cout << "  --sharpen-radius INT      Sharpen radius 1-5 (default: 1)\n";
-    std::cout << "  --sharpen-threshold FLOAT Sharpen threshold 0-255 (default: 0)\n";
-    std::cout << "  --smart-sharpen FLOAT     Smart edge-aware sharpen 0.0-3.0 (default: 0)\n";
-    std::cout << "  --smart-sharpen-radius INT Smart sharpen radius 1-5 (default: 2)\n";
-    std::cout << "  --denoise FLOAT           Denoise strength 0.0-1.0 (default: 0)\n";
-    std::cout << "  --smart-denoise           Smart denoise (preserve edges)\n";
-    std::cout << "\nOutpainting Options:\n";
-    std::cout << "  --outpaint-top INT        Expand canvas top by N pixels\n";
-    std::cout << "  --outpaint-bottom INT     Expand canvas bottom by N pixels\n";
-    std::cout << "  --outpaint-left INT       Expand canvas left by N pixels\n";
-    std::cout << "  --outpaint-right INT      Expand canvas right by N pixels\n";
-    std::cout << "  --outpaint INT            Expand all directions by N pixels\n";
-    std::cout << "\nTransform Options (post-processing):\n";
-    std::cout << "  --resize WxH              Resize output image (e.g. 512x512)\n";
-    std::cout << "  --resize-mode MODE        Resize interpolation: nearest, bilinear, bicubic\n";
-    std::cout << "  --flip-h                  Flip horizontally\n";
-    std::cout << "  --flip-v                  Flip vertically\n";
-    std::cout << "  --rotate DEG              Rotate by 90, 180, or 270 degrees\n";
-    std::cout << "\nBatch Processing Options:\n";
-    std::cout << "  --batch-input-dir PATH    Input directory for batch processing\n";
-    std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
+    std::cout << "\nColor Grading:\n";
+    std::cout << "  --lut PATH                Load 3D LUT file (.cube format)\n";
     std::cout << "\nImage Interrogation:\n";
     std::cout << "  --interrogate PATH        Image path for caption/description\n";
     std::cout << "                            (requires JoyCaption model - placeholder)\n";
@@ -391,6 +371,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--preset") {
             if (++i >= argc) { std::cerr << "Missing value for --preset\n"; return false; }
             opts.preset = argv[i];
+        } else if (arg == "--lut") {
+            if (++i >= argc) { std::cerr << "Missing value for --lut\n"; return false; }
+            opts.lut_path = argv[i];
         } else if (arg == "--whiten") {
             if (++i >= argc) { std::cerr << "Missing value for --whiten\n"; return false; }
             opts.whiten_strength = std::stof(argv[i]);
@@ -799,7 +782,8 @@ int main(int argc, char** argv) {
                 !opts.preset.empty() ||
                 opts.vignette_strength > 0.0f ||
                 !opts.radial_filter.empty() ||
-                !opts.graduated_filter.empty()) {
+                !opts.graduated_filter.empty() ||
+                !opts.lut_path.empty()) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -861,6 +845,14 @@ int main(int argc, char** argv) {
                     char comma;
                     ss >> angle >> comma >> pos >> comma >> width >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
                     tensor = myimg::graduated_filter(tensor, angle, pos, width, exp_val, cont_val, sat_val);
+                }
+                
+                // LUT 颜色分级
+                if (!opts.lut_path.empty()) {
+                    myimg::LUT3D lut;
+                    if (lut.load_from_file(opts.lut_path)) {
+                        tensor = lut.apply(tensor);
+                    }
                 }
                 
                 // Portrait retouching
@@ -979,7 +971,8 @@ int main(int argc, char** argv) {
                                !opts.preset.empty() ||
                                opts.vignette_strength > 0.0f ||
                                !opts.radial_filter.empty() ||
-                               !opts.graduated_filter.empty();
+                               !opts.graduated_filter.empty() ||
+                               !opts.lut_path.empty();
         if (has_adjustments) {
             std::cout << "Applying photo adjustments...\n";
             myimg::ImageData img_data;
@@ -1062,6 +1055,15 @@ int main(int argc, char** argv) {
                 char comma;
                 ss >> angle >> comma >> pos >> comma >> width >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
                 tensor = myimg::graduated_filter(tensor, angle, pos, width, exp_val, cont_val, sat_val);
+            }
+            
+            // LUT 颜色分级
+            if (!opts.lut_path.empty()) {
+                std::cout << "Applying LUT: " << opts.lut_path << "\n";
+                myimg::LUT3D lut;
+                if (lut.load_from_file(opts.lut_path)) {
+                    tensor = lut.apply(tensor);
+                }
             }
             
             // 人像修饰
