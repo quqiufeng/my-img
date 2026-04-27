@@ -363,4 +363,78 @@ torch::Tensor apply_curves(const torch::Tensor& image, const std::string& curves
     return img.clamp(0, 1);
 }
 
+// 内置滤镜预设
+torch::Tensor apply_preset(const torch::Tensor& image, const std::string& name) {
+    auto img = image.clone();
+    
+    if (name == "bw" || name == "blackwhite") {
+        // 黑白
+        auto gray = img.mean(0, true).expand_as(img);
+        return gray.clamp(0, 1);
+    }
+    else if (name == "sepia") {
+        // 复古 sepia
+        auto r = img[0];
+        auto g = img[1];
+        auto b = img[2];
+        img[0] = (r * 0.393f + g * 0.769f + b * 0.189f).clamp(0, 1);
+        img[1] = (r * 0.349f + g * 0.686f + b * 0.168f).clamp(0, 1);
+        img[2] = (r * 0.272f + g * 0.534f + b * 0.131f).clamp(0, 1);
+        return img;
+    }
+    else if (name == "vintage") {
+        // 复古：降低饱和度 + 暖色调 + 轻微对比度提升
+        auto gray = img.mean(0, true);
+        img = gray + (img - gray) * 0.6f; // 降低饱和度
+        img = adjust_temperature(img, 0.3f); // 暖色调
+        img = adjust_contrast(img, 0.15f); // 提升对比度
+        img = adjust_brightness(img, -0.05f); // 轻微压暗
+        return img.clamp(0, 1);
+    }
+    else if (name == "warm") {
+        return adjust_temperature(img, 0.5f).clamp(0, 1);
+    }
+    else if (name == "cool") {
+        return adjust_temperature(img, -0.5f).clamp(0, 1);
+    }
+    else if (name == "dramatic") {
+        // 戏剧性：高对比度 + 压暗 + 提升饱和度
+        img = adjust_contrast(img, 0.4f);
+        img = adjust_brightness(img, -0.1f);
+        img = adjust_saturation(img, 0.2f);
+        img = adjust_shadows(img, -30.0f);
+        return img.clamp(0, 1);
+    }
+    else if (name == "japanese" || name == "film") {
+        // 日系/胶片：低对比度 + 轻微过曝 + 降低饱和度 + 偏青
+        img = adjust_contrast(img, -0.1f);
+        img = adjust_brightness(img, 0.1f);
+        img = adjust_saturation(img, -0.2f);
+        img = adjust_temperature(img, -0.1f); // 轻微冷色
+        img = adjust_highlights(img, 20.0f);
+        return img.clamp(0, 1);
+    }
+    else if (name == "cyberpunk") {
+        // 赛博朋克：高饱和度 + 洋红/青色偏移
+        img = adjust_saturation(img, 0.4f);
+        img = adjust_contrast(img, 0.2f);
+        // 增强蓝和洋红
+        img[0] = img[0] * 1.1f; // 红
+        img[2] = img[2] * 1.2f; // 蓝
+        return img.clamp(0, 1);
+    }
+    else if (name == "cinematic") {
+        // 电影感：宽色阶 + 轻微去饱和 + 压暗阴影
+        img = adjust_contrast(img, 0.15f);
+        img = adjust_saturation(img, -0.1f);
+        img = adjust_shadows(img, -20.0f);
+        img = adjust_highlights(img, 10.0f);
+        img = adjust_temperature(img, 0.05f);
+        return img.clamp(0, 1);
+    }
+    
+    // 未知预设，返回原图
+    return img;
+}
+
 } // namespace myimg

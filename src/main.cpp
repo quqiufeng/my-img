@@ -77,6 +77,7 @@ struct CliOptions {
     float shadows = 0.0f;        // -100 ~ 100
     bool auto_enhance = false;   // 一键优化
     std::string curves;          // RGB curves "in,out;in,out"
+    std::string preset;          // Filter preset name
     
     // 人像修饰
     float whiten_strength = 0.0f;    // 0.0-1.0
@@ -172,6 +173,9 @@ static void print_usage(const char* argv0) {
     std::cout << "  --auto-enhance            Auto one-click photo enhancement\n";
     std::cout << "\nCurves Options:\n";
     std::cout << "  --curves \"in,out;in,out\"  RGB curves (0-255, e.g. \"0,0;128,140;255,255\")\n";
+    std::cout << "\nFilter Presets:\n";
+    std::cout << "  --preset NAME             Apply filter preset: bw, sepia, vintage, warm,\n";
+    std::cout << "                            cool, dramatic, japanese, film, cyberpunk, cinematic\n";
     std::cout << "\nPortrait Retouching Options:\n";
     std::cout << "  --whiten FLOAT            Whitening strength 0.0-1.0\n";
     std::cout << "  --skin-smooth FLOAT       Skin smoothing strength 0.0-1.0\n";
@@ -351,6 +355,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--curves") {
             if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
             opts.curves = argv[i];
+        } else if (arg == "--preset") {
+            if (++i >= argc) { std::cerr << "Missing value for --preset\n"; return false; }
+            opts.preset = argv[i];
         } else if (arg == "--whiten") {
             if (++i >= argc) { std::cerr << "Missing value for --whiten\n"; return false; }
             opts.whiten_strength = std::stof(argv[i]);
@@ -688,7 +695,8 @@ int main(int argc, char** argv) {
                 !opts.curves.empty() ||
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                 opts.smart_denoise_flag ||
-                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f) {
+                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
+                !opts.preset.empty()) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -717,6 +725,11 @@ int main(int argc, char** argv) {
                 // RGB curves
                 if (!opts.curves.empty()) {
                     tensor = myimg::apply_curves(tensor, opts.curves);
+                }
+                
+                // Filter preset
+                if (!opts.preset.empty()) {
+                    tensor = myimg::apply_preset(tensor, opts.preset);
                 }
                 
                 // Portrait retouching
@@ -831,7 +844,8 @@ int main(int argc, char** argv) {
                                !opts.curves.empty() ||
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                                opts.smart_denoise_flag ||
-                               opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f;
+                               opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
+                               !opts.preset.empty();
         if (has_adjustments) {
             std::cout << "Applying photo adjustments...\n";
             myimg::ImageData img_data;
@@ -874,6 +888,12 @@ int main(int argc, char** argv) {
             if (!opts.curves.empty()) {
                 std::cout << "Applying curves: " << opts.curves << "\n";
                 tensor = myimg::apply_curves(tensor, opts.curves);
+            }
+            
+            // 滤镜预设
+            if (!opts.preset.empty()) {
+                std::cout << "Applying preset: " << opts.preset << "\n";
+                tensor = myimg::apply_preset(tensor, opts.preset);
             }
             
             // 人像修饰

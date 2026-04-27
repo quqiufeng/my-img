@@ -55,4 +55,8 @@ torch::Tensor skin_smooth(const torch::Tensor& image, float strength);
 // input/output values are 0-255
 torch::Tensor apply_curves(const torch::Tensor& image, const std::string& curves);
 
+// Built-in filter presets
+// name: "vintage", "bw", "film", "japanese", "warm", "cool", "dramatic"
+torch::Tensor apply_preset(const torch::Tensor& image, const std::string& name);
+
 } // namespace myimg
