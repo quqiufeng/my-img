@@ -100,4 +100,132 @@ torch::Tensor auto_enhance(const torch::Tensor& image) {
     return img.clamp(0, 1);
 }
 
+// USM (Unsharp Mask) 锐化
+torch::Tensor usm_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
+    if (amount <= 0.0f || radius <= 0) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // 创建高斯核
+    int kernel_size = 2 * radius + 1;
+    auto kernel = torch::zeros({1, 1, kernel_size, kernel_size}, torch::TensorOptions().dtype(torch::kFloat32));
+    float sigma = radius / 2.0f;
+    float sum = 0.0f;
+    
+    for (int y = 0; y < kernel_size; ++y) {
+        for (int x = 0; x < kernel_size; ++x) {
+            float dx = x - radius;
+            float dy = y - radius;
+            float val = std::exp(-(dx * dx + dy * dy) / (2.0f * sigma * sigma));
+            kernel[0][0][y][x] = val;
+            sum += val;
+        }
+    }
+    kernel = kernel / sum;
+    kernel = kernel.to(device);
+    
+    // 对每个通道应用高斯模糊
+    auto blurred = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0); // [1, 1, H, W]
+        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, radius);
+        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
+    }
+    
+    // 计算细节
+    auto detail = img - blurred;
+    
+    // 应用阈值：只对差异大于阈值的像素进行锐化
+    if (threshold > 0.0f) {
+        auto mask = detail.abs() > (threshold / 255.0f);
+        detail = detail * mask.to(torch::kFloat32);
+    }
+    
+    // 锐化
+    auto sharpened = img + detail * amount;
+    return sharpened.clamp(0, 1);
+}
+
+// 基础降噪（高斯模糊）
+torch::Tensor denoise(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // 根据强度确定模糊半径
+    int radius = std::max(1, static_cast<int>(strength * 3));
+    int kernel_size = 2 * radius + 1;
+    
+    auto kernel = torch::zeros({1, 1, kernel_size, kernel_size}, torch::TensorOptions().dtype(torch::kFloat32));
+    float sigma = radius / 2.0f;
+    float sum = 0.0f;
+    
+    for (int y = 0; y < kernel_size; ++y) {
+        for (int x = 0; x < kernel_size; ++x) {
+            float dx = x - radius;
+            float dy = y - radius;
+            float val = std::exp(-(dx * dx + dy * dy) / (2.0f * sigma * sigma));
+            kernel[0][0][y][x] = val;
+            sum += val;
+        }
+    }
+    kernel = kernel / sum;
+    kernel = kernel.to(device);
+    
+    // 对每个通道应用高斯模糊
+    auto blurred = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0);
+        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, radius);
+        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
+    }
+    
+    // 混合原图和模糊图
+    float blend = std::min(strength, 1.0f);
+    return (img * (1.0f - blend) + blurred * blend).clamp(0, 1);
+}
+
+// 智能降噪：保留边缘
+torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // 计算边缘强度（使用 Sobel 算子）
+    auto sobel_x = torch::tensor({{{-1.0f, 0.0f, 1.0f}, {-2.0f, 0.0f, 2.0f}, {-1.0f, 0.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0); // [1, 1, 3, 3]
+    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    
+    // 转为灰度计算边缘
+    auto gray = img.mean(0, true); // [1, H, W]
+    auto grad_x = torch::conv2d(gray.unsqueeze(0), sobel_x, {}, 1, 1);
+    auto grad_y = torch::conv2d(gray.unsqueeze(0), sobel_y, {}, 1, 1);
+    auto edge = (grad_x.squeeze() + grad_y.squeeze()).abs();
+    auto edge_mask = (edge < edge.mean().item<float>() * 2.0f).to(torch::kFloat32); // 非边缘区域
+    
+    // 轻量高斯模糊
+    int radius = 1;
+    auto kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f}, {0.125f, 0.25f, 0.125f}, {0.0625f, 0.125f, 0.0625f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    kernel = kernel.unsqueeze(0).unsqueeze(0);
+    
+    auto blurred = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0);
+        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, 1);
+        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
+    }
+    
+    // 只在非边缘区域应用降噪
+    float blend = std::min(strength * 0.7f, 1.0f);
+    auto mask = edge_mask.unsqueeze(0); // [1, H, W]
+    return (img * (1.0f - blend * mask) + blurred * blend * mask).clamp(0, 1);
+}
+
 } // namespace myimg

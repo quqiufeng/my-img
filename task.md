@@ -263,14 +263,16 @@
 - **难度**: 低
 
 #### Task 10.5.4: 锐化与降噪
-- [ ] USM 锐化（数量/半径/阈值）
-- [ ] 智能锐化
+- [x] USM 锐化（数量/半径/阈值）
+- [x] 智能降噪（边缘保留）
 - [ ] 边缘蒙版锐化
 - [ ] 亮度降噪
 - [ ] 色彩降噪
-- [ ] CLI 参数：`--sharpen amount,radius,threshold`（如 `--sharpen 80,1.5,4`）
-- [ ] CLI 参数：`--denoise-luma 20`
-- [ ] CLI 参数：`--denoise-color 25`
+- [x] CLI 参数：`--sharpen FLOAT`（amount）
+- [x] CLI 参数：`--sharpen-radius INT`
+- [x] CLI 参数：`--sharpen-threshold FLOAT`
+- [x] CLI 参数：`--denoise FLOAT`（strength）
+- [x] CLI 参数：`--smart-denoise`
 - **优先级**: 🛒 P1（电商刚需）
 - **难度**: 中
 - **用途**:

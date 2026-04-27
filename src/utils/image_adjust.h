@@ -28,4 +28,18 @@ torch::Tensor adjust_shadows(const torch::Tensor& image, float shadows);
 // Auto enhance (one-click fix)
 torch::Tensor auto_enhance(const torch::Tensor& image);
 
+// USM Sharpening
+// amount: 0.0-3.0 (strength)
+// radius: 1-5 (blur radius in pixels)
+// threshold: 0-255 (only sharpen pixels that differ by more than threshold)
+torch::Tensor usm_sharpen(const torch::Tensor& image, float amount, int radius, float threshold);
+
+// Basic denoising (gaussian blur based)
+// strength: 0.0-1.0
+torch::Tensor denoise(const torch::Tensor& image, float strength);
+
+// Smart denoise: preserve edges while reducing noise
+// strength: 0.0-1.0
+torch::Tensor smart_denoise(const torch::Tensor& image, float strength);
+
 } // namespace myimg

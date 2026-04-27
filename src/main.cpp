@@ -77,6 +77,13 @@ struct CliOptions {
     float shadows = 0.0f;        // -100 ~ 100
     bool auto_enhance = false;   // 一键优化
     
+    // 锐化与降噪
+    float sharpen_amount = 0.0f;   // 0.0-3.0
+    int sharpen_radius = 1;        // 1-5
+    float sharpen_threshold = 0.0f; // 0-255
+    float denoise_strength = 0.0f;  // 0.0-1.0
+    bool smart_denoise_flag = false; // 智能降噪
+    
     // 系统
     int threads = -1;
     bool verbose = false;
@@ -140,6 +147,12 @@ static void print_usage(const char* argv0) {
     std::cout << "  --highlights FLOAT        Highlights -100 to 100\n";
     std::cout << "  --shadows FLOAT           Shadows -100 to 100\n";
     std::cout << "  --auto-enhance            Auto one-click photo enhancement\n";
+    std::cout << "\nSharpening & Denoise Options:\n";
+    std::cout << "  --sharpen FLOAT           USM sharpen amount 0.0-3.0 (default: 0)\n";
+    std::cout << "  --sharpen-radius INT      Sharpen radius 1-5 (default: 1)\n";
+    std::cout << "  --sharpen-threshold FLOAT Sharpen threshold 0-255 (default: 0)\n";
+    std::cout << "  --denoise FLOAT           Denoise strength 0.0-1.0 (default: 0)\n";
+    std::cout << "  --smart-denoise           Smart denoise (preserve edges)\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
@@ -292,6 +305,20 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.shadows = std::stof(argv[i]);
         } else if (arg == "--auto-enhance") {
             opts.auto_enhance = true;
+        } else if (arg == "--sharpen") {
+            if (++i >= argc) { std::cerr << "Missing value for --sharpen\n"; return false; }
+            opts.sharpen_amount = std::stof(argv[i]);
+        } else if (arg == "--sharpen-radius") {
+            if (++i >= argc) { std::cerr << "Missing value for --sharpen-radius\n"; return false; }
+            opts.sharpen_radius = std::stoi(argv[i]);
+        } else if (arg == "--sharpen-threshold") {
+            if (++i >= argc) { std::cerr << "Missing value for --sharpen-threshold\n"; return false; }
+            opts.sharpen_threshold = std::stof(argv[i]);
+        } else if (arg == "--denoise") {
+            if (++i >= argc) { std::cerr << "Missing value for --denoise\n"; return false; }
+            opts.denoise_strength = std::stof(argv[i]);
+        } else if (arg == "--smart-denoise") {
+            opts.smart_denoise_flag = true;
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
@@ -539,7 +566,9 @@ int main(int argc, char** argv) {
         bool has_adjustments = opts.temperature != 0.0f || opts.brightness != 0.0f ||
                                opts.contrast != 0.0f || opts.saturation != 0.0f ||
                                opts.exposure != 0.0f || opts.highlights != 0.0f ||
-                               opts.shadows != 0.0f || opts.auto_enhance;
+                               opts.shadows != 0.0f || opts.auto_enhance ||
+                               opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
+                               opts.smart_denoise_flag;
         if (has_adjustments) {
             std::cout << "Applying photo adjustments...\n";
             myimg::ImageData img_data;
@@ -560,6 +589,22 @@ int main(int argc, char** argv) {
                 if (opts.exposure != 0.0f) tensor = myimg::adjust_exposure(tensor, opts.exposure);
                 if (opts.highlights != 0.0f) tensor = myimg::adjust_highlights(tensor, opts.highlights);
                 if (opts.shadows != 0.0f) tensor = myimg::adjust_shadows(tensor, opts.shadows);
+            }
+            
+            // 降噪（在锐化之前）
+            if (opts.denoise_strength > 0.0f) {
+                std::cout << "Applying denoise...\n";
+                tensor = myimg::denoise(tensor, opts.denoise_strength);
+            }
+            if (opts.smart_denoise_flag) {
+                std::cout << "Applying smart denoise...\n";
+                tensor = myimg::smart_denoise(tensor, 0.5f);
+            }
+            
+            // USM 锐化
+            if (opts.sharpen_amount > 0.0f) {
+                std::cout << "Applying USM sharpen...\n";
+                tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
             }
             
             img_data = myimg::tensor_to_image_data(tensor);
