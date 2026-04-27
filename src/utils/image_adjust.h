@@ -42,4 +42,12 @@ torch::Tensor denoise(const torch::Tensor& image, float strength);
 // strength: 0.0-1.0
 torch::Tensor smart_denoise(const torch::Tensor& image, float strength);
 
+// Portrait retouching
+// Whitening: 0.0-1.0
+torch::Tensor whiten(const torch::Tensor& image, float strength);
+
+// Skin smoothing: simple gaussian blur with edge preservation
+// strength: 0.0-1.0
+torch::Tensor skin_smooth(const torch::Tensor& image, float strength);
+
 } // namespace myimg

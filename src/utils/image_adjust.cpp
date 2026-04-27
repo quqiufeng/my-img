@@ -228,4 +228,74 @@ torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
     return (img * (1.0f - blend * mask) + blurred * blend * mask).clamp(0, 1);
 }
 
+// 美白：提升亮度，降低饱和度，偏冷色调
+torch::Tensor whiten(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    float factor = std::min(strength, 1.0f);
+    
+    // 提升亮度
+    img = img * (1.0f + factor * 0.15f) + factor * 0.05f;
+    
+    // 降低饱和度
+    auto gray = img.mean(0, true);
+    img = gray + (img - gray) * (1.0f - factor * 0.2f);
+    
+    // 轻微冷色调（减少黄/红色调）
+    img[0] = img[0] * (1.0f - factor * 0.05f);
+    img[2] = img[2] * (1.0f + factor * 0.05f);
+    
+    return img.clamp(0, 1);
+}
+
+// 磨皮：高斯模糊 + 边缘保留
+torch::Tensor skin_smooth(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // 检测皮肤色调区域（简单的 RGB 范围判断）
+    // 皮肤通常在 R > G > B 的范围内
+    auto r = img[0];
+    auto g = img[1];
+    auto b = img[2];
+    
+    // 简单的皮肤 mask：R > G 且 G > B 且 R 在中等亮度
+    auto skin_mask = (r > g) * (g > b) * (r > 0.3f) * (r < 0.85f);
+    skin_mask = skin_mask.to(torch::kFloat32);
+    
+    // 对皮肤区域应用高斯模糊
+    int radius = std::max(1, static_cast<int>(strength * 3));
+    int kernel_size = 2 * radius + 1;
+    auto kernel = torch::zeros({1, 1, kernel_size, kernel_size}, torch::TensorOptions().dtype(torch::kFloat32));
+    float sigma = radius / 2.0f;
+    float sum = 0.0f;
+    
+    for (int y = 0; y < kernel_size; ++y) {
+        for (int x = 0; x < kernel_size; ++x) {
+            float dx = x - radius;
+            float dy = y - radius;
+            float val = std::exp(-(dx * dx + dy * dy) / (2.0f * sigma * sigma));
+            kernel[0][0][y][x] = val;
+            sum += val;
+        }
+    }
+    kernel = kernel / sum;
+    kernel = kernel.to(device);
+    
+    auto blurred = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0);
+        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, radius);
+        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
+    }
+    
+    // 只对皮肤区域应用模糊
+    float blend = std::min(strength * 0.6f, 1.0f);
+    auto mask = skin_mask.unsqueeze(0); // [1, H, W]
+    return (img * (1.0f - blend * mask) + blurred * blend * mask).clamp(0, 1);
+}
+
 } // namespace myimg

@@ -77,6 +77,10 @@ struct CliOptions {
     float shadows = 0.0f;        // -100 ~ 100
     bool auto_enhance = false;   // 一键优化
     
+    // 人像修饰
+    float whiten_strength = 0.0f;    // 0.0-1.0
+    float skin_smooth_strength = 0.0f; // 0.0-1.0
+    
     // 锐化与降噪
     float sharpen_amount = 0.0f;   // 0.0-3.0
     int sharpen_radius = 1;        // 1-5
@@ -165,6 +169,9 @@ static void print_usage(const char* argv0) {
     std::cout << "  --highlights FLOAT        Highlights -100 to 100\n";
     std::cout << "  --shadows FLOAT           Shadows -100 to 100\n";
     std::cout << "  --auto-enhance            Auto one-click photo enhancement\n";
+    std::cout << "\nPortrait Retouching Options:\n";
+    std::cout << "  --whiten FLOAT            Whitening strength 0.0-1.0\n";
+    std::cout << "  --skin-smooth FLOAT       Skin smoothing strength 0.0-1.0\n";
     std::cout << "\nSharpening & Denoise Options:\n";
     std::cout << "  --sharpen FLOAT           USM sharpen amount 0.0-3.0 (default: 0)\n";
     std::cout << "  --sharpen-radius INT      Sharpen radius 1-5 (default: 1)\n";
@@ -338,6 +345,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.shadows = std::stof(argv[i]);
         } else if (arg == "--auto-enhance") {
             opts.auto_enhance = true;
+        } else if (arg == "--whiten") {
+            if (++i >= argc) { std::cerr << "Missing value for --whiten\n"; return false; }
+            opts.whiten_strength = std::stof(argv[i]);
+        } else if (arg == "--skin-smooth") {
+            if (++i >= argc) { std::cerr << "Missing value for --skin-smooth\n"; return false; }
+            opts.skin_smooth_strength = std::stof(argv[i]);
         } else if (arg == "--sharpen") {
             if (++i >= argc) { std::cerr << "Missing value for --sharpen\n"; return false; }
             opts.sharpen_amount = std::stof(argv[i]);
@@ -666,7 +679,8 @@ int main(int argc, char** argv) {
                 opts.exposure != 0.0f || opts.highlights != 0.0f ||
                 opts.shadows != 0.0f || opts.auto_enhance ||
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                opts.smart_denoise_flag) {
+                opts.smart_denoise_flag ||
+                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -690,6 +704,14 @@ int main(int argc, char** argv) {
                 }
                 if (opts.sharpen_amount > 0.0f) {
                     tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+                }
+                
+                // Portrait retouching
+                if (opts.whiten_strength > 0.0f) {
+                    tensor = myimg::whiten(tensor, opts.whiten_strength);
+                }
+                if (opts.skin_smooth_strength > 0.0f) {
+                    tensor = myimg::skin_smooth(tensor, opts.skin_smooth_strength);
                 }
                 
                 img_data = myimg::tensor_to_image_data(tensor);
@@ -794,7 +816,8 @@ int main(int argc, char** argv) {
                                opts.exposure != 0.0f || opts.highlights != 0.0f ||
                                opts.shadows != 0.0f || opts.auto_enhance ||
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                               opts.smart_denoise_flag;
+                               opts.smart_denoise_flag ||
+                               opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f;
         if (has_adjustments) {
             std::cout << "Applying photo adjustments...\n";
             myimg::ImageData img_data;
@@ -831,6 +854,16 @@ int main(int argc, char** argv) {
             if (opts.sharpen_amount > 0.0f) {
                 std::cout << "Applying USM sharpen...\n";
                 tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+            }
+            
+            // 人像修饰
+            if (opts.whiten_strength > 0.0f) {
+                std::cout << "Applying whitening...\n";
+                tensor = myimg::whiten(tensor, opts.whiten_strength);
+            }
+            if (opts.skin_smooth_strength > 0.0f) {
+                std::cout << "Applying skin smoothing...\n";
+                tensor = myimg::skin_smooth(tensor, opts.skin_smooth_strength);
             }
             
             img_data = myimg::tensor_to_image_data(tensor);
