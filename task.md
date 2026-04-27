@@ -311,9 +311,11 @@
   - 摄影：快速修图预览
 
 #### Task 10.5.7: 镜头校正
-- [ ] 暗角修复（Vignetting）
+- [x] 暗角添加（Vignetting effect）
 - [ ] 镜头畸变校正（桶形/枕形畸变）
 - [ ] 色差校正（Chromatic Aberration）
+- [x] CLI 参数：`--vignette FLOAT`
+- [x] CLI 参数：`--vignette-radius FLOAT`
 - [ ] CLI 参数：`--lens-correction vignette,distortion,ca`
 - **优先级**: P2
 - **难度**: 中

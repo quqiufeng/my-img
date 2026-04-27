@@ -59,4 +59,9 @@ torch::Tensor apply_curves(const torch::Tensor& image, const std::string& curves
 // name: "vintage", "bw", "film", "japanese", "warm", "cool", "dramatic"
 torch::Tensor apply_preset(const torch::Tensor& image, const std::string& name);
 
+// Vignette effect
+// strength: 0.0-1.0 (darken edges)
+// radius: 0.0-1.0 (0.5 = half image size)
+torch::Tensor vignette(const torch::Tensor& image, float strength, float radius = 0.75f);
+
 } // namespace myimg

@@ -437,4 +437,32 @@ torch::Tensor apply_preset(const torch::Tensor& image, const std::string& name) 
     return img;
 }
 
+// 暗角效果
+torch::Tensor vignette(const torch::Tensor& image, float strength, float radius) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    int h = img.size(1);
+    int w = img.size(2);
+    auto device = img.device();
+    
+    // 创建径向距离图
+    auto y = torch::linspace(-1.0f, 1.0f, h, torch::TensorOptions().dtype(torch::kFloat32).device(device));
+    auto x = torch::linspace(-1.0f, 1.0f, w, torch::TensorOptions().dtype(torch::kFloat32).device(device));
+    auto yy = y.unsqueeze(1).expand({h, w});
+    auto xx = x.unsqueeze(0).expand({h, w});
+    auto dist = (yy * yy + xx * xx).sqrt(); // 中心到边缘的距离
+    
+    // 创建 vignette mask
+    float r = radius; // 影响半径
+    auto mask = (1.0f - (dist / r).clamp(0, 1).pow(2)).clamp(0, 1);
+    
+    // 应用暗角
+    float blend = std::min(strength, 1.0f);
+    mask = mask * (1.0f - blend) + blend; // 边缘 darker
+    mask = mask.unsqueeze(0); // [1, H, W]
+    
+    return (img * mask).clamp(0, 1);
+}
+
 } // namespace myimg

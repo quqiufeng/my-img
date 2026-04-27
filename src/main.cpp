@@ -78,6 +78,8 @@ struct CliOptions {
     bool auto_enhance = false;   // 一键优化
     std::string curves;          // RGB curves "in,out;in,out"
     std::string preset;          // Filter preset name
+    float vignette_strength = 0.0f; // 0.0-1.0
+    float vignette_radius = 0.75f;  // 0.0-1.0
     
     // 人像修饰
     float whiten_strength = 0.0f;    // 0.0-1.0
@@ -173,6 +175,9 @@ static void print_usage(const char* argv0) {
     std::cout << "  --auto-enhance            Auto one-click photo enhancement\n";
     std::cout << "\nCurves Options:\n";
     std::cout << "  --curves \"in,out;in,out\"  RGB curves (0-255, e.g. \"0,0;128,140;255,255\")\n";
+    std::cout << "\nVignette Options:\n";
+    std::cout << "  --vignette FLOAT          Vignette strength 0.0-1.0\n";
+    std::cout << "  --vignette-radius FLOAT   Vignette radius 0.0-1.0 (default: 0.75)\n";
     std::cout << "\nFilter Presets:\n";
     std::cout << "  --preset NAME             Apply filter preset: bw, sepia, vintage, warm,\n";
     std::cout << "                            cool, dramatic, japanese, film, cyberpunk, cinematic\n";
@@ -355,6 +360,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--curves") {
             if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
             opts.curves = argv[i];
+        } else if (arg == "--vignette") {
+            if (++i >= argc) { std::cerr << "Missing value for --vignette\n"; return false; }
+            opts.vignette_strength = std::stof(argv[i]);
+        } else if (arg == "--vignette-radius") {
+            if (++i >= argc) { std::cerr << "Missing value for --vignette-radius\n"; return false; }
+            opts.vignette_radius = std::stof(argv[i]);
         } else if (arg == "--preset") {
             if (++i >= argc) { std::cerr << "Missing value for --preset\n"; return false; }
             opts.preset = argv[i];
@@ -696,7 +707,8 @@ int main(int argc, char** argv) {
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                 opts.smart_denoise_flag ||
                 opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
-                !opts.preset.empty()) {
+                !opts.preset.empty() ||
+                opts.vignette_strength > 0.0f) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -730,6 +742,11 @@ int main(int argc, char** argv) {
                 // Filter preset
                 if (!opts.preset.empty()) {
                     tensor = myimg::apply_preset(tensor, opts.preset);
+                }
+                
+                // Vignette
+                if (opts.vignette_strength > 0.0f) {
+                    tensor = myimg::vignette(tensor, opts.vignette_strength, opts.vignette_radius);
                 }
                 
                 // Portrait retouching
@@ -845,7 +862,8 @@ int main(int argc, char** argv) {
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                                opts.smart_denoise_flag ||
                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
-                               !opts.preset.empty();
+                               !opts.preset.empty() ||
+                               opts.vignette_strength > 0.0f;
         if (has_adjustments) {
             std::cout << "Applying photo adjustments...\n";
             myimg::ImageData img_data;
@@ -894,6 +912,12 @@ int main(int argc, char** argv) {
             if (!opts.preset.empty()) {
                 std::cout << "Applying preset: " << opts.preset << "\n";
                 tensor = myimg::apply_preset(tensor, opts.preset);
+            }
+            
+            // 暗角
+            if (opts.vignette_strength > 0.0f) {
+                std::cout << "Applying vignette...\n";
+                tensor = myimg::vignette(tensor, opts.vignette_strength, opts.vignette_radius);
             }
             
             // 人像修饰
