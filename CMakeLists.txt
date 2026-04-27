@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(my-img VERSION 0.1.0 LANGUAGES CXX)
+project(my-img VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -138,6 +138,10 @@ endif()
 set(MYIMG_SOURCES
     src/main.cpp
     src/adapters/sdcpp_adapter.cpp
+        src/utils/stb_impl.c
+    src/utils/image_utils.cpp
+        src/utils/stb_impl.c
+    src/utils/stb_impl.c
 )
 
 # ============================================================
@@ -250,6 +254,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vae.cpp")
         src/backend/vae.cpp
         src/backend/model.cpp
         src/utils/image_utils.cpp
+        src/utils/stb_impl.c
         src/utils/gguf_loader.cpp
         src/utils/safetensors.cpp
     )
@@ -276,6 +281,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix.cpp")
         src/backend/vae.cpp
         src/backend/model.cpp
         src/utils/image_utils.cpp
+        src/utils/stb_impl.c
         src/utils/gguf_loader.cpp
         src/utils/safetensors.cpp
     )
@@ -351,6 +357,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
     add_executable(test_sdcpp_adapter
         tests/test_sdcpp_adapter.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/stb_impl.c
     )
     target_include_directories(test_sdcpp_adapter PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -379,6 +386,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
     add_executable(test_txt2img
         tests/test_txt2img.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/stb_impl.c
     )
     target_include_directories(test_txt2img PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -404,6 +412,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
     add_executable(test_hires_fix_real
         tests/test_hires_fix_real.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/stb_impl.c
     )
     target_include_directories(test_hires_fix_real PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -422,5 +431,27 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
         INTERPROCEDURAL_OPTIMIZATION FALSE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_utils.cpp")
+    add_executable(test_image_utils
+        tests/test_image_utils.cpp
+        src/utils/image_utils.cpp
+        src/utils/stb_impl.c
+    )
+    target_include_directories(test_image_utils PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${STB_IMAGE_INCLUDE}
+        ${THIRDPARTY_DIR}/ggml/include
+    )
+    target_link_libraries(test_image_utils PRIVATE
+        ${TORCH_LIBRARIES}
+        ggml
+    )
+    set_target_properties(test_image_utils PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
     )
 endif()

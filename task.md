@@ -28,25 +28,29 @@
 
 ### Phase 6: 核心功能（ComfyUI 基础节点）
 
-#### Task 6.1: img2img（图像到图像）🌟
-- [ ] CLI 参数：`--init-img PATH`
-- [ ] CLI 参数：`--strength FLOAT`（0.0-1.0，默认 0.75）
-- [ ] 加载参考图（PNG/JPG）
-- [ ] VAE encode 为 latent
-- [ ] 根据 strength 加噪
-- [ ] 去噪生成
-- [ ] 参考：sd.cpp `init_image` 参数
+#### Task 6.1: img2img（图像到图像）🌟 ✅
+- [x] CLI 参数：`--init-img PATH`
+- [x] CLI 参数：`--strength FLOAT`（0.0-1.0，默认 0.75）
+- [x] 加载参考图（PNG/JPG）
+- [x] VAE encode 为 latent
+- [x] 根据 strength 加噪
+- [x] 去噪生成
+- [x] 参考：sd.cpp `init_image` 参数
+- [x] 单元测试：test_image_utils
 - **优先级**: 🌟 P0
 - **难度**: 低（sd.cpp 原生支持）
+- **状态**: ✅ 已完成（2026-04-27）
 
-#### Task 6.2: LoRA 集成 🌟
-- [ ] CLI 参数：`--lora "PATH:weight"`（支持多个）
-- [ ] LoRA 权重加载（.safetensors）
-- [ ] 权重注入扩散模型
-- [ ] 高噪声/低噪声 LoRA 支持
-- [ ] 参考：sd.cpp `sd_lora_t`
+#### Task 6.2: LoRA 集成 🌟 ✅
+- [x] CLI 参数：`--lora "PATH:weight"`（支持多个）
+- [x] LoRA 权重加载（.safetensors）
+- [x] 权重注入扩散模型
+- [x] 高噪声/低噪声 LoRA 支持
+- [x] 参考：sd.cpp `sd_lora_t`
+- [x] 单元测试：已验证 sd_lora_t 结构传递
 - **优先级**: 🌟 P0
 - **难度**: 中
+- **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 6.3: Inpainting（局部重绘）
 - [ ] CLI 参数：`--mask PATH`

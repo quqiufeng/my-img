@@ -5,6 +5,7 @@
 #include <random>
 #include <filesystem>
 #include "adapters/sdcpp_adapter.h"
+#include "utils/image_utils.h"
 
 namespace fs = std::filesystem;
 
@@ -45,6 +46,13 @@ struct CliOptions {
     int upscale_repeats = 1;
     int upscale_tile_size = 1440;
     
+    // img2img
+    std::string init_image;
+    float strength = 0.75f;
+    
+    // LoRA
+    std::vector<std::string> loras;
+    
     // 输出
     std::string output = "output.png";
     
@@ -71,6 +79,12 @@ static void print_usage(const char* argv0) {
     std::cout << "  --sampling-method NAME    Sampling method: euler, dpm++2m, etc. (default: euler)\n";
     std::cout << "  --scheduler NAME          Scheduler: discrete, karras, etc. (default: discrete)\n";
     std::cout << "  -s, --seed INT            Seed, -1 for random (default: -1)\n";
+    std::cout << "\nimg2img Options:\n";
+    std::cout << "  -i, --init-img PATH       Initial image for img2img (default: none)\n";
+    std::cout << "  --strength FLOAT          Denoising strength 0.0-1.0 (default: 0.75)\n";
+    std::cout << "\nLoRA Options:\n";
+    std::cout << "  --lora PATH:weight        LoRA model path and weight (can specify multiple)\n";
+    std::cout << "  --lora-model-dir PATH     Directory containing LoRA models\n";
     std::cout << "\nVRAM Optimization:\n";
     std::cout << "  --diffusion-fa            Enable Flash Attention for diffusion\n";
     std::cout << "  --vae-tiling              Enable VAE tiling\n";
@@ -143,6 +157,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "-s" || arg == "--seed") {
             if (++i >= argc) { std::cerr << "Missing value for -s/--seed\n"; return false; }
             opts.seed = std::stoll(argv[i]);
+        } else if (arg == "-i" || arg == "--init-img") {
+            if (++i >= argc) { std::cerr << "Missing value for -i/--init-img\n"; return false; }
+            opts.init_image = argv[i];
+        } else if (arg == "--strength") {
+            if (++i >= argc) { std::cerr << "Missing value for --strength\n"; return false; }
+            opts.strength = std::stof(argv[i]);
         } else if (arg == "--diffusion-fa") {
             opts.diffusion_fa = true;
         } else if (arg == "--vae-tiling") {
@@ -177,6 +197,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--upscale-repeats") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-repeats\n"; return false; }
             opts.upscale_repeats = std::stoi(argv[i]);
+        } else if (arg == "--lora") {
+            if (++i >= argc) { std::cerr << "Missing value for --lora\n"; return false; }
+            opts.loras.push_back(argv[i]);
         } else if (arg == "--upscale-tile-size") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-tile-size\n"; return false; }
             opts.upscale_tile_size = std::stoi(argv[i]);
@@ -286,6 +309,40 @@ int main(int argc, char** argv) {
         params.hires_height = opts.hires_height;
         params.hires_strength = opts.hires_strength;
         params.hires_sample_steps = opts.hires_steps;
+    }
+    
+    // img2img
+    if (!opts.init_image.empty()) {
+        std::cout << "[INFO] Loading init image: " << opts.init_image << "\n";
+        auto img_data = myimg::load_image_from_file(opts.init_image);
+        if (img_data.empty()) {
+            std::cerr << "Error: Failed to load init image: " << opts.init_image << "\n";
+            return 1;
+        }
+        params.init_image.width = img_data.width;
+        params.init_image.height = img_data.height;
+        params.init_image.channels = img_data.channels;
+        params.init_image.data = std::move(img_data.data);
+        params.strength = opts.strength;
+        std::cout << "[INFO] img2img mode, strength: " << opts.strength << "\n";
+    }
+    
+    // LoRA
+    if (!opts.loras.empty()) {
+        std::cout << "[INFO] Loading LoRA models:\n";
+        for (const auto& lora_str : opts.loras) {
+            size_t colon = lora_str.find(':');
+            myimg::LoRAConfig lora;
+            if (colon != std::string::npos) {
+                lora.path = lora_str.substr(0, colon);
+                lora.multiplier = std::stof(lora_str.substr(colon + 1));
+            } else {
+                lora.path = lora_str;
+                lora.multiplier = 1.0f;
+            }
+            params.loras.push_back(lora);
+            std::cout << "  - " << lora.path << " (weight: " << lora.multiplier << ")\n";
+        }
     }
     
     std::cout << "========================================\n";
