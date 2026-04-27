@@ -61,6 +61,63 @@ ImageData tensor_to_image_data(const torch::Tensor& tensor) {
     return img;
 }
 
+ImageData resize_image(const ImageData& img, int new_width, int new_height, const std::string& mode) {
+    auto tensor = image_data_to_tensor(img);
+    
+    auto options = torch::nn::functional::InterpolateFuncOptions()
+        .size(std::vector<int64_t>({new_height, new_width}));
+    
+    if (mode == "nearest") {
+        options = options.mode(torch::kNearest);
+    } else if (mode == "bicubic") {
+        options = options.mode(torch::kBicubic).align_corners(true);
+    } else {
+        options = options.mode(torch::kBilinear).align_corners(true);
+    }
+    
+    auto resized = torch::nn::functional::interpolate(tensor.unsqueeze(0), options).squeeze(0);
+    
+    return tensor_to_image_data(resized);
+}
+
+ImageData crop_image(const ImageData& img, int x, int y, int w, int h) {
+    auto tensor = image_data_to_tensor(img);
+    auto cropped = tensor.index({
+        torch::indexing::Slice(),
+        torch::indexing::Slice(y, std::min(y + h, img.height)),
+        torch::indexing::Slice(x, std::min(x + w, img.width))
+    });
+    return tensor_to_image_data(cropped);
+}
+
+ImageData flip_image(const ImageData& img, bool horizontal) {
+    auto tensor = image_data_to_tensor(img);
+    auto flipped = horizontal ? tensor.flip({2}) : tensor.flip({1});
+    return tensor_to_image_data(flipped);
+}
+
+ImageData rotate_image(const ImageData& img, int degrees) {
+    auto tensor = image_data_to_tensor(img);
+    auto rotated = tensor;
+    
+    // k: number of 90-degree counter-clockwise rotations
+    int k = ((360 - degrees) / 90) % 4;
+    rotated = torch::rot90(tensor, k, {1, 2});
+    
+    return tensor_to_image_data(rotated);
+}
+
+ImageData convert_channels(const ImageData& img, const std::string& from_to) {
+    if (from_to == "rgb_to_bgr" || from_to == "bgr_to_rgb") {
+        ImageData result = img;
+        for (size_t i = 0; i < img.data.size(); i += 3) {
+            std::swap(result.data[i], result.data[i + 2]);
+        }
+        return result;
+    }
+    return img;
+}
+
 std::pair<ImageData, ImageData> create_outpaint_canvas(
     const ImageData& original,
     int top, int bottom, int left, int right

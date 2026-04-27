@@ -205,13 +205,13 @@
 - **难度**: 低
 
 #### Task 10.3: Image Scale & Crop
-- [ ] 图像缩放（多种插值算法：nearest/bilinear/bicubic/lanczos）
+- [x] 图像缩放（nearest/bilinear/bicubic 插值）
 - [ ] 图像裁剪（指定坐标和尺寸）
   - CLI 参数：`--crop x,y,width,height`（像素坐标）
   - CLI 参数：`--crop-center width,height`（居中裁剪）
   - CLI 参数：`--crop-ratio width:height`（按比例裁剪，如 16:9, 4:3, 1:1）
-- [ ] 图像翻转（水平/垂直）
-- [ ] 图像旋转（90°/180°/270°/任意角度）
+- [x] 图像翻转（水平/垂直）
+- [x] 图像旋转（90°/180°/270°）
 - [ ] 图像格式转换（PNG/JPG/WEBP/BMP）
 - **优先级**: P2
 - **难度**: 低

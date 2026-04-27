@@ -37,4 +37,22 @@ std::pair<ImageData, ImageData> create_outpaint_canvas(
     int top, int bottom, int left, int right
 );
 
+// Image transformations using libtorch
+// Resize image using specified interpolation
+// mode: "nearest", "bilinear", "bicubic"
+ImageData resize_image(const ImageData& img, int new_width, int new_height, const std::string& mode = "bilinear");
+
+// Crop image (x, y, width, height)
+ImageData crop_image(const ImageData& img, int x, int y, int w, int h);
+
+// Flip image (horizontal or vertical)
+ImageData flip_image(const ImageData& img, bool horizontal);
+
+// Rotate image by 90/180/270 degrees
+ImageData rotate_image(const ImageData& img, int degrees); // 90, 180, 270
+
+// Convert image format (just reorders channels if needed)
+// Currently supports RGB <-> BGR conversion
+ImageData convert_channels(const ImageData& img, const std::string& from_to);
+
 } // namespace myimg

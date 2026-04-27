@@ -90,6 +90,14 @@ struct CliOptions {
     int outpaint_left = 0;
     int outpaint_right = 0;
     
+    // Image transformation (post-processing)
+    int resize_width = 0;     // 0 = no resize
+    int resize_height = 0;    // 0 = no resize
+    std::string resize_mode = "bilinear"; // nearest, bilinear, bicubic
+    bool flip_h = false;
+    bool flip_v = false;
+    int rotate = 0;           // 90, 180, 270
+    
     // 系统
     int threads = -1;
     bool verbose = false;
@@ -165,6 +173,12 @@ static void print_usage(const char* argv0) {
     std::cout << "  --outpaint-left INT       Expand canvas left by N pixels\n";
     std::cout << "  --outpaint-right INT      Expand canvas right by N pixels\n";
     std::cout << "  --outpaint INT            Expand all directions by N pixels\n";
+    std::cout << "\nTransform Options (post-processing):\n";
+    std::cout << "  --resize WxH              Resize output image (e.g. 512x512)\n";
+    std::cout << "  --resize-mode MODE        Resize interpolation: nearest, bilinear, bicubic\n";
+    std::cout << "  --flip-h                  Flip horizontally\n";
+    std::cout << "  --flip-v                  Flip vertically\n";
+    std::cout << "  --rotate DEG              Rotate by 90, 180, or 270 degrees\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
@@ -347,6 +361,24 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint\n"; return false; }
             int val = std::stoi(argv[i]);
             opts.outpaint_top = opts.outpaint_bottom = opts.outpaint_left = opts.outpaint_right = val;
+        } else if (arg == "--resize") {
+            if (++i >= argc) { std::cerr << "Missing value for --resize\n"; return false; }
+            std::string val = argv[i];
+            size_t x = val.find('x');
+            if (x != std::string::npos) {
+                opts.resize_width = std::stoi(val.substr(0, x));
+                opts.resize_height = std::stoi(val.substr(x + 1));
+            }
+        } else if (arg == "--resize-mode") {
+            if (++i >= argc) { std::cerr << "Missing value for --resize-mode\n"; return false; }
+            opts.resize_mode = argv[i];
+        } else if (arg == "--flip-h") {
+            opts.flip_h = true;
+        } else if (arg == "--flip-v") {
+            opts.flip_v = true;
+        } else if (arg == "--rotate") {
+            if (++i >= argc) { std::cerr << "Missing value for --rotate\n"; return false; }
+            opts.rotate = std::stoi(argv[i]);
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
@@ -678,6 +710,36 @@ int main(int argc, char** argv) {
             }
             
             img_data = myimg::tensor_to_image_data(tensor);
+            image.width = img_data.width;
+            image.height = img_data.height;
+            image.channels = img_data.channels;
+            image.data = std::move(img_data.data);
+        }
+        
+        // 后处理变换
+        bool has_transform = opts.resize_width > 0 || opts.resize_height > 0 ||
+                            opts.flip_h || opts.flip_v || opts.rotate != 0;
+        if (has_transform) {
+            std::cout << "Applying transformations...\n";
+            myimg::ImageData img_data;
+            img_data.width = image.width;
+            img_data.height = image.height;
+            img_data.channels = image.channels;
+            img_data.data = std::move(image.data);
+            
+            if (opts.resize_width > 0 && opts.resize_height > 0) {
+                img_data = myimg::resize_image(img_data, opts.resize_width, opts.resize_height, opts.resize_mode);
+            }
+            if (opts.flip_h) {
+                img_data = myimg::flip_image(img_data, true);
+            }
+            if (opts.flip_v) {
+                img_data = myimg::flip_image(img_data, false);
+            }
+            if (opts.rotate != 0) {
+                img_data = myimg::rotate_image(img_data, opts.rotate);
+            }
+            
             image.width = img_data.width;
             image.height = img_data.height;
             image.channels = img_data.channels;
