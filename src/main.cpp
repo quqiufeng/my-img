@@ -47,9 +47,10 @@ struct CliOptions {
     int upscale_repeats = 1;
     int upscale_tile_size = 1440;
     
-    // img2img
+    // img2img / Inpainting
     std::string init_image;
     float strength = 0.75f;
+    std::string mask_image;
     
     // LoRA
     std::vector<std::string> loras;
@@ -85,6 +86,7 @@ static void print_usage(const char* argv0) {
     std::cout << "\nimg2img Options:\n";
     std::cout << "  -i, --init-img PATH       Initial image for img2img (default: none)\n";
     std::cout << "  --strength FLOAT          Denoising strength 0.0-1.0 (default: 0.75)\n";
+    std::cout << "  --mask PATH               Mask image for inpainting (white=inpaint, black=keep)\n";
     std::cout << "\nLoRA Options:\n";
     std::cout << "  --lora PATH:weight        LoRA model path and weight (can specify multiple)\n";
     std::cout << "  --lora-model-dir PATH     Directory containing LoRA models\n";
@@ -172,6 +174,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--strength") {
             if (++i >= argc) { std::cerr << "Missing value for --strength\n"; return false; }
             opts.strength = std::stof(argv[i]);
+        } else if (arg == "--mask") {
+            if (++i >= argc) { std::cerr << "Missing value for --mask\n"; return false; }
+            opts.mask_image = argv[i];
         } else if (arg == "--diffusion-fa") {
             opts.diffusion_fa = true;
         } else if (arg == "--vae-tiling") {
@@ -340,6 +345,21 @@ int main(int argc, char** argv) {
         params.init_image.data = std::move(img_data.data);
         params.strength = opts.strength;
         std::cout << "[INFO] img2img mode, strength: " << opts.strength << "\n";
+    }
+    
+    // Inpainting
+    if (!opts.mask_image.empty()) {
+        std::cout << "[INFO] Loading mask: " << opts.mask_image << "\n";
+        auto mask_data = myimg::load_image_from_file(opts.mask_image);
+        if (mask_data.empty()) {
+            std::cerr << "Error: Failed to load mask: " << opts.mask_image << "\n";
+            return 1;
+        }
+        params.mask_image.width = mask_data.width;
+        params.mask_image.height = mask_data.height;
+        params.mask_image.channels = mask_data.channels;
+        params.mask_image.data = std::move(mask_data.data);
+        std::cout << "[INFO] Inpainting mode\n";
     }
     
     // LoRA

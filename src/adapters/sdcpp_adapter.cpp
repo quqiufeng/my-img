@@ -215,6 +215,11 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
         gen_params.init_image = image_to_sd_image(params.init_image);
     }
     
+    // Inpainting
+    if (!params.mask_image.empty()) {
+        gen_params.mask_image = image_to_sd_image(params.mask_image);
+    }
+    
     // ControlNet
     if (!params.control_image.empty()) {
         gen_params.control_image = image_to_sd_image(params.control_image);

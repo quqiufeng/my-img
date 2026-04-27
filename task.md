@@ -52,14 +52,15 @@
 - **难度**: 中
 - **状态**: ✅ 已完成（2026-04-27）
 
-#### Task 6.3: Inpainting（局部重绘）
-- [ ] CLI 参数：`--mask PATH`
-- [ ] 加载 mask 图像（黑白图）
-- [ ] masked latent 生成
-- [ ] 保留未遮罩区域
-- [ ] 参考：sd.cpp `mask_image`
-- **优先级**: P1
+#### Task 6.3: Inpainting（局部重绘）✅
+- [x] CLI 参数：`--mask PATH`
+- [x] 加载 mask 图像（黑白图）
+- [x] masked latent 生成
+- [x] 保留未遮罩区域
+- [x] 与 img2img 结合使用（先 init-img，再 mask）
+- **优先级**: 中
 - **难度**: 中
+- **状态**: ✅ 已完成（2026-04-27）
 
 #### Task 6.4: Outpainting（图像外扩）
 - [ ] 扩展现有图像边界

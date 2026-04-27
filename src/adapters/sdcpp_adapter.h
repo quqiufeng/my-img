@@ -106,9 +106,10 @@ struct GenerationParams {
     int64_t seed = -1;  // -1 表示随机
     int batch_count = 1;
     
-    // img2img
+    // img2img / Inpainting
     float strength = 0.75f;  // 1.0 = txt2img, <1.0 = img2img
     Image init_image;
+    Image mask_image;  // 白色=重绘, 黑色=保留
     
     // ControlNet
     Image control_image;
