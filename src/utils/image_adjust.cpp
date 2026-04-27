@@ -298,4 +298,69 @@ torch::Tensor skin_smooth(const torch::Tensor& image, float strength) {
     return (img * (1.0f - blend * mask) + blurred * blend * mask).clamp(0, 1);
 }
 
+// RGB 曲线调整
+// curves: "input,output;input,output;..." (0-255)
+torch::Tensor apply_curves(const torch::Tensor& image, const std::string& curves) {
+    if (curves.empty()) return image.clone();
+    
+    // Parse control points
+    std::vector<std::pair<float, float>> points;
+    size_t pos = 0;
+    while (pos < curves.size()) {
+        size_t semi = curves.find(';', pos);
+        std::string pair_str = (semi == std::string::npos) ? curves.substr(pos) : curves.substr(pos, semi - pos);
+        size_t comma = pair_str.find(',');
+        if (comma != std::string::npos) {
+            float input_val = std::stof(pair_str.substr(0, comma)) / 255.0f;
+            float output_val = std::stof(pair_str.substr(comma + 1)) / 255.0f;
+            points.push_back({input_val, output_val});
+        }
+        if (semi == std::string::npos) break;
+        pos = semi + 1;
+    }
+    
+    if (points.size() < 2) return image.clone();
+    
+    // Sort by input value
+    std::sort(points.begin(), points.end());
+    
+    // Create lookup table (256 entries)
+    std::vector<float> lut(256);
+    for (int i = 0; i < 256; ++i) {
+        float x = i / 255.0f;
+        // Find segment
+        size_t idx = 0;
+        for (size_t j = 0; j < points.size() - 1; ++j) {
+            if (x >= points[j].first && x <= points[j + 1].first) {
+                idx = j;
+                break;
+            }
+        }
+        // Linear interpolation
+        float x0 = points[idx].first;
+        float y0 = points[idx].second;
+        float x1 = points[idx + 1].first;
+        float y1 = points[idx + 1].second;
+        if (x1 - x0 > 0) {
+            float t = (x - x0) / (x1 - x0);
+            lut[i] = y0 + t * (y1 - y0);
+        } else {
+            lut[i] = y0;
+        }
+    }
+    
+    // Apply lookup table
+    auto img = image.clone();
+    auto lut_tensor = torch::tensor(lut, torch::TensorOptions().dtype(torch::kFloat32)).to(img.device());
+    
+    // Scale to 0-255, round, clamp, lookup, scale back
+    auto idx = (img * 255.0f).clamp(0, 255).to(torch::kInt64);
+    
+    for (int c = 0; c < img.size(0); ++c) {
+        img[c] = lut_tensor.index({idx[c]});
+    }
+    
+    return img.clamp(0, 1);
+}
+
 } // namespace myimg

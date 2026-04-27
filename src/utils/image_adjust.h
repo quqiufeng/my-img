@@ -50,4 +50,9 @@ torch::Tensor whiten(const torch::Tensor& image, float strength);
 // strength: 0.0-1.0
 torch::Tensor skin_smooth(const torch::Tensor& image, float strength);
 
+// RGB Curves adjustment
+// curves: vector of control points in format "input,output;input,output;..."
+// input/output values are 0-255
+torch::Tensor apply_curves(const torch::Tensor& image, const std::string& curves);
+
 } // namespace myimg

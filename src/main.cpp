@@ -76,6 +76,7 @@ struct CliOptions {
     float highlights = 0.0f;     // -100 ~ 100
     float shadows = 0.0f;        // -100 ~ 100
     bool auto_enhance = false;   // 一键优化
+    std::string curves;          // RGB curves "in,out;in,out"
     
     // 人像修饰
     float whiten_strength = 0.0f;    // 0.0-1.0
@@ -169,6 +170,8 @@ static void print_usage(const char* argv0) {
     std::cout << "  --highlights FLOAT        Highlights -100 to 100\n";
     std::cout << "  --shadows FLOAT           Shadows -100 to 100\n";
     std::cout << "  --auto-enhance            Auto one-click photo enhancement\n";
+    std::cout << "\nCurves Options:\n";
+    std::cout << "  --curves \"in,out;in,out\"  RGB curves (0-255, e.g. \"0,0;128,140;255,255\")\n";
     std::cout << "\nPortrait Retouching Options:\n";
     std::cout << "  --whiten FLOAT            Whitening strength 0.0-1.0\n";
     std::cout << "  --skin-smooth FLOAT       Skin smoothing strength 0.0-1.0\n";
@@ -345,6 +348,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.shadows = std::stof(argv[i]);
         } else if (arg == "--auto-enhance") {
             opts.auto_enhance = true;
+        } else if (arg == "--curves") {
+            if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
+            opts.curves = argv[i];
         } else if (arg == "--whiten") {
             if (++i >= argc) { std::cerr << "Missing value for --whiten\n"; return false; }
             opts.whiten_strength = std::stof(argv[i]);
@@ -679,6 +685,7 @@ int main(int argc, char** argv) {
                 opts.contrast != 0.0f || opts.saturation != 0.0f ||
                 opts.exposure != 0.0f || opts.highlights != 0.0f ||
                 opts.shadows != 0.0f || opts.auto_enhance ||
+                !opts.curves.empty() ||
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                 opts.smart_denoise_flag ||
                 opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f) {
@@ -705,6 +712,11 @@ int main(int argc, char** argv) {
                 }
                 if (opts.sharpen_amount > 0.0f) {
                     tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+                }
+                
+                // RGB curves
+                if (!opts.curves.empty()) {
+                    tensor = myimg::apply_curves(tensor, opts.curves);
                 }
                 
                 // Portrait retouching
@@ -816,6 +828,7 @@ int main(int argc, char** argv) {
                                opts.contrast != 0.0f || opts.saturation != 0.0f ||
                                opts.exposure != 0.0f || opts.highlights != 0.0f ||
                                opts.shadows != 0.0f || opts.auto_enhance ||
+                               !opts.curves.empty() ||
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                                opts.smart_denoise_flag ||
                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f;
@@ -855,6 +868,12 @@ int main(int argc, char** argv) {
             if (opts.sharpen_amount > 0.0f) {
                 std::cout << "Applying USM sharpen...\n";
                 tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+            }
+            
+            // RGB 曲线
+            if (!opts.curves.empty()) {
+                std::cout << "Applying curves: " << opts.curves << "\n";
+                tensor = myimg::apply_curves(tensor, opts.curves);
             }
             
             // 人像修饰
