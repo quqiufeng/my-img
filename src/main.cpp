@@ -88,6 +88,8 @@ struct CliOptions {
     float split_tone_strength = 0.0f;   // 0.0 ~ 1.0
     float tint = 0.0f;           // -1.0 ~ 1.0 (green/magenta)
     bool auto_white_balance = false;    // Auto white balance
+    float blacks = 0.0f;         // -100 ~ 100 (black level)
+    float whites = 0.0f;         // -100 ~ 100 (white level)
     std::string curves;          // RGB curves "in,out;in,out"
     std::string preset;          // Filter preset name
     float vignette_strength = 0.0f; // 0.0-1.0
@@ -214,6 +216,9 @@ static void print_usage(const char* argv0) {
     std::cout << "\nColor Balance:\n";
     std::cout << "  --tint FLOAT              Tint -1.0(magenta) to 1.0(green)\n";
     std::cout << "  --auto-white-balance      Auto white balance (gray world)\n";
+    std::cout << "\nLevels Options:\n";
+    std::cout << "  --blacks FLOAT            Black level -100 to 100 (neg=crush, pos=lift)\n";
+    std::cout << "  --whites FLOAT            White level -100 to 100 (neg=reduce, pos=boost)\n";
     std::cout << "\nCurves Options:\n";
     std::cout << "  --curves \"in,out;in,out\"  RGB curves (0-255, e.g. \"0,0;128,140;255,255\")\n";
     std::cout << "\nVignette Options:\n";
@@ -408,6 +413,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.tint = std::stof(argv[i]);
         } else if (arg == "--auto-white-balance") {
             opts.auto_white_balance = true;
+        } else if (arg == "--blacks") {
+            if (++i >= argc) { std::cerr << "Missing value for --blacks\n"; return false; }
+            opts.blacks = std::stof(argv[i]);
+        } else if (arg == "--whites") {
+            if (++i >= argc) { std::cerr << "Missing value for --whites\n"; return false; }
+            opts.whites = std::stof(argv[i]);
         } else if (arg == "--curves") {
             if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
             opts.curves = argv[i];
@@ -839,7 +850,8 @@ int main(int argc, char** argv) {
                 opts.dehaze_strength > 0.0f ||
                 opts.vibrance != 0.0f || opts.clarity > 0.0f ||
                 opts.split_tone_strength > 0.0f ||
-                opts.tint != 0.0f || opts.auto_white_balance) {
+                opts.tint != 0.0f || opts.auto_white_balance ||
+                opts.blacks != 0.0f || opts.whites != 0.0f) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -939,6 +951,11 @@ int main(int argc, char** argv) {
                 // Auto white balance
                 if (opts.auto_white_balance) {
                     tensor = myimg::auto_white_balance(tensor);
+                }
+                
+                // Black/White levels
+                if (opts.blacks != 0.0f || opts.whites != 0.0f) {
+                    tensor = myimg::adjust_levels(tensor, opts.blacks, opts.whites);
                 }
                 
                 // Portrait retouching
@@ -1056,6 +1073,7 @@ int main(int argc, char** argv) {
                                opts.vibrance != 0.0f || opts.clarity > 0.0f ||
                                opts.split_tone_strength > 0.0f ||
                                opts.tint != 0.0f || opts.auto_white_balance ||
+                               opts.blacks != 0.0f || opts.whites != 0.0f ||
                                !opts.curves.empty() ||
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                                opts.smart_sharpen_strength > 0.0f || opts.smart_denoise_flag ||
@@ -1146,6 +1164,12 @@ int main(int argc, char** argv) {
             if (opts.auto_white_balance) {
                 std::cout << "Applying auto white balance...\n";
                 tensor = myimg::auto_white_balance(tensor);
+            }
+            
+            // Black/White levels
+            if (opts.blacks != 0.0f || opts.whites != 0.0f) {
+                std::cout << "Applying levels: blacks=" << opts.blacks << " whites=" << opts.whites << "\n";
+                tensor = myimg::adjust_levels(tensor, opts.blacks, opts.whites);
             }
             
             // 滤镜预设

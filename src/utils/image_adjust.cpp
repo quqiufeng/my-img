@@ -276,6 +276,44 @@ torch::Tensor auto_white_balance(const torch::Tensor& image) {
     return img;
 }
 
+// Black/White levels adjustment
+// blacks: -100 to 100 (negative = crush blacks, positive = lift blacks)
+// whites: -100 to 100 (negative = reduce whites, positive = increase whites)
+torch::Tensor adjust_levels(const torch::Tensor& image, float blacks, float whites) {
+    if (blacks == 0.0f && whites == 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    
+    // Convert -100..100 to actual level adjustments
+    // Blacks: negative = lower black point (crush), positive = raise black point (lift)
+    float black_point = std::clamp(blacks / 100.0f, -1.0f, 1.0f) * 0.3f;
+    float white_point = std::clamp(whites / 100.0f, -1.0f, 1.0f) * 0.3f;
+    
+    // Apply black level adjustment
+    if (black_point != 0.0f) {
+        if (black_point > 0.0f) {
+            // Lift blacks: add offset to dark areas
+            img = img + black_point * (1.0f - img);
+        } else {
+            // Crush blacks: compress dark range
+            img = (img + black_point).clamp(0, 1);
+        }
+    }
+    
+    // Apply white level adjustment
+    if (white_point != 0.0f) {
+        if (white_point > 0.0f) {
+            // Increase whites: boost bright areas
+            img = img * (1.0f + white_point);
+        } else {
+            // Reduce whites: compress bright range
+            img = img * (1.0f + white_point);
+        }
+    }
+    
+    return img.clamp(0, 1);
+}
+
 // USM (Unsharp Mask) 锐化
 torch::Tensor usm_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
     if (amount <= 0.0f || radius <= 0) return image.clone();

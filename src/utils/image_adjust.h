@@ -49,6 +49,11 @@ torch::Tensor adjust_tint(const torch::Tensor& image, float strength);
 // Auto white balance
 torch::Tensor auto_white_balance(const torch::Tensor& image);
 
+// Black/White levels adjustment
+// blacks: -100 to 100 (negative = crush blacks, positive = lift blacks)
+// whites: -100 to 100 (negative = reduce whites, positive = increase whites)
+torch::Tensor adjust_levels(const torch::Tensor& image, float blacks, float whites);
+
 // USM Sharpening
 // amount: 0.0-3.0 (strength)
 // radius: 1-5 (blur radius in pixels)
