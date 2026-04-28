@@ -140,6 +140,9 @@ struct CliOptions {
     bool flip_h = false;
     bool flip_v = false;
     int rotate = 0;           // 90, 180, 270
+    std::string crop;         // x,y,w,h
+    std::string crop_center;  // w,h
+    std::string crop_ratio;   // w:h (e.g. 16:9, 1:1)
     
     // Output quality
     int jpeg_quality = 95;  // JPEG quality (1-100)
@@ -219,6 +222,15 @@ static void print_usage(const char* argv0) {
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
     std::cout << "  --quality INT             JPEG quality 1-100 (default: 95)\n";
+    std::cout << "\nImage Transformation:\n";
+    std::cout << "  --resize WxH              Resize image (e.g. 1920x1080)\n";
+    std::cout << "  --resize-mode MODE        Resize mode: nearest, bilinear, bicubic\n";
+    std::cout << "  --flip-h                  Flip horizontally\n";
+    std::cout << "  --flip-v                  Flip vertically\n";
+    std::cout << "  --rotate DEG              Rotate 90, 180, or 270 degrees\n";
+    std::cout << "  --crop x,y,w,h            Crop image (pixel coordinates)\n";
+    std::cout << "  --crop-center w,h         Center crop to specified size\n";
+    std::cout << "  --crop-ratio w:h          Crop to aspect ratio (e.g. 16:9, 1:1, 4:3)\n";
     std::cout << "\nBatch Processing:\n";
     std::cout << "  --batch-input-dir PATH    Input directory for batch processing\n";
     std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
@@ -421,6 +433,9 @@ static bool save_preset(const CliOptions& opts, const std::string& preset_name) 
     j["flip_h"] = opts.flip_h;
     j["flip_v"] = opts.flip_v;
     j["rotate"] = opts.rotate;
+    j["crop"] = opts.crop;
+    j["crop_center"] = opts.crop_center;
+    j["crop_ratio"] = opts.crop_ratio;
     j["jpeg_quality"] = opts.jpeg_quality;
     
     std::string preset_path = preset_name;
@@ -511,6 +526,9 @@ static bool load_preset(CliOptions& opts, const std::string& preset_path) {
     get_bool("flip_h", opts.flip_h);
     get_bool("flip_v", opts.flip_v);
     get_int("rotate", opts.rotate);
+    get_string("crop", opts.crop);
+    get_string("crop_center", opts.crop_center);
+    get_string("crop_ratio", opts.crop_ratio);
     get_int("jpeg_quality", opts.jpeg_quality);
     
     std::cout << "Preset loaded from: " << preset_path << "\n";
@@ -795,6 +813,15 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--rotate") {
             if (++i >= argc) { std::cerr << "Missing value for --rotate\n"; return false; }
             opts.rotate = std::stoi(argv[i]);
+        } else if (arg == "--crop") {
+            if (++i >= argc) { std::cerr << "Missing value for --crop\n"; return false; }
+            opts.crop = argv[i];
+        } else if (arg == "--crop-center") {
+            if (++i >= argc) { std::cerr << "Missing value for --crop-center\n"; return false; }
+            opts.crop_center = argv[i];
+        } else if (arg == "--crop-ratio") {
+            if (++i >= argc) { std::cerr << "Missing value for --crop-ratio\n"; return false; }
+            opts.crop_ratio = argv[i];
         } else if (arg == "--batch-input-dir") {
             if (++i >= argc) { std::cerr << "Missing value for --batch-input-dir\n"; return false; }
             opts.batch_input_dir = argv[i];
@@ -1210,6 +1237,44 @@ int main(int argc, char** argv) {
             }
             if (opts.rotate != 0) {
                 img_data = myimg::rotate_image(img_data, opts.rotate);
+            }
+            
+            // Apply cropping
+            if (!opts.crop.empty()) {
+                std::stringstream ss(opts.crop);
+                int x, y, w, h;
+                char comma;
+                ss >> x >> comma >> y >> comma >> w >> comma >> h;
+                img_data = myimg::crop_image(img_data, x, y, w, h);
+            } else if (!opts.crop_center.empty()) {
+                std::stringstream ss(opts.crop_center);
+                int w, h;
+                char comma;
+                ss >> w >> comma >> h;
+                int x = (img_data.width - w) / 2;
+                int y = (img_data.height - h) / 2;
+                img_data = myimg::crop_image(img_data, x, y, w, h);
+            } else if (!opts.crop_ratio.empty()) {
+                size_t colon = opts.crop_ratio.find(':');
+                if (colon != std::string::npos) {
+                    float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
+                    float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
+                    float img_ratio = (float)img_data.width / img_data.height;
+                    float target_ratio = ratio_w / ratio_h;
+                    int w, h, x, y;
+                    if (img_ratio > target_ratio) {
+                        h = img_data.height;
+                        w = (int)(h * target_ratio);
+                        x = (img_data.width - w) / 2;
+                        y = 0;
+                    } else {
+                        w = img_data.width;
+                        h = (int)(w / target_ratio);
+                        x = 0;
+                        y = (img_data.height - h) / 2;
+                    }
+                    img_data = myimg::crop_image(img_data, x, y, w, h);
+                }
             }
             
             // Apply photo adjustments
@@ -1651,7 +1716,8 @@ int main(int argc, char** argv) {
         
         // 后处理变换
         bool has_transform = opts.resize_width > 0 || opts.resize_height > 0 ||
-                            opts.flip_h || opts.flip_v || opts.rotate != 0;
+                            opts.flip_h || opts.flip_v || opts.rotate != 0 ||
+                            !opts.crop.empty() || !opts.crop_center.empty() || !opts.crop_ratio.empty();
         if (has_transform) {
             std::cout << "Applying transformations...\n";
             myimg::ImageData img_data;
@@ -1671,6 +1737,44 @@ int main(int argc, char** argv) {
             }
             if (opts.rotate != 0) {
                 img_data = myimg::rotate_image(img_data, opts.rotate);
+            }
+            
+            // Apply cropping
+            if (!opts.crop.empty()) {
+                std::stringstream ss(opts.crop);
+                int x, y, w, h;
+                char comma;
+                ss >> x >> comma >> y >> comma >> w >> comma >> h;
+                img_data = myimg::crop_image(img_data, x, y, w, h);
+            } else if (!opts.crop_center.empty()) {
+                std::stringstream ss(opts.crop_center);
+                int w, h;
+                char comma;
+                ss >> w >> comma >> h;
+                int x = (img_data.width - w) / 2;
+                int y = (img_data.height - h) / 2;
+                img_data = myimg::crop_image(img_data, x, y, w, h);
+            } else if (!opts.crop_ratio.empty()) {
+                size_t colon = opts.crop_ratio.find(':');
+                if (colon != std::string::npos) {
+                    float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
+                    float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
+                    float img_ratio = (float)img_data.width / img_data.height;
+                    float target_ratio = ratio_w / ratio_h;
+                    int w, h, x, y;
+                    if (img_ratio > target_ratio) {
+                        h = img_data.height;
+                        w = (int)(h * target_ratio);
+                        x = (img_data.width - w) / 2;
+                        y = 0;
+                    } else {
+                        w = img_data.width;
+                        h = (int)(w / target_ratio);
+                        x = 0;
+                        y = (img_data.height - h) / 2;
+                    }
+                    img_data = myimg::crop_image(img_data, x, y, w, h);
+                }
             }
             
             image.width = img_data.width;
