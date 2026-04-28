@@ -19,6 +19,9 @@
 #include "utils/png_metadata.h"
 #include "utils/lut_loader.h"
 #include "utils/dehaze.h"
+#ifdef HAVE_OPENCV
+#include "utils/controlnet_preprocessors.h"
+#endif
 
 namespace fs = std::filesystem;
 
@@ -144,6 +147,11 @@ struct CliOptions {
     std::string crop_center;  // w,h
     std::string crop_ratio;   // w:h (e.g. 16:9, 1:1)
     
+    // ControlNet preprocessor
+    std::string control_preprocessor;  // canny, lineart, normal, scribble, depth, openpose
+    int control_preprocessor_param1 = 0;  // threshold1 for canny, threshold for lineart/scribble
+    int control_preprocessor_param2 = 0;  // threshold2 for canny
+    
     // Output quality
     int jpeg_quality = 95;  // JPEG quality (1-100)
     
@@ -231,6 +239,10 @@ static void print_usage(const char* argv0) {
     std::cout << "  --crop x,y,w,h            Crop image (pixel coordinates)\n";
     std::cout << "  --crop-center w,h         Center crop to specified size\n";
     std::cout << "  --crop-ratio w:h          Crop to aspect ratio (e.g. 16:9, 1:1, 4:3)\n";
+    std::cout << "\nControlNet Preprocessors:\n";
+    std::cout << "  --control-preprocessor NAME  Preprocessor: canny, lineart, normal, scribble\n";
+    std::cout << "  --control-preprocessor-param1 INT  Parameter 1 (threshold)\n";
+    std::cout << "  --control-preprocessor-param2 INT  Parameter 2 (Canny high threshold)\n";
     std::cout << "\nBatch Processing:\n";
     std::cout << "  --batch-input-dir PATH    Input directory for batch processing\n";
     std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
@@ -822,15 +834,15 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--crop-ratio") {
             if (++i >= argc) { std::cerr << "Missing value for --crop-ratio\n"; return false; }
             opts.crop_ratio = argv[i];
-        } else if (arg == "--batch-input-dir") {
-            if (++i >= argc) { std::cerr << "Missing value for --batch-input-dir\n"; return false; }
-            opts.batch_input_dir = argv[i];
-        } else if (arg == "--batch-output-dir") {
-            if (++i >= argc) { std::cerr << "Missing value for --batch-output-dir\n"; return false; }
-            opts.batch_output_dir = argv[i];
-        } else if (arg == "--output-template") {
-            if (++i >= argc) { std::cerr << "Missing value for --output-template\n"; return false; }
-            opts.output_template = argv[i];
+        } else if (arg == "--control-preprocessor") {
+            if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor\n"; return false; }
+            opts.control_preprocessor = argv[i];
+        } else if (arg == "--control-preprocessor-param1") {
+            if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor-param1\n"; return false; }
+            opts.control_preprocessor_param1 = std::stoi(argv[i]);
+        } else if (arg == "--control-preprocessor-param2") {
+            if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor-param2\n"; return false; }
+            opts.control_preprocessor_param2 = std::stoi(argv[i]);
         } else if (arg == "--save-preset") {
             if (++i >= argc) { std::cerr << "Missing value for --save-preset\n"; return false; }
             opts.save_preset_name = argv[i];
@@ -948,6 +960,57 @@ int main(int argc, char** argv) {
         std::cout << "  3. Use: --interrogate-model PATH --interrogate " << opts.interrogate_image << "\n";
         std::cout << "\nNote: Full JoyCaption integration requires additional model files.\n";
         return 0;
+    }
+    
+    // ControlNet preprocessor (post-processing only, no model required)
+    if (!opts.control_preprocessor.empty()) {
+#ifdef HAVE_OPENCV
+        if (opts.init_image.empty()) {
+            std::cerr << "Error: --control-preprocessor requires --init-img\n";
+            return 1;
+        }
+        
+        std::cout << "========================================\n";
+        std::cout << "  ControlNet Preprocessor: " << opts.control_preprocessor << "\n";
+        std::cout << "========================================\n";
+        
+        auto img_data = myimg::load_image_from_file(opts.init_image);
+        if (img_data.empty()) {
+            std::cerr << "Error: Failed to load image\n";
+            return 1;
+        }
+        
+        auto result = myimg::apply_preprocessor(img_data, opts.control_preprocessor,
+                                                 opts.control_preprocessor_param1,
+                                                 opts.control_preprocessor_param2);
+        if (result.empty()) {
+            std::cerr << "Error: Preprocessor failed\n";
+            return 1;
+        }
+        
+        // Save result
+        std::string output_file = opts.output;
+        if (output_file == "output.png") {
+            output_file = "control_" + opts.control_preprocessor + ".png";
+        }
+        
+        myimg::Image image;
+        image.width = result.width;
+        image.height = result.height;
+        image.channels = result.channels;
+        image.data = std::move(result.data);
+        
+        if (image.save_to_file(output_file)) {
+            std::cout << "Saved to: " << output_file << "\n";
+        } else {
+            std::cerr << "Error: Failed to save result\n";
+            return 1;
+        }
+        return 0;
+#else
+        std::cerr << "Error: ControlNet preprocessors require OpenCV. Please install OpenCV.\n";
+        return 1;
+#endif
     }
     
     // Save preset (no model required)

@@ -102,14 +102,17 @@
 - **难度**: 高
 
 #### Task 7.3: ControlNet 预处理器
-- [ ] Canny 边缘检测
-- [ ] Depth 深度估计（MiDaS/DPT）
-- [ ] Lineart 线条提取
-- [ ] OpenPose 姿态检测
-- [ ] Normal Map 法线贴图
-- [ ] Scribble 涂鸦识别
+- [x] Canny 边缘检测（OpenCV）
+- [ ] Depth 深度估计（MiDaS/DPT - 需要 ONNX 模型）
+- [x] Lineart 线条提取（OpenCV Canny + 后处理）
+- [ ] OpenPose 姿态检测（需要 OpenPose ONNX 模型）
+- [x] Normal Map 法线贴图（OpenCV Sobel）
+- [x] Scribble 涂鸦识别（OpenCV Canny + 反色）
+- [x] CLI 参数：`--control-preprocessor NAME`
+- [x] CLI 参数：`--control-preprocessor-param1 INT`
+- [x] CLI 参数：`--control-preprocessor-param2 INT`
 - **优先级**: P2
-- **难度**: 高（需要集成 OpenCV/ONNX）
+- **难度**: 中（使用 OpenCV 实现基础预处理器）
 
 ### Phase 8: 图像理解 & 反推
 

@@ -132,6 +132,15 @@ if(OpenMP_CXX_FOUND)
     list(APPEND SDCPP_LINK_LIBRARIES OpenMP::OpenMP_CXX)
 endif()
 
+# 查找 OpenCV (用于 ControlNet 预处理器)
+find_package(OpenCV QUIET)
+if(OpenCV_FOUND)
+    message(STATUS "[my-img] Found OpenCV ${OpenCV_VERSION}")
+    list(APPEND SDCPP_LINK_LIBRARIES ${OpenCV_LIBS})
+else()
+    message(WARNING "[my-img] OpenCV not found. ControlNet preprocessors will be disabled.")
+endif()
+
 # ============================================================
 # 5. 源文件
 # ============================================================
@@ -146,10 +155,18 @@ set(MYIMG_SOURCES
     src/utils/stb_impl.c
 )
 
+if(OpenCV_FOUND)
+    list(APPEND MYIMG_SOURCES src/utils/controlnet_preprocessors.cpp)
+endif()
+
 # ============================================================
 # 5. 创建可执行文件
 # ============================================================
 add_executable(myimg-cli ${MYIMG_SOURCES})
+
+if(OpenCV_FOUND)
+    target_compile_definitions(myimg-cli PRIVATE HAVE_OPENCV=1)
+endif()
 
 # 包含目录
 target_include_directories(myimg-cli PRIVATE
@@ -163,6 +180,7 @@ target_include_directories(myimg-cli PRIVATE
     ${THIRDPARTY_DIR}/ggml/include
     ${SDCPP_DIR}/include
     ${SDCPP_DIR}/ggml/include
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 # 查找 zlib
