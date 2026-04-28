@@ -36,6 +36,12 @@ torch::Tensor adjust_vibrance(const torch::Tensor& image, float strength);
 // strength: 0.0-1.0
 torch::Tensor enhance_clarity(const torch::Tensor& image, float strength);
 
+// Split toning: color highlights and shadows separately
+// highlight_color, shadow_color: hex strings like "#FFE4C4" or "FF0000"
+// strength: 0.0-1.0
+torch::Tensor split_tone(const torch::Tensor& image, const std::string& highlight_color, 
+                         const std::string& shadow_color, float strength);
+
 // USM Sharpening
 // amount: 0.0-3.0 (strength)
 // radius: 1-5 (blur radius in pixels)

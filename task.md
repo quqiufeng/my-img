@@ -294,11 +294,12 @@
 - [x] RGB 曲线调整（支持控制点）
 - [ ] 亮度曲线
 - [ ] 单独 R/G/B 通道曲线
-- [ ] 色调分离（高光/阴影着色）
+- [x] 色调分离（高光/阴影着色）
 - [ ] 照片滤镜（模拟胶片色）
 - [x] CLI 参数：`--curves "0,0;128,140;255,255"`（输入,输出 控制点）
-- [ ] CLI 参数：`--split-tone-highlights #FFE4C4`
-- [ ] CLI 参数：`--split-tone-shadows #4A6741`
+- [x] CLI 参数：`--split-tone-highlights #FFE4C4`
+- [x] CLI 参数：`--split-tone-shadows #4A6741`
+- [x] CLI 参数：`--split-tone-strength FLOAT`
 - **优先级**: P2
 - **难度**: 中
 

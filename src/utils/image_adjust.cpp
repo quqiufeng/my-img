@@ -180,6 +180,57 @@ torch::Tensor enhance_clarity(const torch::Tensor& image, float strength) {
     return (img + detail * blend * mask).clamp(0, 1);
 }
 
+// Parse hex color string (e.g., "#FFE4C4" or "FF0000")
+static torch::Tensor parse_hex_color(const std::string& hex, torch::Device device) {
+    std::string clean = hex;
+    if (clean[0] == '#') clean = clean.substr(1);
+    
+    int r = std::stoi(clean.substr(0, 2), nullptr, 16);
+    int g = std::stoi(clean.substr(2, 2), nullptr, 16);
+    int b = std::stoi(clean.substr(4, 2), nullptr, 16);
+    
+    return torch::tensor({r / 255.0f, g / 255.0f, b / 255.0f}, 
+                         torch::TensorOptions().dtype(torch::kFloat32).device(device));
+}
+
+// Split toning: color highlights and shadows separately
+torch::Tensor split_tone(const torch::Tensor& image, const std::string& highlight_color, 
+                         const std::string& shadow_color, float strength) {
+    if (strength <= 0.0f || (highlight_color.empty() && shadow_color.empty())) 
+        return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // Parse colors
+    auto hl_color = parse_hex_color(highlight_color.empty() ? "#FFE4C4" : highlight_color, device);
+    auto sh_color = parse_hex_color(shadow_color.empty() ? "#4A6741" : shadow_color, device);
+    
+    // Calculate luminance
+    auto lum = img[0] * 0.299f + img[1] * 0.587f + img[2] * 0.114f;
+    
+    // Create highlight mask (bright areas)
+    auto hl_mask = ((lum - 0.5f) * 2.0f).clamp(0, 1); // 0.5->0, 1.0->1
+    
+    // Create shadow mask (dark areas)
+    auto sh_mask = ((0.5f - lum) * 2.0f).clamp(0, 1); // 0.5->0, 0.0->1
+    
+    // Apply colors
+    float blend = std::min(strength, 1.0f);
+    
+    for (int c = 0; c < 3; ++c) {
+        // Highlights: blend towards highlight color
+        img[c] = img[c] * (1.0f - hl_mask * blend * 0.5f) + 
+                 hl_color[c] * hl_mask * blend * 0.5f;
+        
+        // Shadows: blend towards shadow color
+        img[c] = img[c] * (1.0f - sh_mask * blend * 0.5f) + 
+                 sh_color[c] * sh_mask * blend * 0.5f;
+    }
+    
+    return img.clamp(0, 1);
+}
+
 // USM (Unsharp Mask) 锐化
 torch::Tensor usm_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
     if (amount <= 0.0f || radius <= 0) return image.clone();
