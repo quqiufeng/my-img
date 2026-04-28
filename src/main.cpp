@@ -229,7 +229,8 @@ static void print_usage(const char* argv0) {
     std::cout << "  --graduated-filter angle,pos,width,exp,cont,sat  Graduated filter (e.g. 0,0.5,0.2,0.3,0,0)\n";
     std::cout << "\nFilter Presets:\n";
     std::cout << "  --preset NAME             Apply filter preset: bw, sepia, vintage, warm,\n";
-    std::cout << "                            cool, dramatic, japanese, film, cyberpunk, cinematic\n";
+    std::cout << "                            cool, dramatic, japanese, film, cyberpunk, cinematic,\n";
+    std::cout << "                            portra, velvia, provia, trix, kodachrome, instant\n";
     std::cout << "\nColor Grading:\n";
     std::cout << "  --lut PATH                Load 3D LUT file (.cube format)\n";
     std::cout << "\nImage Restoration:\n";

@@ -646,6 +646,64 @@ torch::Tensor apply_preset(const torch::Tensor& image, const std::string& name) 
         img = adjust_temperature(img, 0.05f);
         return img.clamp(0, 1);
     }
+    else if (name == "portra") {
+        // Kodak Portra: warm skin tones, soft, slightly desaturated
+        img = adjust_temperature(img, 0.25f);
+        img = adjust_saturation(img, -0.15f);
+        img = adjust_contrast(img, -0.1f);
+        img = adjust_brightness(img, 0.05f);
+        img = adjust_highlights(img, 15.0f);
+        img = adjust_shadows(img, 10.0f);
+        return img.clamp(0, 1);
+    }
+    else if (name == "velvia") {
+        // Fuji Velvia: vivid, high saturation, contrasty
+        img = adjust_saturation(img, 0.35f);
+        img = adjust_contrast(img, 0.25f);
+        img = adjust_brightness(img, -0.05f);
+        img = adjust_temperature(img, -0.1f); // slightly cool
+        return img.clamp(0, 1);
+    }
+    else if (name == "provia") {
+        // Fuji Provia: neutral, accurate, moderate contrast
+        img = adjust_contrast(img, 0.1f);
+        img = adjust_saturation(img, 0.05f);
+        img = adjust_brightness(img, 0.02f);
+        return img.clamp(0, 1);
+    }
+    else if (name == "trix" || name == "kodaktrix") {
+        // Kodak Tri-X: classic B&W with rich tones
+        auto gray = img[0] * 0.299f + img[1] * 0.587f + img[2] * 0.114f;
+        // Boost contrast for classic Tri-X look
+        gray = (gray - 0.5f) * 1.3f + 0.5f;
+        gray = gray.clamp(0, 1);
+        img[0] = gray;
+        img[1] = gray;
+        img[2] = gray;
+        return img;
+    }
+    else if (name == "kodachrome") {
+        // Kodachrome: legendary saturation + warm yellow highlights
+        img = adjust_saturation(img, 0.25f);
+        img = adjust_contrast(img, 0.2f);
+        img = adjust_temperature(img, 0.15f);
+        img = adjust_brightness(img, -0.02f);
+        // Boost reds and yellows
+        img[0] = (img[0] * 1.05f).clamp(0, 1);
+        return img.clamp(0, 1);
+    }
+    else if (name == "instant") {
+        // Instant film (Polaroid style): faded, warm, soft
+        img = adjust_contrast(img, -0.15f);
+        img = adjust_saturation(img, -0.1f);
+        img = adjust_temperature(img, 0.3f);
+        img = adjust_brightness(img, 0.08f);
+        img = adjust_highlights(img, 20.0f);
+        img = adjust_shadows(img, 15.0f);
+        // Slight green tint
+        img = adjust_tint(img, 0.1f);
+        return img.clamp(0, 1);
+    }
     
     // 未知预设，返回原图
     return img;
