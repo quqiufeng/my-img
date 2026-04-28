@@ -91,6 +91,10 @@ struct CliOptions {
     float blacks = 0.0f;         // -100 ~ 100 (black level)
     float whites = 0.0f;         // -100 ~ 100 (white level)
     std::string curves;          // RGB curves "in,out;in,out"
+    std::string brightness_curves;  // Brightness curves "in,out;in,out"
+    std::string r_curves;           // Red channel curves "in,out;in,out"
+    std::string g_curves;           // Green channel curves "in,out;in,out"
+    std::string b_curves;           // Blue channel curves "in,out;in,out"
     std::string preset;          // Filter preset name
     float vignette_strength = 0.0f; // 0.0-1.0
     float vignette_radius = 0.75f;  // 0.0-1.0
@@ -226,6 +230,10 @@ static void print_usage(const char* argv0) {
     std::cout << "  --whites FLOAT            White level -100 to 100 (neg=reduce, pos=boost)\n";
     std::cout << "\nCurves Options:\n";
     std::cout << "  --curves \"in,out;in,out\"  RGB curves (0-255, e.g. \"0,0;128,140;255,255\")\n";
+    std::cout << "  --brightness-curves \"in,out;...\"  Brightness curves (applies to luma only)\n";
+    std::cout << "  --r-curves \"in,out;...\"  Red channel curves\n";
+    std::cout << "  --g-curves \"in,out;...\"  Green channel curves\n";
+    std::cout << "  --b-curves \"in,out;...\"  Blue channel curves\n";
     std::cout << "\nVignette Options:\n";
     std::cout << "  --vignette FLOAT          Vignette strength 0.0-1.0\n";
     std::cout << "  --vignette-radius FLOAT   Vignette radius 0.0-1.0 (default: 0.75)\n";
@@ -494,6 +502,18 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--color-denoise") {
             if (++i >= argc) { std::cerr << "Missing value for --color-denoise\n"; return false; }
             opts.color_denoise_strength = std::stof(argv[i]);
+        } else if (arg == "--brightness-curves") {
+            if (++i >= argc) { std::cerr << "Missing value for --brightness-curves\n"; return false; }
+            opts.brightness_curves = argv[i];
+        } else if (arg == "--r-curves") {
+            if (++i >= argc) { std::cerr << "Missing value for --r-curves\n"; return false; }
+            opts.r_curves = argv[i];
+        } else if (arg == "--g-curves") {
+            if (++i >= argc) { std::cerr << "Missing value for --g-curves\n"; return false; }
+            opts.g_curves = argv[i];
+        } else if (arg == "--b-curves") {
+            if (++i >= argc) { std::cerr << "Missing value for --b-curves\n"; return false; }
+            opts.b_curves = argv[i];
         } else if (arg == "--outpaint-top") {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint-top\n"; return false; }
             opts.outpaint_top = std::stoi(argv[i]);
@@ -870,9 +890,9 @@ int main(int argc, char** argv) {
                 opts.exposure != 0.0f || opts.highlights != 0.0f ||
                 opts.shadows != 0.0f || opts.auto_enhance ||
                 !opts.curves.empty() ||
-                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                                opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
-                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
+                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
+                opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
+                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
                 !opts.preset.empty() ||
                 opts.vignette_strength > 0.0f ||
                 !opts.radial_filter.empty() ||
@@ -882,7 +902,9 @@ int main(int argc, char** argv) {
                 opts.vibrance != 0.0f || opts.clarity > 0.0f ||
                 opts.split_tone_strength > 0.0f ||
                 opts.tint != 0.0f || opts.auto_white_balance ||
-                opts.blacks != 0.0f || opts.whites != 0.0f) {
+                opts.blacks != 0.0f || opts.whites != 0.0f ||
+                !opts.brightness_curves.empty() ||
+                !opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -931,6 +953,16 @@ int main(int argc, char** argv) {
                 // RGB curves
                 if (!opts.curves.empty()) {
                     tensor = myimg::apply_curves(tensor, opts.curves);
+                }
+                
+                // Brightness curves (luma only)
+                if (!opts.brightness_curves.empty()) {
+                    tensor = myimg::apply_brightness_curves(tensor, opts.brightness_curves);
+                }
+                
+                // Per-channel RGB curves
+                if (!opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
+                    tensor = myimg::apply_channel_curves(tensor, opts.r_curves, opts.g_curves, opts.b_curves);
                 }
                 
                 // Filter preset
@@ -1120,6 +1152,8 @@ int main(int argc, char** argv) {
                                opts.split_tone_strength > 0.0f ||
                                opts.tint != 0.0f || opts.auto_white_balance ||
                                opts.blacks != 0.0f || opts.whites != 0.0f ||
+                               !opts.brightness_curves.empty() ||
+                               !opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty() ||
                                !opts.curves.empty() ||
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                 opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
@@ -1193,6 +1227,24 @@ int main(int argc, char** argv) {
                 tensor = myimg::edge_mask_sharpen(tensor, opts.edge_sharpen_amount, opts.edge_sharpen_radius, opts.edge_sharpen_threshold);
             }
             */
+            
+            // RGB 曲线
+            if (!opts.curves.empty()) {
+                std::cout << "Applying curves: " << opts.curves << "\n";
+                tensor = myimg::apply_curves(tensor, opts.curves);
+            }
+            
+            // Brightness curves (luma only)
+            if (!opts.brightness_curves.empty()) {
+                std::cout << "Applying brightness curves: " << opts.brightness_curves << "\n";
+                tensor = myimg::apply_brightness_curves(tensor, opts.brightness_curves);
+            }
+            
+            // Per-channel RGB curves
+            if (!opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
+                std::cout << "Applying channel curves...\n";
+                tensor = myimg::apply_channel_curves(tensor, opts.r_curves, opts.g_curves, opts.b_curves);
+            }
             
             // 滤镜预设
             if (!opts.preset.empty()) {

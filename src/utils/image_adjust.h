@@ -54,6 +54,15 @@ torch::Tensor auto_white_balance(const torch::Tensor& image);
 // whites: -100 to 100 (negative = reduce whites, positive = increase whites)
 torch::Tensor adjust_levels(const torch::Tensor& image, float blacks, float whites);
 
+// Brightness curves: apply curve to luminance channel only
+// curves_str: "in,out;in,out" format (0-255)
+torch::Tensor apply_brightness_curves(const torch::Tensor& image, const std::string& curves_str);
+
+// Per-channel RGB curves
+// r_curves, g_curves, b_curves: "in,out;in,out" format (0-255)
+torch::Tensor apply_channel_curves(const torch::Tensor& image, const std::string& r_curves, 
+                                    const std::string& g_curves, const std::string& b_curves);
+
 // USM Sharpening
 // amount: 0.0-3.0 (strength)
 // radius: 1-5 (blur radius in pixels)

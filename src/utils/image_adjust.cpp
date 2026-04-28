@@ -314,6 +314,109 @@ torch::Tensor adjust_levels(const torch::Tensor& image, float blacks, float whit
     return img.clamp(0, 1);
 }
 
+// Parse curves string and create LUT
+static std::vector<float> parse_curves_lut(const std::string& curves_str) {
+    std::vector<float> lut(256);
+    
+    if (curves_str.empty()) {
+        for (int i = 0; i < 256; ++i) lut[i] = i / 255.0f;
+        return lut;
+    }
+    
+    // Parse control points
+    std::vector<std::pair<float, float>> points;
+    size_t pos = 0;
+    while (pos < curves_str.size()) {
+        size_t semi = curves_str.find(';', pos);
+        std::string pair_str = (semi == std::string::npos) ? curves_str.substr(pos) : curves_str.substr(pos, semi - pos);
+        size_t comma = pair_str.find(',');
+        if (comma != std::string::npos) {
+            float input_val = std::stof(pair_str.substr(0, comma)) / 255.0f;
+            float output_val = std::stof(pair_str.substr(comma + 1)) / 255.0f;
+            points.push_back({input_val, output_val});
+        }
+        if (semi == std::string::npos) break;
+        pos = semi + 1;
+    }
+    
+    if (points.size() < 2) {
+        for (int i = 0; i < 256; ++i) lut[i] = i / 255.0f;
+        return lut;
+    }
+    
+    // Sort by input value
+    std::sort(points.begin(), points.end());
+    
+    // Create lookup table
+    for (int i = 0; i < 256; ++i) {
+        float x = i / 255.0f;
+        size_t idx = 0;
+        for (size_t j = 0; j < points.size() - 1; ++j) {
+            if (x >= points[j].first && x <= points[j + 1].first) {
+                idx = j;
+                break;
+            }
+        }
+        float x0 = points[idx].first;
+        float y0 = points[idx].second;
+        float x1 = points[idx + 1].first;
+        float y1 = points[idx + 1].second;
+        if (x1 - x0 > 0) {
+            float t = (x - x0) / (x1 - x0);
+            lut[i] = y0 + t * (y1 - y0);
+        } else {
+            lut[i] = y0;
+        }
+    }
+    
+    return lut;
+}
+
+// Brightness curves: apply curve to luminance channel only
+// curves_str: "in,out;in,out" format (0-255)
+torch::Tensor apply_brightness_curves(const torch::Tensor& image, const std::string& curves_str) {
+    if (curves_str.empty()) return image.clone();
+    
+    auto img = image.clone();
+    auto lut = parse_curves_lut(curves_str);
+    auto lut_tensor = torch::tensor(lut, torch::TensorOptions().dtype(torch::kFloat32)).to(img.device());
+    
+    // Compute luminance
+    auto luma = img[0] * 0.299f + img[1] * 0.587f + img[2] * 0.114f;
+    
+    // Apply curve to luminance
+    auto idx = (luma * 255.0f).clamp(0, 255).to(torch::kInt64);
+    auto luma_new = lut_tensor.index({idx});
+    
+    // Adjust RGB proportionally
+    for (int c = 0; c < 3; ++c) {
+        auto ratio = img[c] / (luma + 1e-6f);
+        img[c] = (luma_new * ratio).clamp(0, 1);
+    }
+    
+    return img;
+}
+
+// Per-channel RGB curves
+// r_curves, g_curves, b_curves: "in,out;in,out" format (0-255)
+torch::Tensor apply_channel_curves(const torch::Tensor& image, const std::string& r_curves, 
+                                    const std::string& g_curves, const std::string& b_curves) {
+    if (r_curves.empty() && g_curves.empty() && b_curves.empty()) return image.clone();
+    
+    auto img = image.clone();
+    std::vector<std::string> curve_strs = {r_curves, g_curves, b_curves};
+    
+    for (int c = 0; c < 3; ++c) {
+        if (curve_strs[c].empty()) continue;
+        auto lut = parse_curves_lut(curve_strs[c]);
+        auto lut_tensor = torch::tensor(lut, torch::TensorOptions().dtype(torch::kFloat32)).to(img.device());
+        auto idx = (img[c] * 255.0f).clamp(0, 255).to(torch::kInt64);
+        img[c] = lut_tensor.index({idx});
+    }
+    
+    return img.clamp(0, 1);
+}
+
 // USM (Unsharp Mask) 锐化
 torch::Tensor usm_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
     if (amount <= 0.0f || radius <= 0) return image.clone();
