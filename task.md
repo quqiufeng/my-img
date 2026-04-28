@@ -367,13 +367,13 @@
   - 摄影：快速套用调色风格
 
 #### Task 10.5.11: 批量处理与脚本
-- [ ] 批量处理目录下所有图片
-- [ ] 处理进度显示
+- [x] 批量处理目录下所有图片
+- [x] 处理进度显示（计数器 [N/M]）
 - [ ] 多线程并行处理
-- [ ] 输出文件名模板（如 `{filename}_edited.{ext}`）
-- [ ] CLI 参数：`--batch /path/to/input_dir /path/to/output_dir`
-- [ ] CLI 参数：`--output-template "{name}_edited{ext}"`
-- [ ] CLI 参数：`--threads 4`
+- [x] 输出文件名模板（支持 `{name}`, `{ext}`, `{index}`, `{index:N}`）
+- [x] CLI 参数：`--batch-input-dir /path/to/input_dir --batch-output-dir /path/to/output_dir`
+- [x] CLI 参数：`--output-template "{name}_edited{ext}"`
+- [x] CLI 参数：`--threads INT`
 - **优先级**: 🛒 P1（电商刚需）
 - **难度**: 低
 - **用途**:

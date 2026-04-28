@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <sstream>
 #include <cmath>
+#include <iomanip>
 #include "adapters/sdcpp_adapter.h"
 #include "utils/image_utils.h"
 #include "utils/image_adjust.h"
@@ -143,6 +144,7 @@ struct CliOptions {
     // Batch processing (post-processing only)
     std::string batch_input_dir;
     std::string batch_output_dir;
+    std::string output_template;  // e.g. "{name}_edited{ext}" or "{index:04d}{ext}"
     
     // Image interrogation / metadata
     std::string interrogate_image;   // Image to interrogate (JoyCaption placeholder)
@@ -207,6 +209,11 @@ static void print_usage(const char* argv0) {
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
     std::cout << "  --quality INT             JPEG quality 1-100 (default: 95)\n";
+    std::cout << "\nBatch Processing:\n";
+    std::cout << "  --batch-input-dir PATH    Input directory for batch processing\n";
+    std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
+    std::cout << "  --output-template TPL     Output filename template (default: {name}{ext})\n";
+    std::cout << "                            Placeholders: {name}, {ext}, {index}, {index:N}\n";
     std::cout << "\nPhoto Adjustment Options:\n";
     std::cout << "  --temperature FLOAT       Color temperature -1.0(cold) to 1.0(warm)\n";
     std::cout << "  --brightness FLOAT        Brightness -1.0 to 1.0\n";
@@ -295,6 +302,59 @@ static std::string parse_embedding_syntax(const std::string& prompt, std::vector
         } else {
             pos = end;
         }
+    }
+    
+    return result;
+}
+
+// Expand output filename template
+// Supported placeholders: {name}, {ext}, {index}, {index:N} (zero-padded)
+static std::string expand_output_template(const std::string& template_str, 
+                                           const std::string& filename,
+                                           int index) {
+    std::string result = template_str.empty() ? "{name}{ext}" : template_str;
+    
+    // Extract name and extension
+    size_t dot_pos = filename.rfind('.');
+    std::string name = (dot_pos != std::string::npos) ? filename.substr(0, dot_pos) : filename;
+    std::string ext = (dot_pos != std::string::npos) ? filename.substr(dot_pos) : "";
+    
+    // Replace {name}
+    size_t pos = 0;
+    while ((pos = result.find("{name}", pos)) != std::string::npos) {
+        result.replace(pos, 6, name);
+        pos += name.size();
+    }
+    
+    // Replace {ext}
+    pos = 0;
+    while ((pos = result.find("{ext}", pos)) != std::string::npos) {
+        result.replace(pos, 5, ext);
+        pos += ext.size();
+    }
+    
+    // Replace {index:N} with zero-padded index
+    pos = 0;
+    while ((pos = result.find("{index:", pos)) != std::string::npos) {
+        size_t end = result.find('}', pos);
+        if (end != std::string::npos) {
+            int padding = std::stoi(result.substr(pos + 7, end - pos - 7));
+            std::ostringstream oss;
+            oss << std::setw(padding) << std::setfill('0') << index;
+            std::string idx_str = oss.str();
+            result.replace(pos, end - pos + 1, idx_str);
+            pos += idx_str.size();
+        } else {
+            break;
+        }
+    }
+    
+    // Replace {index} (no padding)
+    pos = 0;
+    while ((pos = result.find("{index}", pos)) != std::string::npos) {
+        std::string idx_str = std::to_string(index);
+        result.replace(pos, 7, idx_str);
+        pos += idx_str.size();
     }
     
     return result;
@@ -584,6 +644,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--batch-output-dir") {
             if (++i >= argc) { std::cerr << "Missing value for --batch-output-dir\n"; return false; }
             opts.batch_output_dir = argv[i];
+        } else if (arg == "--output-template") {
+            if (++i >= argc) { std::cerr << "Missing value for --output-template\n"; return false; }
+            opts.output_template = argv[i];
         } else if (arg == "--interrogate") {
             if (++i >= argc) { std::cerr << "Missing value for --interrogate\n"; return false; }
             opts.interrogate_image = argv[i];
@@ -697,13 +760,16 @@ int main(int argc, char** argv) {
         return 0;
     }
     
-    // 检查必要参数
-    if (opts.model.empty() && opts.diffusion_model.empty()) {
+    // Batch processing mode doesn't require model parameters
+    bool batch_mode = !opts.batch_input_dir.empty();
+    
+    // 检查必要参数 (skip for batch mode)
+    if (!batch_mode && opts.model.empty() && opts.diffusion_model.empty()) {
         std::cerr << "Error: --model or --diffusion-model is required\n";
         return 1;
     }
-    // 如果使用 diffusion-model 模式，需要 vae 和 llm
-    if (!opts.diffusion_model.empty()) {
+    // 如果使用 diffusion-model 模式，需要 vae 和 llm (skip for batch mode)
+    if (!batch_mode && !opts.diffusion_model.empty()) {
         if (opts.vae.empty()) {
             std::cerr << "Error: --vae is required when using --diffusion-model\n";
             return 1;
@@ -891,8 +957,19 @@ int main(int argc, char** argv) {
         
         fs::create_directories(opts.batch_output_dir);
         
+        // Count total files first
+        int total_files = 0;
+        for (const auto& entry : fs::directory_iterator(opts.batch_input_dir)) {
+            if (!entry.is_regular_file()) continue;
+            std::string ext = entry.path().extension().string();
+            for (auto& c : ext) c = std::tolower(c);
+            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
+                total_files++;
+        }
+        
         int processed = 0;
         int failed = 0;
+        int file_index = 0;
         
         for (const auto& entry : fs::directory_iterator(opts.batch_input_dir)) {
             if (!entry.is_regular_file()) continue;
@@ -902,10 +979,17 @@ int main(int argc, char** argv) {
             if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".bmp" && ext != ".tga")
                 continue;
             
+            file_index++;
             std::string input_file = entry.path().string();
-            std::string output_file = opts.batch_output_dir + "/" + entry.path().filename().string();
+            std::string filename = entry.path().filename().string();
+            std::string output_filename = expand_output_template(opts.output_template, filename, file_index);
+            std::string output_file = opts.batch_output_dir + "/" + output_filename;
             
-            std::cout << "Processing: " << entry.path().filename().string() << "\n";
+            std::cout << "[" << file_index << "/" << total_files << "] Processing: " << filename;
+            if (output_filename != filename) {
+                std::cout << " -> " << output_filename;
+            }
+            std::cout << "\n";
             
             auto img_data = myimg::load_image_from_file(input_file);
             if (img_data.empty()) {
