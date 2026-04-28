@@ -42,6 +42,13 @@ torch::Tensor enhance_clarity(const torch::Tensor& image, float strength);
 torch::Tensor split_tone(const torch::Tensor& image, const std::string& highlight_color, 
                          const std::string& shadow_color, float strength);
 
+// Tint: green/magenta shift
+// strength: -1.0 to 1.0 (positive = green, negative = magenta)
+torch::Tensor adjust_tint(const torch::Tensor& image, float strength);
+
+// Auto white balance
+torch::Tensor auto_white_balance(const torch::Tensor& image);
+
 // USM Sharpening
 // amount: 0.0-3.0 (strength)
 // radius: 1-5 (blur radius in pixels)

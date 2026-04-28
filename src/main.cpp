@@ -86,6 +86,8 @@ struct CliOptions {
     std::string split_tone_highlights;  // Hex color for highlights (e.g., "#FFE4C4")
     std::string split_tone_shadows;     // Hex color for shadows (e.g., "#4A6741")
     float split_tone_strength = 0.0f;   // 0.0 ~ 1.0
+    float tint = 0.0f;           // -1.0 ~ 1.0 (green/magenta)
+    bool auto_white_balance = false;    // Auto white balance
     std::string curves;          // RGB curves "in,out;in,out"
     std::string preset;          // Filter preset name
     float vignette_strength = 0.0f; // 0.0-1.0
@@ -209,6 +211,9 @@ static void print_usage(const char* argv0) {
     std::cout << "  --split-tone-highlights HEX  Highlight color for split toning (default: #FFE4C4)\n";
     std::cout << "  --split-tone-shadows HEX     Shadow color for split toning (default: #4A6741)\n";
     std::cout << "  --split-tone-strength FLOAT  Split tone strength 0.0-1.0 (default: 0)\n";
+    std::cout << "\nColor Balance:\n";
+    std::cout << "  --tint FLOAT              Tint -1.0(magenta) to 1.0(green)\n";
+    std::cout << "  --auto-white-balance      Auto white balance (gray world)\n";
     std::cout << "\nCurves Options:\n";
     std::cout << "  --curves \"in,out;in,out\"  RGB curves (0-255, e.g. \"0,0;128,140;255,255\")\n";
     std::cout << "\nVignette Options:\n";
@@ -398,6 +403,11 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--split-tone-strength") {
             if (++i >= argc) { std::cerr << "Missing value for --split-tone-strength\n"; return false; }
             opts.split_tone_strength = std::stof(argv[i]);
+        } else if (arg == "--tint") {
+            if (++i >= argc) { std::cerr << "Missing value for --tint\n"; return false; }
+            opts.tint = std::stof(argv[i]);
+        } else if (arg == "--auto-white-balance") {
+            opts.auto_white_balance = true;
         } else if (arg == "--curves") {
             if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
             opts.curves = argv[i];
@@ -828,7 +838,8 @@ int main(int argc, char** argv) {
                 !opts.lut_path.empty() ||
                 opts.dehaze_strength > 0.0f ||
                 opts.vibrance != 0.0f || opts.clarity > 0.0f ||
-                opts.split_tone_strength > 0.0f) {
+                opts.split_tone_strength > 0.0f ||
+                opts.tint != 0.0f || opts.auto_white_balance) {
                 
                 auto tensor = myimg::image_data_to_tensor(img_data);
                 
@@ -918,6 +929,16 @@ int main(int argc, char** argv) {
                 // Split toning
                 if (opts.split_tone_strength > 0.0f) {
                     tensor = myimg::split_tone(tensor, opts.split_tone_highlights, opts.split_tone_shadows, opts.split_tone_strength);
+                }
+                
+                // Tint
+                if (opts.tint != 0.0f) {
+                    tensor = myimg::adjust_tint(tensor, opts.tint);
+                }
+                
+                // Auto white balance
+                if (opts.auto_white_balance) {
+                    tensor = myimg::auto_white_balance(tensor);
                 }
                 
                 // Portrait retouching
@@ -1034,6 +1055,7 @@ int main(int argc, char** argv) {
                                opts.shadows != 0.0f || opts.auto_enhance ||
                                opts.vibrance != 0.0f || opts.clarity > 0.0f ||
                                opts.split_tone_strength > 0.0f ||
+                               opts.tint != 0.0f || opts.auto_white_balance ||
                                !opts.curves.empty() ||
                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                                opts.smart_sharpen_strength > 0.0f || opts.smart_denoise_flag ||
@@ -1112,6 +1134,18 @@ int main(int argc, char** argv) {
                           << " shadows=" << opts.split_tone_shadows
                           << " strength=" << opts.split_tone_strength << "\n";
                 tensor = myimg::split_tone(tensor, opts.split_tone_highlights, opts.split_tone_shadows, opts.split_tone_strength);
+            }
+            
+            // Tint
+            if (opts.tint != 0.0f) {
+                std::cout << "Applying tint: " << opts.tint << "\n";
+                tensor = myimg::adjust_tint(tensor, opts.tint);
+            }
+            
+            // Auto white balance
+            if (opts.auto_white_balance) {
+                std::cout << "Applying auto white balance...\n";
+                tensor = myimg::auto_white_balance(tensor);
             }
             
             // 滤镜预设

@@ -231,6 +231,51 @@ torch::Tensor split_tone(const torch::Tensor& image, const std::string& highligh
     return img.clamp(0, 1);
 }
 
+// Tint: green/magenta shift
+// strength: -1.0 to 1.0 (positive = green, negative = magenta)
+torch::Tensor adjust_tint(const torch::Tensor& image, float strength) {
+    if (strength == 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    float blend = std::clamp(strength, -1.0f, 1.0f) * 0.3f;
+    
+    // Positive = more green, negative = more magenta (reduce green)
+    if (blend > 0.0f) {
+        img[1] = (img[1] * (1.0f - blend) + blend).clamp(0, 1);
+    } else {
+        float reduction = -blend;
+        img[1] = (img[1] * (1.0f - reduction)).clamp(0, 1);
+    }
+    
+    return img;
+}
+
+// Auto white balance using gray world assumption
+// Calculates average color and neutralizes color cast
+torch::Tensor auto_white_balance(const torch::Tensor& image) {
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // Calculate mean of each channel
+    float mean_r = img[0].mean().item<float>();
+    float mean_g = img[1].mean().item<float>();
+    float mean_b = img[2].mean().item<float>();
+    
+    // Gray world: all channels should have same mean
+    // Scale each channel to match green mean (reference)
+    float scale_r = (mean_g / (mean_r + 1e-6f));
+    float scale_b = (mean_g / (mean_b + 1e-6f));
+    
+    // Limit extreme corrections
+    scale_r = std::clamp(scale_r, 0.5f, 2.0f);
+    scale_b = std::clamp(scale_b, 0.5f, 2.0f);
+    
+    img[0] = (img[0] * scale_r).clamp(0, 1);
+    img[2] = (img[2] * scale_b).clamp(0, 1);
+    
+    return img;
+}
+
 // USM (Unsharp Mask) 锐化
 torch::Tensor usm_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
     if (amount <= 0.0f || radius <= 0) return image.clone();
