@@ -355,11 +355,12 @@
 #### Task 10.5.10: LUT 预设与滤镜
 - [x] 加载 LUT 文件（.cube 格式）- 3D LUT 颜色分级
 - [x] 内置常用滤镜（复古、日系、胶片、黑白、赛博朋克、电影感等）
-- [ ] 保存/加载自定义预设
+- [x] 保存/加载自定义预设
 - [x] 批量应用预设（通过 batch processing）
 - [x] CLI 参数：`--lut /path/to/filter.cube`
 - [x] CLI 参数：`--preset NAME`（内置预设名）
-- [ ] CLI 参数：`--save-preset my_preset`
+- [x] CLI 参数：`--save-preset my_preset`
+- [x] CLI 参数：`--load-preset my_preset.json`
 - **优先级**: P2
 - **难度**: 中
 - **用途**:

@@ -7,6 +7,8 @@
 #include <sstream>
 #include <cmath>
 #include <iomanip>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include "adapters/sdcpp_adapter.h"
 #include "utils/image_utils.h"
 #include "utils/image_adjust.h"
@@ -146,6 +148,10 @@ struct CliOptions {
     std::string batch_output_dir;
     std::string output_template;  // e.g. "{name}_edited{ext}" or "{index:04d}{ext}"
     
+    // Presets
+    std::string save_preset_name;   // Save current settings as preset
+    std::string load_preset_path;   // Load settings from preset file
+    
     // Image interrogation / metadata
     std::string interrogate_image;   // Image to interrogate (JoyCaption placeholder)
     std::string read_metadata_image; // Image to read PNG metadata from
@@ -271,6 +277,9 @@ static void print_usage(const char* argv0) {
     std::cout << "  --interrogate PATH        Image path for caption/description\n";
     std::cout << "                            (requires JoyCaption model - placeholder)\n";
     std::cout << "  --read-metadata PATH      Read PNG metadata (prompt/parameters)\n";
+    std::cout << "\nPreset Options:\n";
+    std::cout << "  --save-preset NAME        Save current settings as preset (.json)\n";
+    std::cout << "  --load-preset PATH        Load settings from preset file\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
@@ -358,6 +367,150 @@ static std::string expand_output_template(const std::string& template_str,
     }
     
     return result;
+}
+
+// Save current options as a preset JSON file
+static bool save_preset(const CliOptions& opts, const std::string& preset_name) {
+    nlohmann::json j;
+    
+    // Photo adjustments
+    j["temperature"] = opts.temperature;
+    j["brightness"] = opts.brightness;
+    j["contrast"] = opts.contrast;
+    j["saturation"] = opts.saturation;
+    j["exposure"] = opts.exposure;
+    j["highlights"] = opts.highlights;
+    j["shadows"] = opts.shadows;
+    j["auto_enhance"] = opts.auto_enhance;
+    j["vibrance"] = opts.vibrance;
+    j["clarity"] = opts.clarity;
+    j["split_tone_highlights"] = opts.split_tone_highlights;
+    j["split_tone_shadows"] = opts.split_tone_shadows;
+    j["split_tone_strength"] = opts.split_tone_strength;
+    j["tint"] = opts.tint;
+    j["auto_white_balance"] = opts.auto_white_balance;
+    j["blacks"] = opts.blacks;
+    j["whites"] = opts.whites;
+    j["curves"] = opts.curves;
+    j["brightness_curves"] = opts.brightness_curves;
+    j["r_curves"] = opts.r_curves;
+    j["g_curves"] = opts.g_curves;
+    j["b_curves"] = opts.b_curves;
+    j["preset"] = opts.preset;
+    j["vignette_strength"] = opts.vignette_strength;
+    j["vignette_radius"] = opts.vignette_radius;
+    j["radial_filter"] = opts.radial_filter;
+    j["graduated_filter"] = opts.graduated_filter;
+    j["lut_path"] = opts.lut_path;
+    j["dehaze_strength"] = opts.dehaze_strength;
+    j["sharpen_amount"] = opts.sharpen_amount;
+    j["sharpen_radius"] = opts.sharpen_radius;
+    j["sharpen_threshold"] = opts.sharpen_threshold;
+    j["denoise_strength"] = opts.denoise_strength;
+    j["luminance_denoise_strength"] = opts.luminance_denoise_strength;
+    j["color_denoise_strength"] = opts.color_denoise_strength;
+    j["whiten_strength"] = opts.whiten_strength;
+    j["skin_smooth_strength"] = opts.skin_smooth_strength;
+    j["resize_width"] = opts.resize_width;
+    j["resize_height"] = opts.resize_height;
+    j["resize_mode"] = opts.resize_mode;
+    j["flip_h"] = opts.flip_h;
+    j["flip_v"] = opts.flip_v;
+    j["rotate"] = opts.rotate;
+    j["jpeg_quality"] = opts.jpeg_quality;
+    
+    std::string preset_path = preset_name;
+    if (preset_path.find('.') == std::string::npos) {
+        preset_path += ".json";
+    }
+    
+    std::ofstream file(preset_path);
+    if (!file) {
+        std::cerr << "Error: Failed to save preset to " << preset_path << "\n";
+        return false;
+    }
+    file << j.dump(2);
+    std::cout << "Preset saved to: " << preset_path << "\n";
+    return true;
+}
+
+// Load preset from JSON file
+static bool load_preset(CliOptions& opts, const std::string& preset_path) {
+    std::ifstream file(preset_path);
+    if (!file) {
+        std::cerr << "Error: Failed to load preset from " << preset_path << "\n";
+        return false;
+    }
+    
+    nlohmann::json j;
+    try {
+        file >> j;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Invalid preset JSON: " << e.what() << "\n";
+        return false;
+    }
+    
+    // Helper to safely get values
+    auto get_float = [&j](const std::string& key, float& val) {
+        if (j.contains(key) && !j[key].is_null()) val = j[key].get<float>();
+    };
+    auto get_int = [&j](const std::string& key, int& val) {
+        if (j.contains(key) && !j[key].is_null()) val = j[key].get<int>();
+    };
+    auto get_bool = [&j](const std::string& key, bool& val) {
+        if (j.contains(key) && !j[key].is_null()) val = j[key].get<bool>();
+    };
+    auto get_string = [&j](const std::string& key, std::string& val) {
+        if (j.contains(key) && !j[key].is_null()) val = j[key].get<std::string>();
+    };
+    
+    get_float("temperature", opts.temperature);
+    get_float("brightness", opts.brightness);
+    get_float("contrast", opts.contrast);
+    get_float("saturation", opts.saturation);
+    get_float("exposure", opts.exposure);
+    get_float("highlights", opts.highlights);
+    get_float("shadows", opts.shadows);
+    get_bool("auto_enhance", opts.auto_enhance);
+    get_float("vibrance", opts.vibrance);
+    get_float("clarity", opts.clarity);
+    get_string("split_tone_highlights", opts.split_tone_highlights);
+    get_string("split_tone_shadows", opts.split_tone_shadows);
+    get_float("split_tone_strength", opts.split_tone_strength);
+    get_float("tint", opts.tint);
+    get_bool("auto_white_balance", opts.auto_white_balance);
+    get_float("blacks", opts.blacks);
+    get_float("whites", opts.whites);
+    get_string("curves", opts.curves);
+    get_string("brightness_curves", opts.brightness_curves);
+    get_string("r_curves", opts.r_curves);
+    get_string("g_curves", opts.g_curves);
+    get_string("b_curves", opts.b_curves);
+    get_string("preset", opts.preset);
+    get_float("vignette_strength", opts.vignette_strength);
+    get_float("vignette_radius", opts.vignette_radius);
+    get_string("radial_filter", opts.radial_filter);
+    get_string("graduated_filter", opts.graduated_filter);
+    get_string("lut_path", opts.lut_path);
+    get_float("dehaze_strength", opts.dehaze_strength);
+    get_float("sharpen_amount", opts.sharpen_amount);
+    get_int("sharpen_radius", opts.sharpen_radius);
+    get_float("sharpen_threshold", opts.sharpen_threshold);
+    get_float("denoise_strength", opts.denoise_strength);
+    get_float("luminance_denoise_strength", opts.luminance_denoise_strength);
+    get_float("color_denoise_strength", opts.color_denoise_strength);
+    get_float("whiten_strength", opts.whiten_strength);
+    get_float("skin_smooth_strength", opts.skin_smooth_strength);
+    get_int("resize_width", opts.resize_width);
+    get_int("resize_height", opts.resize_height);
+    get_string("resize_mode", opts.resize_mode);
+    get_bool("flip_h", opts.flip_h);
+    get_bool("flip_v", opts.flip_v);
+    get_int("rotate", opts.rotate);
+    get_int("jpeg_quality", opts.jpeg_quality);
+    
+    std::cout << "Preset loaded from: " << preset_path << "\n";
+    return true;
 }
 
 static bool parse_args(int argc, char** argv, CliOptions& opts) {
@@ -647,6 +800,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--output-template") {
             if (++i >= argc) { std::cerr << "Missing value for --output-template\n"; return false; }
             opts.output_template = argv[i];
+        } else if (arg == "--save-preset") {
+            if (++i >= argc) { std::cerr << "Missing value for --save-preset\n"; return false; }
+            opts.save_preset_name = argv[i];
+        } else if (arg == "--load-preset") {
+            if (++i >= argc) { std::cerr << "Missing value for --load-preset\n"; return false; }
+            opts.load_preset_path = argv[i];
         } else if (arg == "--interrogate") {
             if (++i >= argc) { std::cerr << "Missing value for --interrogate\n"; return false; }
             opts.interrogate_image = argv[i];
@@ -758,6 +917,17 @@ int main(int argc, char** argv) {
         std::cout << "  3. Use: --interrogate-model PATH --interrogate " << opts.interrogate_image << "\n";
         std::cout << "\nNote: Full JoyCaption integration requires additional model files.\n";
         return 0;
+    }
+    
+    // Save preset (no model required)
+    if (!opts.save_preset_name.empty()) {
+        if (!save_preset(opts, opts.save_preset_name)) {
+            return 1;
+        }
+        // If only saving preset (no generation/batch), exit
+        if (opts.batch_input_dir.empty() && opts.model.empty() && opts.diffusion_model.empty()) {
+            return 0;
+        }
     }
     
     // Batch processing mode doesn't require model parameters
@@ -938,6 +1108,13 @@ int main(int argc, char** argv) {
             }
             params.loras.push_back(lora);
             std::cout << "  - " << lora.path << " (weight: " << lora.multiplier << ")\n";
+        }
+    }
+    
+    // Load preset if specified
+    if (!opts.load_preset_path.empty()) {
+        if (!load_preset(opts, opts.load_preset_path)) {
+            return 1;
         }
     }
     
