@@ -8,6 +8,10 @@
 #include <cmath>
 #include <iomanip>
 #include <fstream>
+#include <thread>
+#include <mutex>
+#include <queue>
+#include <atomic>
 #include <nlohmann/json.hpp>
 #include "adapters/sdcpp_adapter.h"
 #include "utils/image_utils.h"
@@ -1130,22 +1134,20 @@ int main(int argc, char** argv) {
         std::cout << "========================================\n";
         std::cout << "Input: " << opts.batch_input_dir << "\n";
         std::cout << "Output: " << opts.batch_output_dir << "\n";
+        if (opts.threads > 0) {
+            std::cout << "Threads: " << opts.threads << "\n";
+        }
         std::cout << "========================================\n\n";
         
         fs::create_directories(opts.batch_output_dir);
         
-        // Count total files first
-        int total_files = 0;
-        for (const auto& entry : fs::directory_iterator(opts.batch_input_dir)) {
-            if (!entry.is_regular_file()) continue;
-            std::string ext = entry.path().extension().string();
-            for (auto& c : ext) c = std::tolower(c);
-            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
-                total_files++;
-        }
-        
-        int processed = 0;
-        int failed = 0;
+        // Collect all files
+        struct FileTask {
+            std::string input_file;
+            std::string filename;
+            int index;
+        };
+        std::vector<FileTask> tasks;
         int file_index = 0;
         
         for (const auto& entry : fs::directory_iterator(opts.batch_input_dir)) {
@@ -1157,22 +1159,43 @@ int main(int argc, char** argv) {
                 continue;
             
             file_index++;
-            std::string input_file = entry.path().string();
-            std::string filename = entry.path().filename().string();
-            std::string output_filename = expand_output_template(opts.output_template, filename, file_index);
+            tasks.push_back({
+                entry.path().string(),
+                entry.path().filename().string(),
+                file_index
+            });
+        }
+        
+        int total_files = tasks.size();
+        if (total_files == 0) {
+            std::cout << "No image files found in input directory.\n";
+            return 0;
+        }
+        
+        std::atomic<int> processed{0};
+        std::atomic<int> failed{0};
+        std::atomic<int> current_index{0};
+        std::mutex print_mutex;
+        
+        auto process_file = [&](const FileTask& task) {
+            std::string output_filename = expand_output_template(opts.output_template, task.filename, task.index);
             std::string output_file = opts.batch_output_dir + "/" + output_filename;
             
-            std::cout << "[" << file_index << "/" << total_files << "] Processing: " << filename;
-            if (output_filename != filename) {
-                std::cout << " -> " << output_filename;
+            {
+                std::lock_guard<std::mutex> lock(print_mutex);
+                std::cout << "[" << task.index << "/" << total_files << "] Processing: " << task.filename;
+                if (output_filename != task.filename) {
+                    std::cout << " -> " << output_filename;
+                }
+                std::cout << "\n";
             }
-            std::cout << "\n";
             
-            auto img_data = myimg::load_image_from_file(input_file);
+            auto img_data = myimg::load_image_from_file(task.input_file);
             if (img_data.empty()) {
+                std::lock_guard<std::mutex> lock(print_mutex);
                 std::cerr << "  Failed to load\n";
                 failed++;
-                continue;
+                return;
             }
             
             // Apply transformations
@@ -1234,26 +1257,9 @@ int main(int argc, char** argv) {
                 if (opts.color_denoise_strength > 0.0f) {
                     tensor = myimg::color_denoise(tensor, opts.color_denoise_strength);
                 }
-                /* Smart denoise (disabled - conv2d crash under investigation)
-                if (opts.smart_denoise_flag) {
-                    tensor = myimg::smart_denoise(tensor, 0.5f);
-                }
-                */
                 if (opts.sharpen_amount > 0.0f) {
                     tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
                 }
-                
-                /* Smart sharpen (disabled - conv2d crash under investigation)
-                if (opts.smart_sharpen_strength > 0.0f) {
-                    tensor = myimg::smart_sharpen(tensor, opts.smart_sharpen_strength, opts.smart_sharpen_radius);
-                }
-                */
-                
-                /* Edge-mask sharpen (disabled - conv2d crash under investigation)
-                if (opts.edge_sharpen_amount > 0.0f) {
-                    tensor = myimg::edge_mask_sharpen(tensor, opts.edge_sharpen_amount, opts.edge_sharpen_radius, opts.edge_sharpen_threshold);
-                }
-                */
                 
                 // RGB curves
                 if (!opts.curves.empty()) {
@@ -1359,18 +1365,44 @@ int main(int argc, char** argv) {
             image.data = std::move(img_data.data);
             
             if (!image.save_to_file(output_file)) {
+                std::lock_guard<std::mutex> lock(print_mutex);
                 std::cerr << "  Failed to save\n";
                 failed++;
-                continue;
+                return;
             }
             
             processed++;
+        };
+        
+        // Determine thread count
+        int num_threads = opts.threads;
+        if (num_threads <= 0) {
+            num_threads = std::thread::hardware_concurrency();
+            if (num_threads == 0) num_threads = 4;
+        }
+        num_threads = std::min(num_threads, total_files);
+        
+        // Launch worker threads
+        std::vector<std::thread> workers;
+        for (int t = 0; t < num_threads; ++t) {
+            workers.emplace_back([&]() {
+                while (true) {
+                    int idx = current_index.fetch_add(1);
+                    if (idx >= total_files) break;
+                    process_file(tasks[idx]);
+                }
+            });
+        }
+        
+        // Wait for all threads to complete
+        for (auto& worker : workers) {
+            worker.join();
         }
         
         std::cout << "\n========================================\n";
         std::cout << "Batch processing complete!\n";
-        std::cout << "Processed: " << processed << "\n";
-        if (failed > 0) std::cout << "Failed: " << failed << "\n";
+        std::cout << "Processed: " << processed.load() << "\n";
+        if (failed.load() > 0) std::cout << "Failed: " << failed.load() << "\n";
         std::cout << "========================================\n";
         return 0;
     }
