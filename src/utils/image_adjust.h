@@ -68,6 +68,20 @@ torch::Tensor denoise(const torch::Tensor& image, float strength);
 // strength: 0.0-1.0
 torch::Tensor smart_denoise(const torch::Tensor& image, float strength);
 
+// Edge-mask sharpening: sharpen only non-edge areas to avoid halos
+// amount: 0.0-3.0 (strength)
+// radius: 1-5 (blur radius)
+// threshold: 0-1 (edge detection threshold, lower = more edges excluded)
+torch::Tensor edge_mask_sharpen(const torch::Tensor& image, float amount, int radius, float threshold);
+
+// Luminance noise reduction: reduce noise in brightness while preserving edges
+// strength: 0.0-1.0
+torch::Tensor luminance_denoise(const torch::Tensor& image, float strength);
+
+// Color noise reduction: reduce chroma noise while preserving luminance
+// strength: 0.0-1.0
+torch::Tensor color_denoise(const torch::Tensor& image, float strength);
+
 // Portrait retouching
 // Whitening: 0.0-1.0
 torch::Tensor whiten(const torch::Tensor& image, float strength);

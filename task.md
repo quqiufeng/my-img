@@ -273,8 +273,8 @@
 - [x] 智能锐化（边缘感知，避免噪点放大）
 - [x] 智能降噪（边缘保留）
 - [ ] 边缘蒙版锐化
-- [ ] 亮度降噪
-- [ ] 色彩降噪
+- [x] 亮度降噪
+- [x] 色彩降噪
 - [x] CLI 参数：`--sharpen FLOAT`（amount）
 - [x] CLI 参数：`--sharpen-radius INT`
 - [x] CLI 参数：`--sharpen-threshold FLOAT`

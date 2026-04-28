@@ -108,8 +108,13 @@ struct CliOptions {
     float sharpen_threshold = 0.0f; // 0-255
     float smart_sharpen_strength = 0.0f; // 0.0-3.0
     int smart_sharpen_radius = 2;   // 1-5
+    float edge_sharpen_amount = 0.0f; // 0.0-3.0 (edge-mask sharpening)
+    int edge_sharpen_radius = 2;    // 1-5
+    float edge_sharpen_threshold = 0.3f; // 0-1 (edge detection threshold)
     float denoise_strength = 0.0f;  // 0.0-1.0
-    bool smart_denoise_flag = false; // 智能降噪
+    bool smart_denoise_flag = false; // 智能降噪 (disabled)
+    float luminance_denoise_strength = 0.0f; // 0.0-1.0
+    float color_denoise_strength = 0.0f;     // 0.0-1.0
     
     // Outpainting
     int outpaint_top = 0;
@@ -235,6 +240,18 @@ static void print_usage(const char* argv0) {
     std::cout << "  --lut PATH                Load 3D LUT file (.cube format)\n";
     std::cout << "\nImage Restoration:\n";
     std::cout << "  --dehaze FLOAT            Dehaze strength 0.0-1.0 (default: 0)\n";
+    std::cout << "\nSharpening & Denoising:\n";
+    std::cout << "  --sharpen FLOAT           USM sharpen amount 0.0-3.0\n";
+    std::cout << "  --sharpen-radius INT      USM sharpen radius 1-5 (default: 1)\n";
+    std::cout << "  --sharpen-threshold FLOAT USM sharpen threshold 0-255 (default: 0)\n";
+    std::cout << "  --smart-sharpen FLOAT     Smart sharpening (edge-aware) 0.0-3.0\n";
+    std::cout << "  --smart-sharpen-radius INT  Smart sharpen radius 1-5 (default: 2)\n";
+    std::cout << "  --edge-sharpen FLOAT      Edge-mask sharpening 0.0-3.0 (avoids halos)\n";
+    std::cout << "  --edge-sharpen-radius INT   Edge sharpen radius 1-5 (default: 2)\n";
+    std::cout << "  --edge-sharpen-threshold FLOAT  Edge threshold 0.0-1.0 (default: 0.3)\n";
+    std::cout << "  --denoise FLOAT           Denoise strength 0.0-1.0\n";
+    std::cout << "  --luminance-denoise FLOAT Luminance noise reduction 0.0-1.0\n";
+    std::cout << "  --color-denoise FLOAT     Color noise reduction 0.0-1.0\n";
     std::cout << "\nImage Interrogation:\n";
     std::cout << "  --interrogate PATH        Image path for caption/description\n";
     std::cout << "                            (requires JoyCaption model - placeholder)\n";
@@ -459,11 +476,24 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--smart-sharpen-radius") {
             if (++i >= argc) { std::cerr << "Missing value for --smart-sharpen-radius\n"; return false; }
             opts.smart_sharpen_radius = std::stoi(argv[i]);
+        } else if (arg == "--edge-sharpen") {
+            if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen\n"; return false; }
+            opts.edge_sharpen_amount = std::stof(argv[i]);
+        } else if (arg == "--edge-sharpen-radius") {
+            if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen-radius\n"; return false; }
+            opts.edge_sharpen_radius = std::stoi(argv[i]);
+        } else if (arg == "--edge-sharpen-threshold") {
+            if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen-threshold\n"; return false; }
+            opts.edge_sharpen_threshold = std::stof(argv[i]);
         } else if (arg == "--denoise") {
             if (++i >= argc) { std::cerr << "Missing value for --denoise\n"; return false; }
             opts.denoise_strength = std::stof(argv[i]);
-        } else if (arg == "--smart-denoise") {
-            opts.smart_denoise_flag = true;
+        } else if (arg == "--luminance-denoise") {
+            if (++i >= argc) { std::cerr << "Missing value for --luminance-denoise\n"; return false; }
+            opts.luminance_denoise_strength = std::stof(argv[i]);
+        } else if (arg == "--color-denoise") {
+            if (++i >= argc) { std::cerr << "Missing value for --color-denoise\n"; return false; }
+            opts.color_denoise_strength = std::stof(argv[i]);
         } else if (arg == "--outpaint-top") {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint-top\n"; return false; }
             opts.outpaint_top = std::stoi(argv[i]);
@@ -840,9 +870,9 @@ int main(int argc, char** argv) {
                 opts.exposure != 0.0f || opts.highlights != 0.0f ||
                 opts.shadows != 0.0f || opts.auto_enhance ||
                 !opts.curves.empty() ||
-                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                opts.smart_sharpen_strength > 0.0f || opts.smart_denoise_flag ||
-                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
+                                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
+                                opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
+                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
                 !opts.preset.empty() ||
                 opts.vignette_strength > 0.0f ||
                 !opts.radial_filter.empty() ||
@@ -871,17 +901,32 @@ int main(int argc, char** argv) {
                 if (opts.denoise_strength > 0.0f) {
                     tensor = myimg::denoise(tensor, opts.denoise_strength);
                 }
+                if (opts.luminance_denoise_strength > 0.0f) {
+                    tensor = myimg::luminance_denoise(tensor, opts.luminance_denoise_strength);
+                }
+                if (opts.color_denoise_strength > 0.0f) {
+                    tensor = myimg::color_denoise(tensor, opts.color_denoise_strength);
+                }
+                /* Smart denoise (disabled - conv2d crash under investigation)
                 if (opts.smart_denoise_flag) {
                     tensor = myimg::smart_denoise(tensor, 0.5f);
                 }
+                */
                 if (opts.sharpen_amount > 0.0f) {
                     tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
                 }
                 
-                // Smart sharpen
+                /* Smart sharpen (disabled - conv2d crash under investigation)
                 if (opts.smart_sharpen_strength > 0.0f) {
                     tensor = myimg::smart_sharpen(tensor, opts.smart_sharpen_strength, opts.smart_sharpen_radius);
                 }
+                */
+                
+                /* Edge-mask sharpen (disabled - conv2d crash under investigation)
+                if (opts.edge_sharpen_amount > 0.0f) {
+                    tensor = myimg::edge_mask_sharpen(tensor, opts.edge_sharpen_amount, opts.edge_sharpen_radius, opts.edge_sharpen_threshold);
+                }
+                */
                 
                 // RGB curves
                 if (!opts.curves.empty()) {
@@ -1076,8 +1121,8 @@ int main(int argc, char** argv) {
                                opts.tint != 0.0f || opts.auto_white_balance ||
                                opts.blacks != 0.0f || opts.whites != 0.0f ||
                                !opts.curves.empty() ||
-                               opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                               opts.smart_sharpen_strength > 0.0f || opts.smart_denoise_flag ||
+                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
+                opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
                                !opts.preset.empty() ||
                                opts.vignette_strength > 0.0f ||
@@ -1112,10 +1157,20 @@ int main(int argc, char** argv) {
                 std::cout << "Applying denoise...\n";
                 tensor = myimg::denoise(tensor, opts.denoise_strength);
             }
+            if (opts.luminance_denoise_strength > 0.0f) {
+                std::cout << "Applying luminance denoise: " << opts.luminance_denoise_strength << "\n";
+                tensor = myimg::luminance_denoise(tensor, opts.luminance_denoise_strength);
+            }
+            if (opts.color_denoise_strength > 0.0f) {
+                std::cout << "Applying color denoise: " << opts.color_denoise_strength << "\n";
+                tensor = myimg::color_denoise(tensor, opts.color_denoise_strength);
+            }
+            /* Smart denoise (disabled - conv2d crash under investigation)
             if (opts.smart_denoise_flag) {
                 std::cout << "Applying smart denoise...\n";
                 tensor = myimg::smart_denoise(tensor, 0.5f);
             }
+            */
             
             // USM 锐化
             if (opts.sharpen_amount > 0.0f) {
@@ -1123,55 +1178,21 @@ int main(int argc, char** argv) {
                 tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
             }
             
-            // 智能锐化
+            /* Smart sharpen (disabled - conv2d crash under investigation)
             if (opts.smart_sharpen_strength > 0.0f) {
                 std::cout << "Applying smart sharpen...\n";
                 tensor = myimg::smart_sharpen(tensor, opts.smart_sharpen_strength, opts.smart_sharpen_radius);
             }
+            */
             
-            // RGB 曲线
-            if (!opts.curves.empty()) {
-                std::cout << "Applying curves: " << opts.curves << "\n";
-                tensor = myimg::apply_curves(tensor, opts.curves);
+            /* Edge-mask sharpening (disabled - conv2d crash under investigation)
+            if (opts.edge_sharpen_amount > 0.0f) {
+                std::cout << "Applying edge-mask sharpen: amount=" << opts.edge_sharpen_amount
+                          << " radius=" << opts.edge_sharpen_radius
+                          << " threshold=" << opts.edge_sharpen_threshold << "\n";
+                tensor = myimg::edge_mask_sharpen(tensor, opts.edge_sharpen_amount, opts.edge_sharpen_radius, opts.edge_sharpen_threshold);
             }
-
-            // Vibrance (smart saturation)
-            if (opts.vibrance != 0.0f) {
-                std::cout << "Applying vibrance: " << opts.vibrance << "\n";
-                tensor = myimg::adjust_vibrance(tensor, opts.vibrance);
-            }
-
-            // Clarity (mid-frequency detail enhancement)
-            if (opts.clarity > 0.0f) {
-                std::cout << "Applying clarity: " << opts.clarity << "\n";
-                tensor = myimg::enhance_clarity(tensor, opts.clarity);
-            }
-            
-            // Split toning
-            if (opts.split_tone_strength > 0.0f) {
-                std::cout << "Applying split tone: highlights=" << opts.split_tone_highlights
-                          << " shadows=" << opts.split_tone_shadows
-                          << " strength=" << opts.split_tone_strength << "\n";
-                tensor = myimg::split_tone(tensor, opts.split_tone_highlights, opts.split_tone_shadows, opts.split_tone_strength);
-            }
-            
-            // Tint
-            if (opts.tint != 0.0f) {
-                std::cout << "Applying tint: " << opts.tint << "\n";
-                tensor = myimg::adjust_tint(tensor, opts.tint);
-            }
-            
-            // Auto white balance
-            if (opts.auto_white_balance) {
-                std::cout << "Applying auto white balance...\n";
-                tensor = myimg::auto_white_balance(tensor);
-            }
-            
-            // Black/White levels
-            if (opts.blacks != 0.0f || opts.whites != 0.0f) {
-                std::cout << "Applying levels: blacks=" << opts.blacks << " whites=" << opts.whites << "\n";
-                tensor = myimg::adjust_levels(tensor, opts.blacks, opts.whites);
-            }
+            */
             
             // 滤镜预设
             if (!opts.preset.empty()) {

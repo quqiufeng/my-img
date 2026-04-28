@@ -413,8 +413,8 @@ torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
     auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0); // [1, 1, 3, 3]
-    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0).contiguous(); // [1, 1, 3, 3]
+    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0).contiguous();
     
     // 转为灰度计算边缘
     auto gray = img.mean(0, true); // [1, H, W]
@@ -427,7 +427,7 @@ torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
     int radius = 1;
     auto kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f}, {0.125f, 0.25f, 0.125f}, {0.0625f, 0.125f, 0.0625f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    kernel = kernel.unsqueeze(0).unsqueeze(0);
+    kernel = kernel.unsqueeze(0).unsqueeze(0).contiguous();
     
     auto blurred = torch::zeros_like(img);
     for (int c = 0; c < img.size(0); ++c) {
@@ -440,6 +440,57 @@ torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
     float blend = std::min(strength * 0.7f, 1.0f);
     auto mask = edge_mask.unsqueeze(0); // [1, H, W]
     return (img * (1.0f - blend * mask) + blurred * blend * mask).clamp(0, 1);
+}
+
+// Edge-mask sharpening: sharpen only non-edge areas to avoid halos
+// amount: 0.0-3.0 (strength)
+// radius: 1-5 (blur radius)
+// threshold: 0-1 (edge detection threshold, lower = more edges excluded)
+torch::Tensor edge_mask_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
+    if (amount <= 0.0f || radius <= 0) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    
+    // Compute edge strength using Sobel (same pattern as smart_denoise)
+    auto sobel_x = torch::tensor({{{-1.0f, 0.0f, 1.0f}, {-2.0f, 0.0f, 2.0f}, {-1.0f, 0.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0);
+    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    
+    // Use the same conv2d pattern as smart_denoise
+    auto gray = img.mean(0, true);
+    auto grad_x = torch::conv2d(gray.unsqueeze(0), sobel_x, {}, 1, 1);
+    auto grad_y = torch::conv2d(gray.unsqueeze(0), sobel_y, {}, 1, 1);
+    auto edge = (grad_x.squeeze(0).squeeze(0) + grad_y.squeeze(0).squeeze(0)).abs();
+    
+    // Normalize and apply threshold
+    float max_edge = edge.max().item().toFloat();
+    float thresh = threshold * max_edge + 1e-6f;
+    auto edge_mask = (edge < thresh).to(torch::kFloat32);
+    
+    // Gaussian blur using the same kernel pattern as smart_denoise
+    auto kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f}, {0.125f, 0.25f, 0.125f}, {0.0625f, 0.125f, 0.0625f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    kernel = kernel.unsqueeze(0).unsqueeze(0);
+    
+    auto blurred = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0);
+        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, 1);
+        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
+    }
+    
+    // USM: detail = original - blurred
+    auto detail = img - blurred;
+    
+    // Apply sharpening only to non-edge areas
+    float blend = std::min(amount, 3.0f);
+    auto mask = edge_mask.unsqueeze(0);
+    
+    return (img + detail * blend * mask).clamp(0, 1);
 }
 
 // 美白：提升亮度，降低饱和度，偏冷色调
@@ -847,8 +898,8 @@ torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radi
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
     auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0); // [1, 1, 3, 3]
-    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0).contiguous(); // [1, 1, 3, 3]
+    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0).contiguous();
     
     // Convert to grayscale for edge detection
     auto gray = img.mean(0, true); // [1, H, W]
@@ -863,7 +914,7 @@ torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radi
     // Create sharpening kernel (Laplacian-like)
     auto kernel = torch::tensor({{{0.0f, -1.0f, 0.0f}, {-1.0f, 5.0f, -1.0f}, {0.0f, -1.0f, 0.0f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    kernel = kernel.unsqueeze(0).unsqueeze(0);
+    kernel = kernel.unsqueeze(0).unsqueeze(0).contiguous();
     
     // Apply sharpening to each channel
     auto sharpened = torch::zeros_like(img);
@@ -879,6 +930,98 @@ torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radi
     auto result = img * (1.0f - blend * mask) + sharpened * blend * mask;
     
     return result.clamp(0, 1);
+}
+
+// Luminance noise reduction: simple box blur on luminance channel
+// strength: 0.0-1.0
+torch::Tensor luminance_denoise(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    int h = img.size(1);
+    int w = img.size(2);
+    
+    // Compute luminance
+    auto luma = img[0] * 0.299f + img[1] * 0.587f + img[2] * 0.114f;
+    
+    // Simple 3x3 box blur on luminance using slice operations
+    auto luma_blur = torch::zeros_like(luma);
+    luma_blur.slice(0, 1, h-1).slice(1, 1, w-1) = (
+        luma.slice(0, 0, h-2).slice(1, 0, w-2) +
+        luma.slice(0, 0, h-2).slice(1, 1, w-1) +
+        luma.slice(0, 0, h-2).slice(1, 2, w) +
+        luma.slice(0, 1, h-1).slice(1, 0, w-2) +
+        luma.slice(0, 1, h-1).slice(1, 1, w-1) +
+        luma.slice(0, 1, h-1).slice(1, 2, w) +
+        luma.slice(0, 2, h).slice(1, 0, w-2) +
+        luma.slice(0, 2, h).slice(1, 1, w-1) +
+        luma.slice(0, 2, h).slice(1, 2, w)
+    ) / 9.0f;
+    
+    // Blend original luminance with blurred luminance
+    float blend = std::min(strength * 0.5f, 1.0f);
+    auto luma_denoised = luma * (1.0f - blend) + luma_blur * blend;
+    
+    // Apply luminance change while preserving chroma ratios
+    for (int c = 0; c < 3; ++c) {
+        auto ratio = img[c] / (luma + 1e-6f);
+        img[c] = (luma_denoised * ratio).clamp(0, 1);
+    }
+    
+    return img;
+}
+
+// Color noise reduction: blur chroma channels (R-G, B-G differences)
+// strength: 0.0-1.0
+torch::Tensor color_denoise(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    int h = img.size(1);
+    int w = img.size(2);
+    
+    // Compute chroma channels (differences from green)
+    auto cr = img[0] - img[1]; // R - G
+    auto cb = img[2] - img[1]; // B - G
+    
+    // Simple 3x3 box blur on chroma channels
+    auto blur_cr = torch::zeros_like(cr);
+    auto blur_cb = torch::zeros_like(cb);
+    
+    blur_cr.slice(0, 1, h-1).slice(1, 1, w-1) = (
+        cr.slice(0, 0, h-2).slice(1, 0, w-2) +
+        cr.slice(0, 0, h-2).slice(1, 1, w-1) +
+        cr.slice(0, 0, h-2).slice(1, 2, w) +
+        cr.slice(0, 1, h-1).slice(1, 0, w-2) +
+        cr.slice(0, 1, h-1).slice(1, 1, w-1) +
+        cr.slice(0, 1, h-1).slice(1, 2, w) +
+        cr.slice(0, 2, h).slice(1, 0, w-2) +
+        cr.slice(0, 2, h).slice(1, 1, w-1) +
+        cr.slice(0, 2, h).slice(1, 2, w)
+    ) / 9.0f;
+    
+    blur_cb.slice(0, 1, h-1).slice(1, 1, w-1) = (
+        cb.slice(0, 0, h-2).slice(1, 0, w-2) +
+        cb.slice(0, 0, h-2).slice(1, 1, w-1) +
+        cb.slice(0, 0, h-2).slice(1, 2, w) +
+        cb.slice(0, 1, h-1).slice(1, 0, w-2) +
+        cb.slice(0, 1, h-1).slice(1, 1, w-1) +
+        cb.slice(0, 1, h-1).slice(1, 2, w) +
+        cb.slice(0, 2, h).slice(1, 0, w-2) +
+        cb.slice(0, 2, h).slice(1, 1, w-1) +
+        cb.slice(0, 2, h).slice(1, 2, w)
+    ) / 9.0f;
+    
+    // Blend original chroma with blurred chroma
+    float blend = std::min(strength * 0.7f, 1.0f);
+    auto cr_denoised = cr * (1.0f - blend) + blur_cr * blend;
+    auto cb_denoised = cb * (1.0f - blend) + blur_cb * blend;
+    
+    // Reconstruct RGB
+    img[0] = (img[1] + cr_denoised).clamp(0, 1);
+    img[2] = (img[1] + cb_denoised).clamp(0, 1);
+    
+    return img;
 }
 
 } // namespace myimg
