@@ -1127,4 +1127,84 @@ torch::Tensor color_denoise(const torch::Tensor& image, float strength) {
     return img;
 }
 
+// Skin tone matching: adjust skin tones towards warm/cool/neutral
+// mode: "warm", "cool", "neutral"
+// strength: 0.0-1.0 (0 = no change, 1 = full effect)
+torch::Tensor skin_tone_match(const torch::Tensor& image, const std::string& mode, float strength) {
+    if (strength <= 0.0f || mode.empty()) return image.clone();
+    
+    auto img = image.clone();
+    float blend = std::min(strength, 1.0f);
+    
+    // Simple skin tone detection based on RGB ratios
+    auto r = img[0];
+    auto g = img[1];
+    auto b = img[2];
+    
+    // Skin tones typically have R > G > B and moderate saturation
+    auto skin_mask = ((r > g) * (g > b) * (r > 0.35f) * (r < 0.8f)).to(torch::kFloat32);
+    
+    if (mode == "warm") {
+        // Increase red/yellow, decrease blue
+        img[0] = (img[0] * (1.0f - skin_mask * blend * 0.1f) + skin_mask * blend * 0.1f).clamp(0, 1);
+        img[1] = (img[1] * (1.0f - skin_mask * blend * 0.05f) + skin_mask * blend * 0.05f).clamp(0, 1);
+        img[2] = (img[2] * (1.0f - skin_mask * blend * 0.15f)).clamp(0, 1);
+    } else if (mode == "cool") {
+        // Decrease red/yellow, increase blue
+        img[0] = (img[0] * (1.0f - skin_mask * blend * 0.1f)).clamp(0, 1);
+        img[1] = (img[1] * (1.0f - skin_mask * blend * 0.05f)).clamp(0, 1);
+        img[2] = (img[2] * (1.0f - skin_mask * blend * 0.15f) + skin_mask * blend * 0.15f).clamp(0, 1);
+    } else if (mode == "neutral") {
+        // Reduce color cast by moving towards gray
+        auto gray = img.mean(0, true);
+        for (int c = 0; c < 3; ++c) {
+            img[c] = (img[c] * (1.0f - skin_mask * blend * 0.2f) + gray.squeeze() * skin_mask * blend * 0.2f).clamp(0, 1);
+        }
+    }
+    
+    return img;
+}
+
+// Skin tone enhancement: even out skin tones using mild blur on skin areas
+// strength: 0.0-1.0
+torch::Tensor skin_tone_even(const torch::Tensor& image, float strength) {
+    if (strength <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    float blend = std::min(strength * 0.5f, 1.0f);
+    
+    // Detect skin areas
+    auto r = img[0];
+    auto g = img[1];
+    auto b = img[2];
+    auto skin_mask = ((r > g) * (g > b) * (r > 0.35f) * (r < 0.8f)).to(torch::kFloat32);
+    
+    // Simple box blur on skin areas using slice operations
+    int h = img.size(1);
+    int w = img.size(2);
+    
+    for (int c = 0; c < 3; ++c) {
+        auto ch = img[c];
+        auto blurred = torch::zeros_like(ch);
+        
+        // 3x3 box blur
+        blurred.slice(0, 1, h-1).slice(1, 1, w-1) = (
+            ch.slice(0, 0, h-2).slice(1, 0, w-2) +
+            ch.slice(0, 0, h-2).slice(1, 1, w-1) +
+            ch.slice(0, 0, h-2).slice(1, 2, w) +
+            ch.slice(0, 1, h-1).slice(1, 0, w-2) +
+            ch.slice(0, 1, h-1).slice(1, 1, w-1) +
+            ch.slice(0, 1, h-1).slice(1, 2, w) +
+            ch.slice(0, 2, h).slice(1, 0, w-2) +
+            ch.slice(0, 2, h).slice(1, 1, w-1) +
+            ch.slice(0, 2, h).slice(1, 2, w)
+        ) / 9.0f;
+        
+        // Apply blur only to skin areas
+        img[c] = (ch * (1.0f - skin_mask * blend) + blurred * skin_mask * blend).clamp(0, 1);
+    }
+    
+    return img;
+}
+
 } // namespace myimg

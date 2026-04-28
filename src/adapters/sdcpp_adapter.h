@@ -104,14 +104,14 @@ struct GenerationParams {
     int sample_steps = 20;
     float cfg_scale = 7.5f;
     float eta = 0.0f;
-    float flow_shift = 3.0f;  // Flow prediction 的 shift
+    float flow_shift = 0.0f;  // Flow prediction 的 shift (0 = use model default)
     
     // 种子和批次
     int64_t seed = -1;  // -1 表示随机
     int batch_count = 1;
     
     // img2img / Inpainting
-    float strength = 0.75f;  // 1.0 = txt2img, <1.0 = img2img
+    float strength = 1.0f;  // 1.0 = txt2img, <1.0 = img2img
     Image init_image;
     Image mask_image;  // 白色=重绘, 黑色=保留
     

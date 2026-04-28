@@ -1,8 +1,6 @@
 #!/bin/bash
 # =============================================================================
 # 图像生成脚本 - RTX 3080 10G 专用版 (低显存优化)
-# 用途: my-img 项目开发完成后的验证工具
-# 说明: 此脚本用于验证 my-img 编译后的 sd-workflow 二进制功能
 # =============================================================================
 #
 # 【出图原理 / Why HiRes Fix】
@@ -30,6 +28,9 @@
 # =============================================================================
 set -euo pipefail
 
+# 设置库路径
+export LD_LIBRARY_PATH=/home/dministrator/onnxruntime-linux-x64-1.20.1/lib:$LD_LIBRARY_PATH
+
 RED="\033[0;31m"
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
@@ -38,8 +39,8 @@ CYAN="\033[0;36m"
 NC="\033[0m"
 
 MODEL_DIR="${MODEL_DIR:-/opt/image/model}"
-# 使用 my-img 编译后的二进制（开发完成后验证用）
-SD_CLI="${SD_CLI:-$HOME/my-img/build/myimg-cli}"
+# 使用 my-img 编译后的二进制
+SD_CLI="${SD_CLI:-/home/dministrator/my-img/build/myimg-cli}"
 DIFFUSION_MODEL="$MODEL_DIR/z_image_turbo-Q5_K_M.gguf"
 VAE_MODEL="$MODEL_DIR/ae.safetensors"
 LLM_MODEL="$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
@@ -68,8 +69,8 @@ echo "========================================"
 echo "  Pre-check"
 echo "========================================"
 
-if [ ! -f "$SD_CLI" ]; then echo -e "${RED}Error: sd-workflow not found: $SD_CLI${NC}"; exit 1; fi
-if [ ! -x "$SD_CLI" ]; then echo -e "${RED}Error: sd-workflow not executable: $SD_CLI${NC}"; exit 1; fi
+if [ ! -f "$SD_CLI" ]; then echo -e "${RED}Error: sd-cli not found: $SD_CLI${NC}"; exit 1; fi
+if [ ! -x "$SD_CLI" ]; then echo -e "${RED}Error: sd-cli not executable: $SD_CLI${NC}"; exit 1; fi
 
 for model in "$DIFFUSION_MODEL" "$VAE_MODEL" "$LLM_MODEL"; do
     if [ ! -f "$model" ]; then echo -e "${RED}Error: model not found: $model${NC}"; exit 1; fi
@@ -86,14 +87,14 @@ if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || [ "$WIDTH" -le 0 ]; then echo -e "${RED}Error
 if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Error: height must be positive integer${NC}"; exit 1; fi
 
 # HD optimized parameters (实测调优)
-# 人像推荐: euler + discrete + cfg 3.2 + strength 0.30 + 1280x720低分辨率 (边缘最稳定)
+# 人像推荐: dpm++2m + karras + cfg 4.5 + strength 0.15 + 1280x720低分辨率 (边缘最稳定)
 # 风景推荐: dpm++2m + karras + cfg 1.5 + strength 0.35
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-3.2}"
+CFG_SCALE="${CFG_SCALE:-3.5}"
 STEPS="${STEPS:-50}"
 HIRES_STEPS="${HIRES_STEPS:-60}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.20}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
     echo -e "${BLUE}[INFO] Ultra HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
@@ -107,7 +108,7 @@ if [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders}"}
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, mutated, extra limbs, missing limbs, malformed face, ugly face, distorted face, asymmetrical eyes, mismatched eyes, crossed eyes, lazy eye, blank eyes, dead eyes, unnatural skin, plastic skin, doll face, mannequin, porcelain skin, waxy skin, oily skin, acne, blemishes, scars, wrinkles, aged, old, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, bad hands, extra fingers, missing fingers, fused fingers, too many fingers}"}
 
 if [ -n "$OUTPUT_FILE" ]; then
     if [[ "$OUTPUT_FILE" == *"/"* ]]; then

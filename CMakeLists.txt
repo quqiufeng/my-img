@@ -91,7 +91,7 @@ set(STB_IMAGE_INCLUDE ${THIRDPARTY_DIR}/stb)
 # ============================================================
 # 4. stable-diffusion.cpp 集成
 # ============================================================
-set(SDCPP_DIR /opt/stable-diffusion.cpp)
+set(SDCPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stable-diffusion.cpp)
 set(SDCPP_BUILD_DIR ${SDCPP_DIR}/build)
 
 # 检查 sd.cpp 是否已编译
@@ -119,7 +119,12 @@ set(SDCPP_LINK_LIBRARIES
 # 如果有 CUDA 支持，添加 CUDA 库
 if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
     message(STATUS "[my-img] Found GGML CUDA backend")
-    list(APPEND SDCPP_LINK_LIBRARIES ${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a)
+    # 使用 --whole-archive 确保 CUDA 后端符号不被丢弃
+    list(APPEND SDCPP_LINK_LIBRARIES 
+        "-Wl,--whole-archive"
+        ${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a
+        "-Wl,--no-whole-archive"
+    )
     find_package(CUDAToolkit)
     if(CUDAToolkit_FOUND)
         list(APPEND SDCPP_LINK_LIBRARIES CUDA::cudart CUDA::cuda_driver CUDA::cublas)
@@ -138,7 +143,29 @@ if(OpenCV_FOUND)
     message(STATUS "[my-img] Found OpenCV ${OpenCV_VERSION}")
     list(APPEND SDCPP_LINK_LIBRARIES ${OpenCV_LIBS})
 else()
-    message(WARNING "[my-img] OpenCV not found. ControlNet preprocessors will be disabled.")
+    message(WARNING "[my-img] OpenCV not found. Some preprocessors will be disabled.")
+endif()
+
+# ============================================================
+# 4.5 ONNX Runtime 集成 (ControlNet 预处理器)
+# ============================================================
+set(ONNXRUNTIME_ROOT "")
+if(DEFINED ENV{ONNXRUNTIME_ROOT})
+    set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})
+elseif(EXISTS /home/dministrator/onnxruntime-linux-x64-1.20.1)
+    set(ONNXRUNTIME_ROOT /home/dministrator/onnxruntime-linux-x64-1.20.1)
+elseif(EXISTS /opt/onnxruntime-linux-x64-gpu-1.16.3)
+    set(ONNXRUNTIME_ROOT /opt/onnxruntime-linux-x64-gpu-1.16.3)
+endif()
+
+if(ONNXRUNTIME_ROOT AND EXISTS "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so")
+    message(STATUS "[my-img] Found ONNX Runtime at ${ONNXRUNTIME_ROOT}")
+    set(ONNXRUNTIME_FOUND TRUE)
+    set(ONNXRUNTIME_INCLUDE_DIRS ${ONNXRUNTIME_ROOT}/include)
+    set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
+else()
+    message(WARNING "[my-img] ONNX Runtime not found. ONNX-based preprocessors (Depth, OpenPose) will be disabled.")
+    set(ONNXRUNTIME_FOUND FALSE)
 endif()
 
 # ============================================================
@@ -159,6 +186,10 @@ if(OpenCV_FOUND)
     list(APPEND MYIMG_SOURCES src/utils/controlnet_preprocessors.cpp)
 endif()
 
+if(ONNXRUNTIME_FOUND)
+    list(APPEND MYIMG_SOURCES src/utils/onnx_preprocessor.cpp)
+endif()
+
 # ============================================================
 # 5. 创建可执行文件
 # ============================================================
@@ -166,6 +197,10 @@ add_executable(myimg-cli ${MYIMG_SOURCES})
 
 if(OpenCV_FOUND)
     target_compile_definitions(myimg-cli PRIVATE HAVE_OPENCV=1)
+endif()
+
+if(ONNXRUNTIME_FOUND)
+    target_compile_definitions(myimg-cli PRIVATE HAVE_ONNXRUNTIME=1)
 endif()
 
 # 包含目录
@@ -181,6 +216,7 @@ target_include_directories(myimg-cli PRIVATE
     ${SDCPP_DIR}/include
     ${SDCPP_DIR}/ggml/include
     ${OpenCV_INCLUDE_DIRS}
+    ${ONNXRUNTIME_INCLUDE_DIRS}
 )
 
 # 查找 zlib
@@ -212,6 +248,11 @@ endif()
         ${SDCPP_LINK_END}
         ${CMAKE_THREAD_LIBS_INIT}
     )
+    if(ONNXRUNTIME_FOUND)
+        target_link_libraries(myimg-cli PRIVATE
+            ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so
+        )
+    endif()
     if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
     else()
     endif()
@@ -411,6 +452,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
         ${CMAKE_THREAD_LIBS_INIT}
+        ${JPEG_LIBRARY}
+        ${WEBP_LIBRARY}
+        ${WEBPMUX_LIBRARY}
     )
     if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
     else()
@@ -440,6 +484,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
         ${CMAKE_THREAD_LIBS_INIT}
+        ${JPEG_LIBRARY}
+        ${WEBP_LIBRARY}
+        ${WEBPMUX_LIBRARY}
     )
     set_target_properties(test_txt2img PROPERTIES
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
@@ -466,6 +513,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
         ${CMAKE_THREAD_LIBS_INIT}
+        ${JPEG_LIBRARY}
+        ${WEBP_LIBRARY}
+        ${WEBPMUX_LIBRARY}
     )
     set_target_properties(test_hires_fix_real PROPERTIES
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"

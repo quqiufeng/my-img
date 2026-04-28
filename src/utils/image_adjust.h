@@ -133,4 +133,13 @@ torch::Tensor graduated_filter(const torch::Tensor& image, float angle, float po
 // radius: 1-5 (blur radius for edge detection)
 torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radius = 2);
 
+// Skin tone matching: adjust skin tones towards warm/cool/neutral
+// mode: "warm", "cool", "neutral"
+// strength: 0.0-1.0 (0 = no change, 1 = full effect)
+torch::Tensor skin_tone_match(const torch::Tensor& image, const std::string& mode, float strength);
+
+// Skin tone enhancement: even out skin tones
+// strength: 0.0-1.0
+torch::Tensor skin_tone_even(const torch::Tensor& image, float strength);
+
 } // namespace myimg

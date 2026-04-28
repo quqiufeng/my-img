@@ -28,14 +28,23 @@ ImageData normal_map(const ImageData& img);
 // Scribble (simplified line detection)
 ImageData scribble(const ImageData& img, int threshold = 100);
 
-// Depth estimation placeholder (requires MiDaS/DPT model)
-ImageData depth_map(const ImageData& img);
+// Depth estimation using MiDaS/DPT model (libtorch)
+// model_path: path to .pt model file
+ImageData depth_map(const ImageData& img, const std::string& model_path = "");
 
-// OpenPose placeholder (requires OpenPose model)
-ImageData openpose(const ImageData& img);
+// OpenPose body pose detection (libtorch)
+// model_path: path to .pth model file
+ImageData openpose(const ImageData& img, const std::string& model_path = "");
+
+// ONNX-based depth estimation (fallback)
+ImageData depth_map_onnx(const ImageData& img, const std::string& model_path = "");
+
+// ONNX-based OpenPose detection (fallback)
+ImageData openpose_onnx(const ImageData& img, const std::string& model_path = "");
 
 // Apply preprocessor by name
 // Returns empty ImageData if preprocessor is not available
-ImageData apply_preprocessor(const ImageData& img, const std::string& name, int param1 = 0, int param2 = 0);
+// model_path: optional path to the model file (for depth/openpose)
+ImageData apply_preprocessor(const ImageData& img, const std::string& name, int param1 = 0, int param2 = 0, const std::string& model_path = "");
 
 } // namespace myimg

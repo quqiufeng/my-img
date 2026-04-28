@@ -112,6 +112,9 @@ struct CliOptions {
     // 人像修饰
     float whiten_strength = 0.0f;    // 0.0-1.0
     float skin_smooth_strength = 0.0f; // 0.0-1.0
+    std::string skin_tone;           // warm, cool, neutral
+    float skin_tone_strength = 0.0f; // 0.0-1.0
+    float skin_even_strength = 0.0f; // 0.0-1.0
     
     // 图像修复
     float dehaze_strength = 0.0f;  // 0.0-1.0
@@ -151,6 +154,8 @@ struct CliOptions {
     std::string control_preprocessor;  // canny, lineart, normal, scribble, depth, openpose
     int control_preprocessor_param1 = 0;  // threshold1 for canny, threshold for lineart/scribble
     int control_preprocessor_param2 = 0;  // threshold2 for canny
+    std::string depth_model;   // Path to MiDaS model (default: /opt/image/model/midas_dpt_hybrid.pt)
+    std::string openpose_model; // Path to OpenPose model (default: /opt/image/model/openpose_body.pt)
     
     // Output quality
     int jpeg_quality = 95;  // JPEG quality (1-100)
@@ -240,9 +245,11 @@ static void print_usage(const char* argv0) {
     std::cout << "  --crop-center w,h         Center crop to specified size\n";
     std::cout << "  --crop-ratio w:h          Crop to aspect ratio (e.g. 16:9, 1:1, 4:3)\n";
     std::cout << "\nControlNet Preprocessors:\n";
-    std::cout << "  --control-preprocessor NAME  Preprocessor: canny, lineart, normal, scribble\n";
+    std::cout << "  --control-preprocessor NAME  Preprocessor: canny, lineart, normal, scribble, depth, openpose\n";
     std::cout << "  --control-preprocessor-param1 INT  Parameter 1 (threshold)\n";
     std::cout << "  --control-preprocessor-param2 INT  Parameter 2 (Canny high threshold)\n";
+    std::cout << "  --depth-model PATH        Path to MiDaS depth model (.pt)\n";
+    std::cout << "  --openpose-model PATH     Path to OpenPose body model (.pt)\n";
     std::cout << "\nBatch Processing:\n";
     std::cout << "  --batch-input-dir PATH    Input directory for batch processing\n";
     std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
@@ -301,6 +308,12 @@ static void print_usage(const char* argv0) {
     std::cout << "  --denoise FLOAT           Denoise strength 0.0-1.0\n";
     std::cout << "  --luminance-denoise FLOAT Luminance noise reduction 0.0-1.0\n";
     std::cout << "  --color-denoise FLOAT     Color noise reduction 0.0-1.0\n";
+    std::cout << "\nPortrait Retouching:\n";
+    std::cout << "  --whiten FLOAT            Teeth/eye whitening 0.0-1.0\n";
+    std::cout << "  --skin-smooth FLOAT       Skin smoothing 0.0-1.0\n";
+    std::cout << "  --skin-tone MODE          Skin tone: warm, cool, neutral\n";
+    std::cout << "  --skin-tone-strength FLOAT Skin tone strength 0.0-1.0\n";
+    std::cout << "  --skin-even FLOAT         Skin tone evening 0.0-1.0\n";
     std::cout << "\nImage Interrogation:\n";
     std::cout << "  --interrogate PATH        Image path for caption/description\n";
     std::cout << "                            (requires JoyCaption model - placeholder)\n";
@@ -439,6 +452,9 @@ static bool save_preset(const CliOptions& opts, const std::string& preset_name) 
     j["color_denoise_strength"] = opts.color_denoise_strength;
     j["whiten_strength"] = opts.whiten_strength;
     j["skin_smooth_strength"] = opts.skin_smooth_strength;
+    j["skin_tone"] = opts.skin_tone;
+    j["skin_tone_strength"] = opts.skin_tone_strength;
+    j["skin_even_strength"] = opts.skin_even_strength;
     j["resize_width"] = opts.resize_width;
     j["resize_height"] = opts.resize_height;
     j["resize_mode"] = opts.resize_mode;
@@ -532,6 +548,9 @@ static bool load_preset(CliOptions& opts, const std::string& preset_path) {
     get_float("color_denoise_strength", opts.color_denoise_strength);
     get_float("whiten_strength", opts.whiten_strength);
     get_float("skin_smooth_strength", opts.skin_smooth_strength);
+    get_string("skin_tone", opts.skin_tone);
+    get_float("skin_tone_strength", opts.skin_tone_strength);
+    get_float("skin_even_strength", opts.skin_even_strength);
     get_int("resize_width", opts.resize_width);
     get_int("resize_height", opts.resize_height);
     get_string("resize_mode", opts.resize_mode);
@@ -743,6 +762,15 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--skin-smooth") {
             if (++i >= argc) { std::cerr << "Missing value for --skin-smooth\n"; return false; }
             opts.skin_smooth_strength = std::stof(argv[i]);
+        } else if (arg == "--skin-tone") {
+            if (++i >= argc) { std::cerr << "Missing value for --skin-tone\n"; return false; }
+            opts.skin_tone = argv[i];
+        } else if (arg == "--skin-tone-strength") {
+            if (++i >= argc) { std::cerr << "Missing value for --skin-tone-strength\n"; return false; }
+            opts.skin_tone_strength = std::stof(argv[i]);
+        } else if (arg == "--skin-even") {
+            if (++i >= argc) { std::cerr << "Missing value for --skin-even\n"; return false; }
+            opts.skin_even_strength = std::stof(argv[i]);
         } else if (arg == "--dehaze") {
             if (++i >= argc) { std::cerr << "Missing value for --dehaze\n"; return false; }
             opts.dehaze_strength = std::stof(argv[i]);
@@ -843,6 +871,12 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--control-preprocessor-param2") {
             if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor-param2\n"; return false; }
             opts.control_preprocessor_param2 = std::stoi(argv[i]);
+        } else if (arg == "--depth-model") {
+            if (++i >= argc) { std::cerr << "Missing value for --depth-model\n"; return false; }
+            opts.depth_model = argv[i];
+        } else if (arg == "--openpose-model") {
+            if (++i >= argc) { std::cerr << "Missing value for --openpose-model\n"; return false; }
+            opts.openpose_model = argv[i];
         } else if (arg == "--save-preset") {
             if (++i >= argc) { std::cerr << "Missing value for --save-preset\n"; return false; }
             opts.save_preset_name = argv[i];
@@ -980,9 +1014,17 @@ int main(int argc, char** argv) {
             return 1;
         }
         
+        std::string model_path;
+        if (opts.control_preprocessor == "depth" || opts.control_preprocessor == "Depth") {
+            model_path = opts.depth_model;
+        } else if (opts.control_preprocessor == "openpose" || opts.control_preprocessor == "OpenPose") {
+            model_path = opts.openpose_model;
+        }
+        
         auto result = myimg::apply_preprocessor(img_data, opts.control_preprocessor,
                                                  opts.control_preprocessor_param1,
-                                                 opts.control_preprocessor_param2);
+                                                 opts.control_preprocessor_param2,
+                                                 model_path);
         if (result.empty()) {
             std::cerr << "Error: Preprocessor failed\n";
             return 1;
@@ -1349,6 +1391,7 @@ int main(int argc, char** argv) {
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                 opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
                 opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
+                !opts.skin_tone.empty() || opts.skin_even_strength > 0.0f ||
                 !opts.preset.empty() ||
                 opts.vignette_strength > 0.0f ||
                 !opts.radial_filter.empty() ||
@@ -1481,6 +1524,14 @@ int main(int argc, char** argv) {
                 }
                 if (opts.skin_smooth_strength > 0.0f) {
                     tensor = myimg::skin_smooth(tensor, opts.skin_smooth_strength);
+                }
+                
+                // Skin tone matching
+                if (!opts.skin_tone.empty()) {
+                    tensor = myimg::skin_tone_match(tensor, opts.skin_tone, opts.skin_tone_strength);
+                }
+                if (opts.skin_even_strength > 0.0f) {
+                    tensor = myimg::skin_tone_even(tensor, opts.skin_even_strength);
                 }
                 
                 img_data = myimg::tensor_to_image_data(tensor);
@@ -1623,6 +1674,7 @@ int main(int argc, char** argv) {
                 opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
                 opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
                                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
+                               !opts.skin_tone.empty() || opts.skin_even_strength > 0.0f ||
                                !opts.preset.empty() ||
                                opts.vignette_strength > 0.0f ||
                                !opts.radial_filter.empty() ||
@@ -1768,6 +1820,16 @@ int main(int argc, char** argv) {
             if (opts.skin_smooth_strength > 0.0f) {
                 std::cout << "Applying skin smoothing...\n";
                 tensor = myimg::skin_smooth(tensor, opts.skin_smooth_strength);
+            }
+            
+            // Skin tone matching
+            if (!opts.skin_tone.empty()) {
+                std::cout << "Applying skin tone: " << opts.skin_tone << " (strength: " << opts.skin_tone_strength << ")\n";
+                tensor = myimg::skin_tone_match(tensor, opts.skin_tone, opts.skin_tone_strength);
+            }
+            if (opts.skin_even_strength > 0.0f) {
+                std::cout << "Applying skin tone evening: " << opts.skin_even_strength << "\n";
+                tensor = myimg::skin_tone_even(tensor, opts.skin_even_strength);
             }
             
             img_data = myimg::tensor_to_image_data(tensor);

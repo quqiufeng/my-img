@@ -259,7 +259,9 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     gen_params.sample_params.scheduler = convert_scheduler(params.scheduler);
     gen_params.sample_params.sample_steps = params.sample_steps;
     gen_params.sample_params.eta = params.eta;
-    gen_params.sample_params.flow_shift = params.flow_shift;
+    if (params.flow_shift != 0.0f) {
+        gen_params.sample_params.flow_shift = params.flow_shift;
+    }
     
     // img2img
     if (!params.init_image.empty() && params.strength < 1.0f) {
@@ -293,12 +295,12 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     }
     
     // HiRes Fix
-    gen_params.enable_hires = params.enable_hires;
+    gen_params.hires.enabled = params.enable_hires;
     if (params.enable_hires) {
-        gen_params.hires_width = params.hires_width;
-        gen_params.hires_height = params.hires_height;
-        gen_params.hires_strength = params.hires_strength;
-        gen_params.hires_sample_steps = params.hires_sample_steps;
+        gen_params.hires.target_width = params.hires_width;
+        gen_params.hires.target_height = params.hires_height;
+        gen_params.hires.denoising_strength = params.hires_strength;
+        gen_params.hires.steps = params.hires_sample_steps;
     }
     
     // VAE Tiling
