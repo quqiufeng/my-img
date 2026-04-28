@@ -270,6 +270,36 @@ static void print_usage(const char* argv0) {
     std::cout << "  --help                    Show this help\n";
 }
 
+// Parse embedding syntax in prompt: replaces "embedding:name" with "name"
+// and returns list of referenced embedding names
+static std::string parse_embedding_syntax(const std::string& prompt, std::vector<std::string>& referenced_embeddings) {
+    std::string result = prompt;
+    size_t pos = 0;
+    
+    while ((pos = result.find("embedding:", pos)) != std::string::npos) {
+        size_t start = pos;
+        size_t end = pos + 10; // length of "embedding:"
+        
+        // Find end of embedding name (space, comma, or end of string)
+        while (end < result.size() && result[end] != ' ' && result[end] != ',' && result[end] != '\t') {
+            end++;
+        }
+        
+        if (end > start + 10) {
+            std::string emb_name = result.substr(start + 10, end - start - 10);
+            referenced_embeddings.push_back(emb_name);
+            
+            // Replace "embedding:name" with just "name"
+            result.replace(start, end - start, emb_name);
+            pos = start + emb_name.size();
+        } else {
+            pos = end;
+        }
+    }
+    
+    return result;
+}
+
 static bool parse_args(int argc, char** argv, CliOptions& opts) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -689,6 +719,20 @@ int main(int argc, char** argv) {
         opts.seed = std::random_device{}();
     }
     
+    // 解析 prompt 中的 embedding 语法
+    std::vector<std::string> referenced_embeddings;
+    std::string processed_prompt = parse_embedding_syntax(opts.prompt, referenced_embeddings);
+    std::string processed_neg_prompt = parse_embedding_syntax(opts.negative_prompt, referenced_embeddings);
+    
+    if (!referenced_embeddings.empty()) {
+        std::cout << "[Embedding] Referenced embeddings: ";
+        for (size_t i = 0; i < referenced_embeddings.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << referenced_embeddings[i];
+        }
+        std::cout << "\n";
+    }
+    
     // 构建生成参数
     myimg::GenerationParams params;
     if (!opts.model.empty()) {
@@ -697,8 +741,8 @@ int main(int argc, char** argv) {
     params.diffusion_model_path = opts.diffusion_model;
     params.vae_path = opts.vae;
     params.llm_path = opts.llm;
-    params.prompt = opts.prompt;
-    params.negative_prompt = opts.negative_prompt;
+    params.prompt = processed_prompt;
+    params.negative_prompt = processed_neg_prompt;
     params.width = opts.width;
     params.height = opts.height;
     params.sample_steps = opts.steps;

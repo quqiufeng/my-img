@@ -74,7 +74,7 @@
 
 #### Task 6.5: Textual Inversion / Embeddings
 - [x] 加载 .pt/.safetensors/.bin embedding 文件
-- [ ] 在 prompt 中识别 `embedding:name` 语法
+- [x] 在 prompt 中识别 `embedding:name` 语法
 - [x] 通过 sd.cpp 注入到文本编码器
 - [x] CLI 参数：`--embd-dir PATH`
 - **优先级**: P1
