@@ -2518,7 +2518,7 @@ enum scheduler_t sd_get_default_scheduler(const sd_ctx_t* sd_ctx, enum sample_me
     return DISCRETE_SCHEDULER;
 }
 
-int64_t resolve_seed(int64_t seed) {
+static int64_t resolve_seed(int64_t seed) {
     if (seed >= 0) {
         return seed;
     }
@@ -2526,14 +2526,14 @@ int64_t resolve_seed(int64_t seed) {
     return rand();
 }
 
-enum sample_method_t resolve_sample_method(sd_ctx_t* sd_ctx, enum sample_method_t sample_method) {
+static enum sample_method_t resolve_sample_method(sd_ctx_t* sd_ctx, enum sample_method_t sample_method) {
     if (sample_method == SAMPLE_METHOD_COUNT) {
         return sd_get_default_sample_method(sd_ctx);
     }
     return sample_method;
 }
 
-scheduler_t resolve_scheduler(sd_ctx_t* sd_ctx,
+static scheduler_t resolve_scheduler(sd_ctx_t* sd_ctx,
                                      scheduler_t scheduler,
                                      enum sample_method_t sample_method) {
     if (scheduler == SCHEDULER_COUNT) {
@@ -2542,7 +2542,7 @@ scheduler_t resolve_scheduler(sd_ctx_t* sd_ctx,
     return scheduler;
 }
 
-float resolve_eta(sd_ctx_t* sd_ctx,
+static float resolve_eta(sd_ctx_t* sd_ctx,
                          float eta,
                          enum sample_method_t sample_method) {
     if (eta == INFINITY) {
@@ -2946,7 +2946,7 @@ public:
     ImageVaeAxesGuard& operator=(const ImageVaeAxesGuard&) = delete;
 };
 
-std::optional<ImageGenerationLatents> prepare_image_generation_latents(sd_ctx_t* sd_ctx,
+static std::optional<ImageGenerationLatents> prepare_image_generation_latents(sd_ctx_t* sd_ctx,
                                                                               const sd_img_gen_params_t* sd_img_gen_params,
                                                                               GenerationRequest* request,
                                                                               SamplePlan* plan) {
@@ -3153,7 +3153,7 @@ std::optional<ImageGenerationLatents> prepare_image_generation_latents(sd_ctx_t*
     return latents;
 }
 
-std::optional<ImageGenerationEmbeds> prepare_image_generation_embeds(sd_ctx_t* sd_ctx,
+static std::optional<ImageGenerationEmbeds> prepare_image_generation_embeds(sd_ctx_t* sd_ctx,
                                                                             const sd_img_gen_params_t* sd_img_gen_params,
                                                                             GenerationRequest* request,
                                                                             SamplePlan* plan,
@@ -3210,7 +3210,7 @@ std::optional<ImageGenerationEmbeds> prepare_image_generation_embeds(sd_ctx_t* s
     return embeds;
 }
 
-sd_image_t* decode_image_outputs(sd_ctx_t* sd_ctx,
+static sd_image_t* decode_image_outputs(sd_ctx_t* sd_ctx,
                                         const GenerationRequest& request,
                                         const std::vector<sd::Tensor<float>>& final_latents) {
     if (final_latents.size() != static_cast<size_t>(request.batch_count)) {
@@ -3255,7 +3255,7 @@ sd_image_t* decode_image_outputs(sd_ctx_t* sd_ctx,
     return result_images;
 }
 
-sd::Tensor<float> upscale_hires_latent(sd_ctx_t* sd_ctx,
+static sd::Tensor<float> upscale_hires_latent(sd_ctx_t* sd_ctx,
                                               const sd::Tensor<float>& latent,
                                               const GenerationRequest& request,
                                               UpscalerGGML* upscaler) {
@@ -4012,5 +4012,4 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
     return result;
 }
 
-// Include extension API implementation
-#include "stable-diffusion-ext.cpp"
+

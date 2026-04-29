@@ -62,7 +62,7 @@ struct CliOptions {
     float hires_scale = 2.0f;
     std::string hires_model_path;
     int hires_tile_size = 128;
-    std::string hires_mode = "sd";  // "sd" = sd.cpp built-in, "libtorch" = libTorch version
+
     
     // ESRGAN
     int upscale_repeats = 1;
@@ -228,7 +228,6 @@ static void print_usage(const char* argv0) {
     std::cout << "  --vae-tile-overlap FLOAT  VAE tile overlap (default: 0.8)\n";
     std::cout << "\nHiRes Fix Options:\n";
     std::cout << "  --hires                   Enable HiRes Fix\n";
-    std::cout << "  --hires-mode MODE         HiRes implementation: sd (built-in), libtorch (experimental)\n";
     std::cout << "  --hires-width INT         HiRes target width (default: 2560)\n";
     std::cout << "  --hires-height INT        HiRes target height (default: 1440)\n";
     std::cout << "  --hires-strength FLOAT    HiRes denoising strength (default: 0.30)\n";
@@ -674,9 +673,6 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.vae_tile_overlap = std::stof(argv[i]);
         } else if (arg == "--hires") {
             opts.hires = true;
-        } else if (arg == "--hires-mode") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-mode\n"; return false; }
-            opts.hires_mode = argv[i];
         } else if (arg == "--hires-width") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-width\n"; return false; }
             opts.hires_width = std::stoi(argv[i]);
@@ -1691,12 +1687,7 @@ int main(int argc, char** argv) {
         }
         
         // 生成图像
-        myimg::Image image;
-        if (opts.hires && opts.hires_mode == "libtorch") {
-            image = adapter.generate_hires_libtorch(params);
-        } else {
-            image = adapter.generate_single(params);
-        }
+        myimg::Image image = adapter.generate_single(params);
         if (image.empty()) {
             std::cerr << "Generation failed for image " << (i + 1) << "\n";
             continue;

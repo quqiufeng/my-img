@@ -4,7 +4,51 @@
 
 ---
 
-## 核心原则：AI 检查法
+## 核心原则：最小侵入
+
+经过 libTorch HiRes Fix 实验的教训，我们确立了**最小侵入 sd.cpp 源码**的升级策略：
+
+### 当前对 sd.cpp 的改动（共 21 行）
+
+```diff
+# 1. 恢复了 8 个 static 关键字（原生代码本来就有）
+-int64_t resolve_seed(int64_t seed) {
++static int64_t resolve_seed(int64_t seed) {
+
+-enum sample_method_t resolve_sample_method(...) {
++static enum sample_method_t resolve_sample_method(...) {
+
+# ... 其他 6 个函数类似
+
+# 2. 删除了末尾的扩展 API include（已废弃）
+-#include "stable-diffusion-ext.cpp"
++
+```
+
+**结论**：sd.cpp 源码**几乎零改动**，升级时直接覆盖新版即可。
+
+### 升级三步走
+
+```bash
+# Step 1: 覆盖新版 sd.cpp（无需担心冲突）
+cd third_party/stable-diffusion.cpp
+git pull origin master
+
+# Step 2: 检查公开 API 变化
+vimdiff include/stable-diffusion.h /tmp/sd.h.old
+
+# Step 3: 在适配器中调整参数映射
+# 只需修改 src/adapters/sdcpp_adapter.cpp
+```
+
+**不需要做的**：
+- ❌ 不需要修改 sd.cpp 内部实现
+- ❌ 不需要维护扩展 API
+- ❌ 不需要处理符号导出/链接问题
+
+---
+
+## AI 检查法
 
 当 sd.cpp 升级后，**不要手动逐个字段对比**。将以下信息提供给 AI，让 AI 自动检查适配性：
 

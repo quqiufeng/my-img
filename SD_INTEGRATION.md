@@ -140,7 +140,32 @@ set(SDCPP_LINK_END "-Wl,--end-group")
 
 ## 4. 适配器设计
 
-### 4.1 核心职责
+### 4.1 升级友好策略（重要）
+
+经过 libTorch HiRes Fix 实验失败后，我们确立了**最小侵入**原则：
+
+**当前状态**：
+- sd.cpp 源码改动：**仅 8 个 `static` 关键字恢复**（原生代码本来就有）
+- 不添加任何扩展 API、不嵌入额外代码
+- 适配器只通过 `stable-diffusion.h` 公开 API 调用 sd.cpp
+
+**升级时只需做一件事**：
+```bash
+# 1. 覆盖新版 sd.cpp
+cd third_party/stable-diffusion.cpp
+git pull origin master
+
+# 2. 检查 stable-diffusion.h 是否有 API 变化
+# 3. 在适配器中调整参数映射
+# 4. 编译测试
+```
+
+**不需要做的**：
+- ❌ 不需要修改 sd.cpp 内部实现
+- ❌ 不需要维护扩展 API
+- ❌ 不需要处理 `#include` 嵌入导致的符号冲突
+
+### 4.2 核心职责
 
 `SDCPPAdapter` 是 my-img 与 sd.cpp 之间的**唯一接口**：
 

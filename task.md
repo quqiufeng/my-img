@@ -1,7 +1,7 @@
 # my-img 开发任务表
 
-> **目标**: 纯 C++ 版 ComfyUI，使用 sd.cpp + libtorch 后端，支持 Z-Image（GGUF）
-> **架构**: sd.cpp（模型推理）+ libtorch（扩展功能）
+> **目标**: 纯 C++ 版 ComfyUI，使用 sd.cpp 后端，支持 Z-Image（GGUF）
+> **架构**: sd.cpp（模型推理）+ 纯 C++ 封装
 > **开发模式**: 完成一个功能 → 编写测试 → 测试通过 → 更新进度 → 下一个功能
 
 ---
@@ -692,15 +692,10 @@
 ## 开发日志
 
 ### 2026-04-29
-- ✅ libTorch 版 HiRes Fix 完整实现
-  - 扩展 API: `sd_ext_generate_latent()` / `sd_ext_sample_latent()` / `sd_ext_vae_decode()`
-  - `SDCPPAdapter::generate_hires_libtorch()`: libTorch GPU latent 上采样 + sd.cpp 采样
-  - CLI 参数: `--hires-mode {sd,libtorch}`
-  - 条件编译: `MYIMG_ENABLE_LIBTORCH` 隔离 libTorch 依赖
-  - 上采样算法: bilinear/bicubic/nearest (通过 `--hires-upscaler` 映射)
-  - 噪声控制: `sd_ext_sample_latent()` 支持 `strength` 参数，复现 sd.cpp 内置 HiRes Fix 逻辑
-  - 编译通过，测试通过 (`test_sdcpp_adapter`)
-  - 更新文档: `HIRES_FIX_LIBTORCH.md`, `libTorchHiresfix.sh`
+- 📝 libTorch HiRes Fix 实验失败，已删除相关代码
+  - 扩展 API 在 RTX 3080 10GB 上出现无法解释的 OOM（相同代码原生路径正常）
+  - 已删除: `stable-diffusion-ext.h/cpp`, `generate_hires_libtorch()`, `--hires-mode`, `libTorchHiresfix.sh`
+  - 使用 sd.cpp 原生 HiRes Fix（`--hires`），已验证 1280x720 和 2560x1440 正常
 
 ### 2026-04-27
 - ✅ 创建项目结构
@@ -729,3 +724,4 @@
 - **模型加载**: 使用 diffusion_model_path（独立扩散模型）而非 model_path
 - **LTO 兼容**: 启用 CMAKE_INTERPROCEDURAL_OPTIMIZATION 以匹配 sd.cpp
 - **VAE Tiling**: 256x256 tile + 0.8 overlap，解决 2560x1440 OOM
+- **升级策略**: **最小侵入 sd.cpp 源码**（仅恢复 8 个 static 关键字），只通过 `stable-diffusion.h` 公开 API 调用，不添加扩展、不嵌入代码，升级时直接覆盖新版

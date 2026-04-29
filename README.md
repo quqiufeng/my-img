@@ -6,7 +6,6 @@
 > |------|------|
 > | **📖 [design.md](design.md)** | 架构设计、技术细节、实现路线图 |
 > | **🔧 [SD_INTEGRATION.md](SD_INTEGRATION.md)** | stable-diffusion.cpp 集成方式、更新维护流程 |
-> | **🚀 [HIRES_FIX_LIBTORCH.md](HIRES_FIX_LIBTORCH.md)** | libTorch 版 HiRes Fix 高清出图原理与实现 |
 > | **⚡ [SD_UPGRADE_GUIDE.md](SD_UPGRADE_GUIDE.md)** | sd.cpp 升级后适配指南、AI 辅助检查流程 |
 > | **📋 [task.md](task.md)** | 开发任务表、功能完整度对照、进度追踪 |
 > | **📜 [AGENTS.md](AGENTS.md)** | 项目开发规范、C++ 代码规范、Git 工作流 |
@@ -603,7 +602,7 @@ cd my-img
 # 2. 创建构建目录
 mkdir build && cd build
 
-# 3. 配置（自动检测 libtorch）
+# 3. 配置
 cmake ..
 
 # 4. 编译

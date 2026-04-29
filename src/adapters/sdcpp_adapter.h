@@ -195,10 +195,6 @@ public:
     // 生成单张图像
     Image generate_single(const GenerationParams& params);
     
-    // libTorch 版 HiRes Fix
-    // 使用 libTorch 进行 latent 上采样和噪声控制，替代 sd.cpp 内置的固定逻辑
-    Image generate_hires_libtorch(const GenerationParams& params);
-    
     // 设置回调
     void set_progress_callback(ProgressCallback callback);
     
