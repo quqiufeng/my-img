@@ -1,8 +1,16 @@
 # my-img - 纯 C++ 版 ComfyUI
 
-> **📖 详细设计文档**：[design.md](design.md) - 架构设计、技术细节、实现路线图
-> 
-> **🔧 SD 集成指南**：[SD_INTEGRATION.md](SD_INTEGRATION.md) - stable-diffusion.cpp 集成方式、更新维护流程
+> 📚 **项目文档索引**
+>
+> | 文档 | 说明 |
+> |------|------|
+> | **📖 [design.md](design.md)** | 架构设计、技术细节、实现路线图 |
+> | **🔧 [SD_INTEGRATION.md](SD_INTEGRATION.md)** | stable-diffusion.cpp 集成方式、更新维护流程 |
+> | **🚀 [HIRES_FIX_LIBTORCH.md](HIRES_FIX_LIBTORCH.md)** | libTorch 版 HiRes Fix 高清出图原理与实现 |
+> | **⚡ [SD_UPGRADE_GUIDE.md](SD_UPGRADE_GUIDE.md)** | sd.cpp 升级后适配指南、AI 辅助检查流程 |
+> | **📋 [task.md](task.md)** | 开发任务表、功能完整度对照、进度追踪 |
+> | **📜 [AGENTS.md](AGENTS.md)** | 项目开发规范、C++ 代码规范、Git 工作流 |
+> | **🤖 [claude.md](claude.md)** | Claude AI 使用说明（项目内部） |
 
 ---
 

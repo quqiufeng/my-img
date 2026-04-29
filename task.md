@@ -691,6 +691,17 @@
 
 ## 开发日志
 
+### 2026-04-29
+- ✅ libTorch 版 HiRes Fix 完整实现
+  - 扩展 API: `sd_ext_generate_latent()` / `sd_ext_sample_latent()` / `sd_ext_vae_decode()`
+  - `SDCPPAdapter::generate_hires_libtorch()`: libTorch GPU latent 上采样 + sd.cpp 采样
+  - CLI 参数: `--hires-mode {sd,libtorch}`
+  - 条件编译: `MYIMG_ENABLE_LIBTORCH` 隔离 libTorch 依赖
+  - 上采样算法: bilinear/bicubic/nearest (通过 `--hires-upscaler` 映射)
+  - 噪声控制: `sd_ext_sample_latent()` 支持 `strength` 参数，复现 sd.cpp 内置 HiRes Fix 逻辑
+  - 编译通过，测试通过 (`test_sdcpp_adapter`)
+  - 更新文档: `HIRES_FIX_LIBTORCH.md`, `libTorchHiresfix.sh`
+
 ### 2026-04-27
 - ✅ 创建项目结构
 - ✅ 配置 CMakeLists.txt（libtorch + ggml + sd.cpp）

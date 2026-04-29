@@ -1,5 +1,11 @@
 #include "adapters/sdcpp_adapter.h"
 #include <stable-diffusion.h>
+#include <stable-diffusion-ext.h>
+
+#ifdef MYIMG_ENABLE_LIBTORCH
+#include <torch/torch.h>
+#endif
+
 #include <iostream>
 #include <cstring>
 #include <chrono>
@@ -380,6 +386,220 @@ Image SDCPPAdapter::generate_single(const GenerationParams& params) {
         return images[0];
     }
     return Image();
+}
+
+Image SDCPPAdapter::generate_hires_libtorch(const GenerationParams& params) {
+#ifdef MYIMG_ENABLE_LIBTORCH
+    if (!ctx_) {
+        std::cerr << "[SDCPPAdapter] Model not initialized!" << std::endl;
+        return Image();
+    }
+
+    std::cout << "[SDCPPAdapter] libTorch HiRes Fix: generating base latent..." << std::endl;
+
+    // 1. 构造基础生成参数（禁用 hires，使用基础分辨率）
+    sd_img_gen_params_t gen_params;
+    sd_img_gen_params_init(&gen_params);
+
+    gen_params.prompt = params.prompt.c_str();
+    gen_params.negative_prompt = params.negative_prompt.c_str();
+    gen_params.clip_skip = params.clip_skip;
+    gen_params.width = params.width;
+    gen_params.height = params.height;
+    gen_params.seed = params.seed;
+    gen_params.batch_count = 1;
+    gen_params.strength = params.strength;
+
+    // 采样参数
+    gen_params.sample_params.sample_method = convert_sample_method(params.sample_method);
+    gen_params.sample_params.scheduler = convert_scheduler(params.scheduler);
+    gen_params.sample_params.sample_steps = params.sample_steps;
+    gen_params.sample_params.eta = params.eta;
+    if (params.flow_shift != 0.0f) {
+        gen_params.sample_params.flow_shift = params.flow_shift;
+    }
+    gen_params.sample_params.guidance.txt_cfg = params.cfg_scale;
+
+    // img2img
+    if (!params.init_image.empty() && params.strength < 1.0f) {
+        gen_params.init_image = image_to_sd_image(params.init_image);
+    }
+
+    // Inpainting
+    if (!params.mask_image.empty()) {
+        gen_params.mask_image = image_to_sd_image(params.mask_image);
+    }
+
+    // ControlNet
+    if (!params.control_image.empty()) {
+        gen_params.control_image = image_to_sd_image(params.control_image);
+        gen_params.control_strength = params.control_strength;
+    }
+
+    // LoRA
+    std::vector<sd_lora_t> sd_loras;
+    if (!params.loras.empty()) {
+        sd_loras.reserve(params.loras.size());
+        for (const auto& lora : params.loras) {
+            sd_lora_t sd_lora;
+            sd_lora.path = lora.path.c_str();
+            sd_lora.multiplier = lora.multiplier;
+            sd_lora.is_high_noise = lora.is_high_noise;
+            sd_loras.push_back(sd_lora);
+        }
+        gen_params.loras = sd_loras.data();
+        gen_params.lora_count = static_cast<uint32_t>(sd_loras.size());
+    }
+
+    // 禁用内置 hires
+    gen_params.hires.enabled = false;
+
+    // VAE Tiling
+    gen_params.vae_tiling_params.enabled = params.vae_tiling;
+    if (params.vae_tiling) {
+        gen_params.vae_tiling_params.tile_size_x = params.vae_tile_size_x;
+        gen_params.vae_tiling_params.tile_size_y = params.vae_tile_size_y;
+        gen_params.vae_tiling_params.target_overlap = params.vae_tile_overlap;
+    }
+
+    // 2. 生成基础 latent
+    sd_tensor_t* base_latent = sd_ext_generate_latent(ctx_, &gen_params);
+    if (!base_latent) {
+        std::cerr << "[SDCPPAdapter] Failed to generate base latent" << std::endl;
+        return Image();
+    }
+
+    // 获取 tensor 信息
+    int ndim = sd_ext_tensor_ndim(base_latent);
+    if (ndim != 3) {
+        std::cerr << "[SDCPPAdapter] Unexpected latent ndim: " << ndim << std::endl;
+        sd_ext_tensor_free(base_latent);
+        return Image();
+    }
+
+    int64_t h = sd_ext_tensor_shape(base_latent, 0);
+    int64_t w = sd_ext_tensor_shape(base_latent, 1);
+    int64_t c = sd_ext_tensor_shape(base_latent, 2);
+
+    std::cout << "[SDCPPAdapter] Base latent shape: [" << h << ", " << w << ", " << c << "]" << std::endl;
+    std::cout << "[SDCPPAdapter] Upscaling to target: " << params.hires_width << "x" << params.hires_height << std::endl;
+
+    // 3. 转换为 libTorch tensor
+    void* data_ptr = sd_ext_tensor_data_ptr(base_latent);
+    if (!data_ptr) {
+        std::cerr << "[SDCPPAdapter] Failed to get latent data pointer" << std::endl;
+        sd_ext_tensor_free(base_latent);
+        return Image();
+    }
+
+    // sd.cpp latent 格式: [H, W, C] (HWC)
+    // 转换为 torch: [C, H, W] 再添加 batch -> [1, C, H, W]
+    auto cpu_tensor = torch::from_blob(data_ptr, {h, w, c}, torch::kFloat32);
+    auto torch_latent = cpu_tensor.permute({2, 0, 1}).unsqueeze(0).to(torch::kCUDA);
+
+    // 计算目标 latent 尺寸（VAE 缩放因子通常为 8）
+    int64_t target_h = params.hires_height / 8;
+    int64_t target_w = params.hires_width / 8;
+
+    // 4. libTorch 上采样
+    torch::nn::functional::InterpolateFuncOptions options;
+    options.size(std::vector<int64_t>{target_h, target_w});
+
+    switch (params.hires_upscaler) {
+        case HiresUpscaler::LatentNearest:
+        case HiresUpscaler::LatentNearestExact:
+        case HiresUpscaler::Nearest:
+            options.mode(torch::kNearest);
+            break;
+        case HiresUpscaler::LatentBicubic:
+        case HiresUpscaler::LatentBicubicAntialiased:
+            options.mode(torch::kBicubic);
+            break;
+        case HiresUpscaler::Lanczos:
+        case HiresUpscaler::Latent:
+        case HiresUpscaler::LatentAntialiased:
+        case HiresUpscaler::Model:
+        default:
+            options.mode(torch::kBilinear);
+            options.align_corners(false);
+            break;
+    }
+
+    auto upscaled = torch::nn::functional::interpolate(torch_latent, options);
+
+    // 转回 [H, W, C] 格式并移回 CPU
+    auto upscaled_hwc = upscaled.squeeze(0).permute({1, 2, 0}).contiguous().to(torch::kCPU);
+
+    // 5. 转换回 sd tensor
+    std::vector<int64_t> target_shape = {target_h, target_w, c};
+    sd_tensor_t* upscaled_sd = sd_ext_tensor_from_data(
+        upscaled_hwc.data_ptr<float>(),
+        target_shape.data(),
+        3,
+        0);  // f32
+
+    // 释放基础 latent
+    sd_ext_tensor_free(base_latent);
+
+    if (!upscaled_sd) {
+        std::cerr << "[SDCPPAdapter] Failed to create upscaled sd tensor" << std::endl;
+        return Image();
+    }
+
+    std::cout << "[SDCPPAdapter] Upscaled latent shape: [" << target_h << ", " << target_w << ", " << c << "]" << std::endl;
+    std::cout << "[SDCPPAdapter] Sampling with strength=" << params.hires_strength << ", steps=" << params.hires_sample_steps << std::endl;
+
+    // 6. 构造采样参数并继续采样
+    sd_sample_params_t sample_params;
+    sd_sample_params_init(&sample_params);
+    sample_params.sample_method = convert_sample_method(params.sample_method);
+    sample_params.scheduler = convert_scheduler(params.scheduler);
+    sample_params.sample_steps = params.hires_sample_steps;
+    sample_params.eta = params.eta;
+    sample_params.guidance.txt_cfg = params.cfg_scale;
+    if (params.flow_shift != 0.0f) {
+        sample_params.flow_shift = params.flow_shift;
+    }
+
+    sd_tensor_t* refined_latent = sd_ext_sample_latent(
+        ctx_,
+        upscaled_sd,
+        nullptr,  // noise: 让 sd.cpp 内部生成并混合
+        params.prompt.c_str(),
+        params.negative_prompt.c_str(),
+        &sample_params,
+        params.hires_width,
+        params.hires_height,
+        params.hires_strength);
+
+    sd_ext_tensor_free(upscaled_sd);
+
+    if (!refined_latent) {
+        std::cerr << "[SDCPPAdapter] HiRes sampling failed" << std::endl;
+        return Image();
+    }
+
+    // 7. VAE 解码
+    sd_image_t sd_img = sd_ext_vae_decode(ctx_, refined_latent);
+    sd_ext_tensor_free(refined_latent);
+
+    if (!sd_img.data) {
+        std::cerr << "[SDCPPAdapter] VAE decode failed" << std::endl;
+        return Image();
+    }
+
+    // 8. 转换为 Image 并返回
+    Image result = sd_image_to_image(sd_img);
+    free(sd_img.data);
+
+    std::cout << "[SDCPPAdapter] libTorch HiRes Fix completed: " << result.width << "x" << result.height << std::endl;
+    return result;
+#else
+    (void)params;
+    std::cerr << "[SDCPPAdapter] libTorch HiRes Fix not available (compiled without MYIMG_ENABLE_LIBTORCH)" << std::endl;
+    std::cerr << "              Falling back to standard generate_single()" << std::endl;
+    return generate_single(params);
+#endif
 }
 
 std::vector<float> SDCPPAdapter::encode_prompt(const std::string& prompt, int clip_skip) {

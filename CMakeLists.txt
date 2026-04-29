@@ -203,6 +203,9 @@ if(ONNXRUNTIME_FOUND)
     target_compile_definitions(myimg-cli PRIVATE HAVE_ONNXRUNTIME=1)
 endif()
 
+# 启用 libTorch HiRes Fix
+target_compile_definitions(myimg-cli PRIVATE MYIMG_ENABLE_LIBTORCH=1)
+
 # 包含目录
 target_include_directories(myimg-cli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -446,16 +449,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
         ${STB_IMAGE_INCLUDE}
         ${SDCPP_DIR}/include
         ${SDCPP_DIR}/ggml/include
+        ${TORCH_INCLUDE_DIRS}
     )
     target_link_libraries(test_sdcpp_adapter PRIVATE
         ${SDCPP_LINK_START}
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
+        ${TORCH_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
         ${JPEG_LIBRARY}
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
     )
+    target_compile_definitions(test_sdcpp_adapter PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
     else()
     endif()
@@ -478,16 +484,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
         ${STB_IMAGE_INCLUDE}
         ${SDCPP_DIR}/include
         ${SDCPP_DIR}/ggml/include
+        ${TORCH_INCLUDE_DIRS}
     )
     target_link_libraries(test_txt2img PRIVATE
         ${SDCPP_LINK_START}
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
+        ${TORCH_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
         ${JPEG_LIBRARY}
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
     )
+    target_compile_definitions(test_txt2img PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_txt2img PROPERTIES
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
@@ -507,16 +516,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         ${STB_IMAGE_INCLUDE}
         ${SDCPP_DIR}/include
         ${SDCPP_DIR}/ggml/include
+        ${TORCH_INCLUDE_DIRS}
     )
     target_link_libraries(test_hires_fix_real PRIVATE
         ${SDCPP_LINK_START}
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
+        ${TORCH_LIBRARIES}
         ${CMAKE_THREAD_LIBS_INIT}
         ${JPEG_LIBRARY}
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
     )
+    target_compile_definitions(test_hires_fix_real PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_hires_fix_real PROPERTIES
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
