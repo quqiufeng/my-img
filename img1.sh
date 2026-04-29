@@ -8,13 +8,13 @@
 # 未见过高分辨率。HiRes Fix 分两阶段：
 #   1. 先生成低分辨率图像（构图、骨架正确）
 #   2. 在 latent 空间放大后 refine（保留结构 + 补充细节）
+#   3. 最后用 ESRGAN 放大到目标分辨率（后处理，不进入 diffusion 流程）
 #
 # 【3080 10G 显存限制】
 # 10G 显存无法直接以高分辨率作为基础（会 OOM 爆显存），因此：
 #   - 基础分辨率只能到 1280x720（latent 160x90，刚好在显存极限）
 #   - 再通过 HiRes Fix 放大到目标 2560x1440（2x 放大）
-#   - 虽然放大倍数较大，但这是 10G 显存下生成 2560x1440 的唯一可行方案
-#   - 最终画质尚可，但不如高显存方案（如 4090D 的 1920x1080 基础）
+#   - ESRGAN 放大是后处理，不消耗 diffusion 显存
 #
 # 【参考提示词示例 (人像)】
 # ./img1.sh "half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up" "~/portrait_2560x1440.png" 2560 1440
@@ -24,7 +24,6 @@
 #   $2 - 输出文件路径
 #   $3 - 宽度 (Width)
 #   $4 - 高度 (Height)
-#   --upscale - 可选：使用 2x ESRGAN 进一步放大（会额外占用显存，慎用）
 # =============================================================================
 set -euo pipefail
 
@@ -39,27 +38,26 @@ CYAN="\033[0;36m"
 NC="\033[0m"
 
 MODEL_DIR="${MODEL_DIR:-/opt/image/model}"
-# 使用 my-img 编译后的二进制
 SD_CLI="${SD_CLI:-/home/dministrator/my-img/build/myimg-cli}"
 DIFFUSION_MODEL="$MODEL_DIR/z_image_turbo-Q5_K_M.gguf"
 VAE_MODEL="$MODEL_DIR/ae.safetensors"
 LLM_MODEL="$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
 UPSCALE_MODEL="$MODEL_DIR/2x_ESRGAN.gguf"
 
-UPSCALE_FLAG=0
 ARGS=()
 for arg in "$@"; do
-    if [ "$arg" = "--upscale" ]; then
-        UPSCALE_FLAG=1
-    else
-        ARGS+=("$arg")
-    fi
+    ARGS+=("$arg")
 done
 
 PROMPT="${ARGS[0]:-A beautiful landscape}"
 OUTPUT_FILE="${ARGS[1]:-}"
 WIDTH="${ARGS[2]:-1280}"
 HEIGHT="${ARGS[3]:-720}"
+
+# 2560x1440 模式：参考 quqiufeng，基础 1280x720，HiRes Fix 直接到 2560x1440
+if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
+    echo -e "${BLUE}[INFO] 2560x1440 Mode: 1280x720 base -> HiRes Fix 2560x1440${NC}"
+fi
 
 if [[ "$OUTPUT_FILE" == ~* ]]; then
     OUTPUT_FILE="${HOME}${OUTPUT_FILE:1}"
@@ -76,7 +74,7 @@ for model in "$DIFFUSION_MODEL" "$VAE_MODEL" "$LLM_MODEL"; do
     if [ ! -f "$model" ]; then echo -e "${RED}Error: model not found: $model${NC}"; exit 1; fi
 done
 
-if [ "$UPSCALE_FLAG" -eq 1 ]; then
+if [ "${FORCE_UPSCALE:-0}" -eq 1 ]; then
     if [ ! -f "$UPSCALE_MODEL" ]; then echo -e "${RED}Error: upscale model not found: $UPSCALE_MODEL${NC}"; exit 1; fi
     echo -e "${CYAN}✓ Upscale mode enabled (2x ESRGAN)${NC}"
 fi
@@ -87,14 +85,13 @@ if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || [ "$WIDTH" -le 0 ]; then echo -e "${RED}Error
 if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Error: height must be positive integer${NC}"; exit 1; fi
 
 # HD optimized parameters (实测调优)
-# 人像推荐: dpm++2m + karras + cfg 4.5 + strength 0.15 + 1280x720低分辨率 (边缘最稳定)
-# 风景推荐: dpm++2m + karras + cfg 1.5 + strength 0.35
+# 人像推荐: euler + discrete + cfg 3.2 + strength 0.30 + 50 steps
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-3.5}"
-STEPS="${STEPS:-50}"
-HIRES_STEPS="${HIRES_STEPS:-60}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.20}"
+CFG_SCALE="${CFG_SCALE:-2.8}"
+STEPS="${STEPS:-55}"
+HIRES_STEPS="${HIRES_STEPS:-25}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.28}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
     echo -e "${BLUE}[INFO] Ultra HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
@@ -102,13 +99,13 @@ else
     echo -e "${BLUE}[INFO] HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 fi
 
-# Add quality keywords - enhanced for realism and edge stability
+# Add quality keywords
 QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, complete face, full head, professional portrait"
 if [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, mutated, extra limbs, missing limbs, malformed face, ugly face, distorted face, asymmetrical eyes, mismatched eyes, crossed eyes, lazy eye, blank eyes, dead eyes, unnatural skin, plastic skin, doll face, mannequin, porcelain skin, waxy skin, oily skin, acne, blemishes, scars, wrinkles, aged, old, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, bad hands, extra fingers, missing fingers, fused fingers, too many fingers}"}
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders}"}
 
 if [ -n "$OUTPUT_FILE" ]; then
     if [[ "$OUTPUT_FILE" == *"/"* ]]; then
@@ -131,17 +128,10 @@ OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT"
 TARGET_LATENT_W=$((WIDTH / 8))
 TARGET_LATENT_H=$((HEIGHT / 8))
 
-# 关键修复：确保低分辨率 latent 宽高比与目标严格匹配
-# Z-Image 模型 latent 对齐到 8 的倍数后，比例必须保持一致
-# 对于 2560x1440 (latent 320x180, ratio=1.778)：
-#   640x360 → latent 80x45 (ratio=1.778) ✓ 严格匹配 (推荐，人像清晰)
-#   1024x576 → latent 128x72 (ratio=1.778) ✓ 严格匹配
-
-# 对于 16:9 比例，使用已知正确的低分辨率对
-# 关键：低分辨率 latent 宽高比必须与目标严格一致
-# 2560x1440 (latent 320x180, ratio=1.778):
-#   1280x720 -> latent 160x90 (ratio=1.778) 推荐，放大倍数最小，边缘最稳定
-#   1024x576 -> latent 128x72 (ratio=1.778) 备选，放大倍数适中
+# quqiufeng 逻辑：目标分辨率直接作为基础，不再折半
+# 2560x1440 -> 基础 1280x720 (latent 160x90) -> HiRes 2560x1440
+# 1920x1080 -> 基础 1024x576 (latent 128x72) -> HiRes 1920x1080
+# 1280x720  -> 基础 640x360 (latent 80x45) -> HiRes 1280x720
 if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
     LOW_W=1280
     LOW_H=720
@@ -152,30 +142,11 @@ elif [ "$WIDTH" -eq 1280 ] && [ "$HEIGHT" -eq 720 ]; then
     LOW_W=640
     LOW_H=360
 else
-    # 通用计算：确保 latent 能被 8 整除且比例匹配
-    LOW_LATENT_W=$((TARGET_LATENT_W / 2))
-    LOW_LATENT_H=$((TARGET_LATENT_H / 2))
-    
-    # 对齐到 8 的倍数
-    LOW_LATENT_W=$(((LOW_LATENT_W + 7) / 8 * 8))
-    LOW_LATENT_H=$(((LOW_LATENT_H + 7) / 8 * 8))
-    
+    # 通用计算
+    LOW_LATENT_W=$(((TARGET_LATENT_W / 2 + 7) / 8 * 8))
+    LOW_LATENT_H=$(((TARGET_LATENT_H / 2 + 7) / 8 * 8))
     LOW_W=$((LOW_LATENT_W * 8))
     LOW_H=$((LOW_LATENT_H * 8))
-fi
-
-# 保持比例的最小限制：只在单边小于512时按比例放大
-if [ "$LOW_W" -lt 512 ] || [ "$LOW_H" -lt 512 ]; then
-    TARGET_RATIO=$(echo "scale=6; $WIDTH / $HEIGHT" | bc)
-    if [ "$LOW_W" -lt "$LOW_H" ]; then
-        LOW_W=512
-        LOW_H=$(echo "scale=0; $LOW_W / $TARGET_RATIO / 8 * 8" | bc)
-        if [ "$LOW_H" -lt 512 ]; then LOW_H=512; fi
-    else
-        LOW_H=512
-        LOW_W=$(echo "scale=0; $LOW_H * $TARGET_RATIO / 8 * 8" | bc)
-        if [ "$LOW_W" -lt 512 ]; then LOW_W=512; fi
-    fi
 fi
 
 echo ""
@@ -188,10 +159,8 @@ echo -e "Steps: $STEPS -> $HIRES_STEPS (HiRes)"
 echo -e "CFG Scale: ${CYAN}$CFG_SCALE${NC}"
 echo -e "HiRes Strength: $HIRES_STRENGTH"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
-if [ "$UPSCALE_FLAG" -eq 1 ]; then
-    UPSCALED_W=$((WIDTH * 2))
-    UPSCALED_H=$((HEIGHT * 2))
-    echo -e "Upscale: ${CYAN}2x ESRGAN -> ${UPSCALED_W}x${UPSCALED_H}${NC}"
+if [ "${FORCE_UPSCALE:-0}" -eq 1 ]; then
+    echo -e "Upscale: ${CYAN}2x ESRGAN -> ${TARGET_W}x${TARGET_H}${NC}"
 fi
 echo "----------------------------------------"
 echo -e "Prompt: ${YELLOW}$PROMPT${NC}"
@@ -225,12 +194,6 @@ SD_CMD=("$SD_CLI"
   -s "$SEED"
   -o "$OUTPUT_PATH"
 )
-
-if [ "$UPSCALE_FLAG" -eq 1 ]; then
-    SD_CMD+=(--upscale-model "$UPSCALE_MODEL")
-    SD_CMD+=(--upscale-repeats 1)
-    SD_CMD+=(--upscale-tile-size 1440)
-fi
 
 "${SD_CMD[@]}"
 
