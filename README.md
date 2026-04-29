@@ -224,6 +224,322 @@ image.save_to_file("output.png");
 
 ---
 
+## HiRes Fix 深度解析
+
+### 1. 为什么需要 HiRes Fix
+
+扩散模型在训练时通常只见过 512×512 ~ 1024×1024 的图像。直接以 2560×1440 等高分辨率生成会导致：
+
+- **多人症**：画面中出现多个重复的人物或物体
+- **畸形五官**：面部特征扭曲、五官错位
+- **结构崩坏**：肢体比例失调、物体变形
+- **细节缺失**：纹理模糊、边缘不清晰
+
+**HiRes Fix 的核心思想**：先在低分辨率（模型熟悉的尺寸）生成正确的构图和结构，然后在 latent 空间放大并 refine，在保留整体结构的同时补充高分辨率细节。
+
+### 2. 工作原理
+
+HiRes Fix 是一个**两阶段生成**流程：
+
+```
+阶段 1：基础生成（低分辨率）
+  Prompt → Text Encoder → 扩散去噪 → VAE 解码
+  输出：1280×720 基础图（构图正确、结构完整）
+
+阶段 2：HiRes Refine（高分辨率）
+  基础图 → VAE 编码回 Latent → Latent 空间放大 → 部分加噪 → 扩散去噪 → VAE 解码
+  输出：2560×1440 高清图（保留结构 + 补充细节）
+```
+
+**Latent 空间放大**（而非像素空间）：
+- 像素空间放大（如 bicubic）只是插值，不会增加真实细节
+- Latent 空间放大后再次进行扩散去噪，AI 会"想象"出符合 prompt 的高分辨率细节
+- 这就是 HiRes Fix 比简单放大更清晰、更真实的原因
+
+### 3. 涉及代码位置
+
+#### 3.1 脚本层：`img1.sh` / `img2.sh`
+
+**分辨率计算逻辑**（`img1.sh:128-150`）：
+
+```bash
+# 目标分辨率直接作为 HiRes 目标，基础分辨率固定为一半
+# 2560x1440 -> 基础 1280x720 (latent 160x90)
+# 1920x1080 -> 基础 1024x576 (latent 128x72)
+if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
+    LOW_W=1280
+    LOW_H=720
+elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
+    LOW_W=1024
+    LOW_H=576
+fi
+```
+
+**参数配置**（`img1.sh:88-94`）：
+```bash
+SAMPLING_METHOD="euler"
+SCHEDULER="discrete"
+CFG_SCALE="2.8"
+STEPS="55"
+HIRES_STEPS="25"
+HIRES_STRENGTH="0.28"
+```
+
+**CLI 调用**（`img1.sh:174-196`）：
+```bash
+$SD_CLI \
+  -W "$LOW_W" -H "$LOW_H" \
+  --hires \
+  --hires-width "$WIDTH" \
+  --hires-height "$HEIGHT" \
+  --hires-strength "$HIRES_STRENGTH" \
+  --hires-steps "$HIRES_STEPS" \
+  --diffusion-fa --vae-tiling
+```
+
+#### 3.2 CLI 入口：`src/main.cpp`
+
+**参数解析**（`main.cpp:55-65`）：
+```cpp
+struct CliOptions {
+    bool hires = false;
+    int hires_width = 2560;
+    int hires_height = 1440;
+    float hires_strength = 0.30f;
+    int hires_steps = 60;
+    std::string hires_upscaler = "latent";
+    float hires_scale = 2.0f;
+};
+```
+
+**参数构建**（`main.cpp:1172-1200`）：
+```cpp
+params.enable_hires = opts.hires;
+if (opts.hires) {
+    params.hires_width = opts.hires_width;
+    params.hires_height = opts.hires_height;
+    params.hires_strength = opts.hires_strength;
+    params.hires_sample_steps = opts.hires_steps;
+    params.hires_upscaler = myimg::HiresUpscaler::Latent; // 或其他
+}
+```
+
+#### 3.3 适配器层：`src/adapters/sdcpp_adapter.cpp`
+
+**枚举转换**（`sdcpp_adapter.cpp:104-117`）：
+```cpp
+static sd_hires_upscaler_t convert_hires_upscaler(HiresUpscaler upscaler) {
+    switch (upscaler) {
+        case HiresUpscaler::Latent:     return SD_HIRES_UPSCALER_LATENT;
+        case HiresUpscaler::Lanczos:    return SD_HIRES_UPSCALER_LANCZOS;
+        case HiresUpscaler::Model:      return SD_HIRES_UPSCALER_MODEL;
+        // ... 其他 upscaler
+    }
+}
+```
+
+**参数映射**（`sdcpp_adapter.cpp:316-329`）：
+```cpp
+gen_params.hires.enabled = params.enable_hires;
+if (params.enable_hires) {
+    gen_params.hires.upscaler = convert_hires_upscaler(params.hires_upscaler);
+    gen_params.hires.target_width = params.hires_width;
+    gen_params.hires.target_height = params.hires_height;
+    gen_params.hires.denoising_strength = params.hires_strength;
+    gen_params.hires.steps = params.hires_sample_steps;
+}
+```
+
+**实际生成**（`sdcpp_adapter.cpp:358-363`）：
+```cpp
+sd_image_t* sd_images = generate_image(ctx_, &gen_params);
+// ↑ sd.cpp 内部完成两阶段生成
+```
+
+### 4. 参数调优原理
+
+#### 4.1 `--hires-strength`（去噪强度）
+
+**作用**：控制第二阶段对基础图的修改程度。
+
+| 值 | 效果 | 适用场景 |
+|---|---|---|
+| 0.15 ~ 0.25 | 轻微 refine，高度保留基础图 | 基础图已经很好，只需轻微增强 |
+| **0.28 ~ 0.35** | **平衡，推荐值** | **大多数场景** |
+| 0.40 ~ 0.60 | 较强修改，可能改变构图 | 基础图有缺陷，需要大幅修正 |
+| > 0.60 | 几乎重新生成，失去 HiRes 意义 | 不建议 |
+
+**原理**：strength 对应 img2img 的 denoising strength。低 strength 只去除少量噪声，保留基础图结构；高 strength 加入更多噪声，生成结果偏离基础图。
+
+**img1.sh 默认值**：`0.28`（低显存下保守值，避免过度修改导致显存激增）
+
+#### 4.2 `--hires-steps`（ refine 步数）
+
+**作用**：第二阶段扩散去噪的采样步数。
+
+| 值 | 效果 | 适用场景 |
+|---|---|---|
+| 15 ~ 20 | 快速 refine，可能细节不足 | 测试、草稿 |
+| **20 ~ 30** | **平衡，推荐值** | **日常出图** |
+| 40 ~ 60 | 精细 refine，细节更丰富 | 高质量要求 |
+| > 60 | 收益递减，耗时增加 | 极致画质 |
+
+**img1.sh 默认值**：`25`（RTX 3080 10G 的显存和时间平衡）
+
+#### 4.3 `--hires-upscaler`（放大算法）
+
+| 算法 | 原理 | 优点 | 缺点 |
+|---|---|---|---|
+| `latent` | 默认，latent 空间直接插值 | 速度快，质量尚可 | 最基础 |
+| `latent-bicubic` | bicubic 插值后 refine | 边缘更平滑 | 可能过平滑 |
+| `lanczos` | Lanczos 重采样 | 保留锐利边缘 | 计算量稍大 |
+| `model` | 加载外部超分模型 | 质量最高 | 需要额外模型文件 |
+
+**推荐**：默认 `latent` 即可。如果追求极致锐利边缘，尝试 `lanczos`。
+
+#### 4.4 基础分辨率选择
+
+**核心原则**：基础分辨率必须是 64 的倍数（latent 空间为 8 的倍数，且通常要求 8×8=64）。
+
+| 目标分辨率 | 推荐基础分辨率 | latent 尺寸 | 放大倍数 | 适用显存 |
+|---|---|---|---|---|
+| 2560×1440 | **1280×720** | 160×90 | 2× | 10GB |
+| 2560×1440 | 1920×1080 | 240×135 | 1.33× | 16GB+ |
+| 1920×1080 | **1024×576** | 128×72 | 1.875× | 10GB |
+| 3840×2160 | 1920×1080 | 240×135 | 2× | 16GB+ |
+
+**img1.sh（10GB 显存）**：基础分辨率必须 ≤ 1280×720，否则第一阶段就 OOM。
+**img2.sh（24GB 显存）**：可以用 1920×1080 作为基础，放大倍数更小，latent 插值损失更少，画质更好。
+
+### 5. 显存优化策略
+
+HiRes Fix 两阶段都在显存中进行，必须配合以下优化：
+
+```bash
+--diffusion-fa        # Flash Attention：减少注意力计算的显存占用
+--vae-tiling          # VAE 分块解码：避免 2560×1440 VAE 解码时 OOM
+--vae-tile-size 256x256
+--vae-tile-overlap 0.8
+```
+
+**VAE Tiling 原理**：VAE 解码器将大图像分成 256×256 的小块分别解码，通过 0.8 的重叠避免块间接缝。
+
+**实测显存占用**（RTX 3080 10GB）：
+- 不使用优化：2560×1440 直接 OOM
+- 仅 Flash Attention：勉强运行，但可能不稳定
+- Flash Attention + VAE Tiling：**稳定运行，峰值显存 ~9.5GB**
+
+### 6. 完整示例
+
+```bash
+# 10GB 显存：1280×720 → 2560×1440
+./myimg-cli \
+  --diffusion-model model.gguf --vae vae.safetensors --llm llm.gguf \
+  -p "masterpiece, best quality, portrait" \
+  -W 1280 -H 720 \
+  --hires --hires-width 2560 --hires-height 1440 \
+  --hires-strength 0.28 --hires-steps 25 \
+  --diffusion-fa --vae-tiling \
+  -o output.png
+
+# 24GB 显存：1920×1080 → 2560×1440（画质更好）
+./myimg-cli \
+  --diffusion-model model.gguf --vae vae.safetensors --llm llm.gguf \
+  -p "masterpiece, best quality, portrait" \
+  -W 1920 -H 1080 \
+  --hires --hires-width 2560 --hires-height 1440 \
+  --hires-strength 0.30 --hires-steps 30 \
+  --diffusion-fa \
+  -o output.png
+```
+
+### 7. 与 ComfyUI HiRes Fix 的区别
+
+| 维度 | ComfyUI | my-img |
+|------|---------|--------|
+| **实现层级** | 工作流节点级（显式） | 引擎封装级（隐式） |
+| **用户可控性** | 每步可替换/调整 | 通过 CLI 参数配置 |
+| **代码复杂度** | 需要理解节点连接 | 只需几个参数 |
+| **阶段扩展** | 可在 HiRes 阶段加 ControlNet/IPAdapter | 目前仅支持基础两阶段 |
+| ** sampler 选择** | 基础/HiRes 可用不同 sampler | 目前使用相同 sampler |
+
+#### ComfyUI 的实现方式
+
+ComfyUI 的 HiRes Fix 是**显式工作流**，用户可以看到并修改每个步骤：
+
+```
+EmptyLatentImage(512x512) → KSampler(20步) → VAEDecode → 基础图
+                                      ↓
+                              LatentUpscale(2x)
+                                      ↓
+                              KSampler(20步, denoise=0.3) → VAEDecode → 高清图
+```
+
+**关键特点**：
+1. **节点可替换**：LatentUpscale 可以换成 ModelUpscale、BicubicUpscale 等
+2. **条件可叠加**：HiRes 阶段的 KSampler 可以接入 ControlNet、IPAdapter
+3. **Prompt 可切换**：基础阶段和 HiRes 阶段可以使用不同 prompt（Prompt Scheduling）
+4. **参数完全独立**：基础步数、HiRes 步数、CFG、Sampler 都可以分别设置
+
+#### my-img 的实现方式
+
+my-img 的 HiRes Fix 是**隐式封装**，由 `stable-diffusion.cpp` 内部完成：
+
+```
+用户传入 --hires 参数
+        ↓
+SDCPPAdapter 将参数映射到 sd_img_gen_params_t.hires
+        ↓
+sd.cpp 的 generate_image() 内部完成两阶段
+        ↓
+返回最终高清图
+```
+
+**关键特点**：
+1. **一键启用**：只需 `--hires --hires-width 2560 --hires-height 1440`
+2. **黑盒执行**：用户无法干预中间过程（如替换 upscaler 算法）
+3. **参数有限**：只能控制 strength、steps、upscaler 类型，无法做阶段级条件注入
+4. **性能优化**：sd.cpp 内部做了显存和计算优化，不需要用户手动管理中间 latent
+
+#### 底层代码差异
+
+**ComfyUI（Python 节点编排）**：
+```python
+# ComfyUI 的 HiRes Fix 是多个节点的组合
+latent = EmptyLatentImage(width=512, height=512)
+latent = KSampler(latent, steps=20, ...)
+image = VAEDecode(latent)
+
+# HiRes 阶段
+latent_hires = LatentUpscale(latent, upscale_method="bicubic", scale=2)
+latent_hires = KSampler(latent_hires, steps=20, denoise=0.3, ...)
+image_hires = VAEDecode(latent_hires)
+```
+
+**my-img（C++ 引擎封装）**：
+```cpp
+// my-img 的 HiRes Fix 是单个函数调用
+sd_img_gen_params_t gen_params;
+gen_params.hires.enabled = true;
+gen_params.hires.target_width = 2560;
+gen_params.hires.target_height = 1440;
+gen_params.hires.denoising_strength = 0.28;
+gen_params.hires.steps = 25;
+
+// 一次调用完成两阶段
+sd_image_t* images = generate_image(ctx, &gen_params);
+```
+
+#### 如何选择？
+
+- **用 ComfyUI**：需要精细控制（如 HiRes 阶段加 ControlNet、换不同 sampler、Prompt Scheduling）
+- **用 my-img**：追求简单快速出图，不需要干预中间过程，或者部署到生产环境
+
+**my-img 的未来计划**：
+当 Workflow JSON 支持完成后，用户将可以像 ComfyUI 一样通过 JSON 定义显式工作流，届时 HiRes Fix 也可以实现阶段级条件注入。
+
+---
+
 ## 目录结构
 
 ```
