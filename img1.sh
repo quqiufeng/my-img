@@ -84,14 +84,14 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || [ "$WIDTH" -le 0 ]; then echo -e "${RED}Error: width must be positive integer${NC}"; exit 1; fi
 if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Error: height must be positive integer${NC}"; exit 1; fi
 
-# HD optimized parameters (实测调优)
-# 人像推荐: euler + discrete + cfg 3.2 + strength 0.30 + 50 steps
-SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
+# HD optimized parameters - sharp and clear
+# Updated after testing: euler_a + higher cfg + more steps for better clarity
+SAMPLING_METHOD="${SAMPLING_METHOD:-euler_a}"
 SCHEDULER="${SCHEDULER:-discrete}"
-CFG_SCALE="${CFG_SCALE:-2.8}"
-STEPS="${STEPS:-55}"
-HIRES_STEPS="${HIRES_STEPS:-25}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.28}"
+CFG_SCALE="${CFG_SCALE:-2.5}"
+STEPS="${STEPS:-40}"
+HIRES_STEPS="${HIRES_STEPS:-30}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
     echo -e "${BLUE}[INFO] Ultra HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
@@ -99,13 +99,14 @@ else
     echo -e "${BLUE}[INFO] HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 fi
 
-# Add quality keywords
-QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, complete face, full head, professional portrait"
-if [[ "$PROMPT" != *"masterpiece"* ]]; then
+# Add quality keywords - sharp and detailed
+QUALITY_PREFIX="sharp focus, crisp details, realistic skin texture, natural lighting, professional portrait"
+if [[ "$PROMPT" != *"sharp focus"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders}"}
+# Negative prompt: avoid blur and low quality
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, out of focus, soft focus, hazy, unclear, low quality, worst quality, jpeg artifacts, noise, grain, bad anatomy, deformed, asymmetrical face, watermark, text, logo}"
 
 if [ -n "$OUTPUT_FILE" ]; then
     if [[ "$OUTPUT_FILE" == *"/"* ]]; then
@@ -127,6 +128,8 @@ OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT"
 
 TARGET_LATENT_W=$((WIDTH / 8))
 TARGET_LATENT_H=$((HEIGHT / 8))
+TARGET_W=$WIDTH
+TARGET_H=$HEIGHT
 
 # quqiufeng 逻辑：目标分辨率直接作为基础，不再折半
 # 2560x1440 -> 基础 1280x720 (latent 160x90) -> HiRes 2560x1440
@@ -194,6 +197,11 @@ SD_CMD=("$SD_CLI"
   -s "$SEED"
   -o "$OUTPUT_PATH"
 )
+
+# ESRGAN 放大
+if [ "${FORCE_UPSCALE:-0}" -eq 1 ]; then
+    SD_CMD+=(--upscale-model "$UPSCALE_MODEL")
+fi
 
 "${SD_CMD[@]}"
 
