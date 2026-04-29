@@ -101,6 +101,21 @@ static sd_type_t convert_wtype(const std::string& wtype) {
     return SD_TYPE_COUNT;  // 使用模型默认类型
 }
 
+static sd_hires_upscaler_t convert_hires_upscaler(HiresUpscaler upscaler) {
+    switch (upscaler) {
+        case HiresUpscaler::Latent:                    return SD_HIRES_UPSCALER_LATENT;
+        case HiresUpscaler::LatentNearest:             return SD_HIRES_UPSCALER_LATENT_NEAREST;
+        case HiresUpscaler::LatentNearestExact:        return SD_HIRES_UPSCALER_LATENT_NEAREST_EXACT;
+        case HiresUpscaler::LatentAntialiased:         return SD_HIRES_UPSCALER_LATENT_ANTIALIASED;
+        case HiresUpscaler::LatentBicubic:             return SD_HIRES_UPSCALER_LATENT_BICUBIC;
+        case HiresUpscaler::LatentBicubicAntialiased:  return SD_HIRES_UPSCALER_LATENT_BICUBIC_ANTIALIASED;
+        case HiresUpscaler::Lanczos:                   return SD_HIRES_UPSCALER_LANCZOS;
+        case HiresUpscaler::Nearest:                   return SD_HIRES_UPSCALER_NEAREST;
+        case HiresUpscaler::Model:                     return SD_HIRES_UPSCALER_MODEL;
+        default:                                       return SD_HIRES_UPSCALER_LATENT;
+    }
+}
+
 // ============================================================
 // SDCPPAdapter 实现
 // ============================================================
@@ -171,6 +186,7 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.offload_params_to_cpu = params.offload_params_to_cpu;
     sd_params.enable_mmap = params.enable_mmap;
     sd_params.flash_attn = params.flash_attn;
+    sd_params.diffusion_flash_attn = params.flash_attn;
     
     // 权重类型
     if (!params.wtype.empty() && params.wtype != "default") {
@@ -263,6 +279,9 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
         gen_params.sample_params.flow_shift = params.flow_shift;
     }
     
+    // Guidance (CFG scale)
+    gen_params.sample_params.guidance.txt_cfg = params.cfg_scale;
+    
     // img2img
     if (!params.init_image.empty() && params.strength < 1.0f) {
         gen_params.init_image = image_to_sd_image(params.init_image);
@@ -297,10 +316,16 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     // HiRes Fix
     gen_params.hires.enabled = params.enable_hires;
     if (params.enable_hires) {
+        gen_params.hires.upscaler = convert_hires_upscaler(params.hires_upscaler);
         gen_params.hires.target_width = params.hires_width;
         gen_params.hires.target_height = params.hires_height;
+        gen_params.hires.scale = params.hires_scale;
         gen_params.hires.denoising_strength = params.hires_strength;
         gen_params.hires.steps = params.hires_sample_steps;
+        gen_params.hires.upscale_tile_size = params.hires_tile_size;
+        if (!params.hires_model_path.empty() && params.hires_upscaler == HiresUpscaler::Model) {
+            gen_params.hires.model_path = params.hires_model_path.c_str();
+        }
     }
     
     // VAE Tiling
@@ -321,7 +346,13 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     
     if (params.enable_hires) {
         std::cout << "  HiRes: " << params.hires_width << "x" << params.hires_height 
-                  << " (strength: " << params.hires_strength << ")" << std::endl;
+                  << " (upscaler: " << sd_hires_upscaler_name(convert_hires_upscaler(params.hires_upscaler))
+                  << ", scale: " << params.hires_scale
+                  << ", strength: " << params.hires_strength
+                  << ", steps: " << params.hires_sample_steps << ")" << std::endl;
+        if (params.hires_upscaler == HiresUpscaler::Model && !params.hires_model_path.empty()) {
+            std::cout << "  HiRes Model: " << params.hires_model_path << std::endl;
+        }
     }
     
     auto start = std::chrono::high_resolution_clock::now();

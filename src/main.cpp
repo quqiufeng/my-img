@@ -58,6 +58,10 @@ struct CliOptions {
     int hires_height = 1440;
     float hires_strength = 0.30f;
     int hires_steps = 60;
+    std::string hires_upscaler = "latent";
+    float hires_scale = 2.0f;
+    std::string hires_model_path;
+    int hires_tile_size = 128;
     
     // ESRGAN
     int upscale_repeats = 1;
@@ -227,6 +231,12 @@ static void print_usage(const char* argv0) {
     std::cout << "  --hires-height INT        HiRes target height (default: 1440)\n";
     std::cout << "  --hires-strength FLOAT    HiRes denoising strength (default: 0.30)\n";
     std::cout << "  --hires-steps INT         HiRes sampling steps (default: 60)\n";
+    std::cout << "  --hires-upscaler NAME     HiRes upscaler: latent, latent-nearest, latent-nearest-exact,\n";
+    std::cout << "                            latent-antialiased, latent-bicubic, latent-bicubic-antialiased,\n";
+    std::cout << "                            lanczos, nearest, model (default: latent)\n";
+    std::cout << "  --hires-scale FLOAT       HiRes scale factor (default: 2.0)\n";
+    std::cout << "  --hires-model PATH        External upscaler model path (for model upscaler)\n";
+    std::cout << "  --hires-tile-size INT     HiRes upscale tile size (default: 128)\n";
     std::cout << "\nUpscale Options:\n";
     std::cout << "  --upscale-repeats INT     ESRGAN upscale repeats (default: 1)\n";
     std::cout << "  --upscale-tile-size INT   ESRGAN tile size (default: 1440)\n";
@@ -674,6 +684,18 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--hires-steps") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-steps\n"; return false; }
             opts.hires_steps = std::stoi(argv[i]);
+        } else if (arg == "--hires-upscaler") {
+            if (++i >= argc) { std::cerr << "Missing value for --hires-upscaler\n"; return false; }
+            opts.hires_upscaler = argv[i];
+        } else if (arg == "--hires-scale") {
+            if (++i >= argc) { std::cerr << "Missing value for --hires-scale\n"; return false; }
+            opts.hires_scale = std::stof(argv[i]);
+        } else if (arg == "--hires-model") {
+            if (++i >= argc) { std::cerr << "Missing value for --hires-model\n"; return false; }
+            opts.hires_model_path = argv[i];
+        } else if (arg == "--hires-tile-size") {
+            if (++i >= argc) { std::cerr << "Missing value for --hires-tile-size\n"; return false; }
+            opts.hires_tile_size = std::stoi(argv[i]);
         } else if (arg == "--upscale-repeats") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-repeats\n"; return false; }
             opts.upscale_repeats = std::stoi(argv[i]);
@@ -1154,6 +1176,27 @@ int main(int argc, char** argv) {
         params.hires_height = opts.hires_height;
         params.hires_strength = opts.hires_strength;
         params.hires_sample_steps = opts.hires_steps;
+        params.hires_scale = opts.hires_scale;
+        params.hires_tile_size = opts.hires_tile_size;
+        if (!opts.hires_model_path.empty()) {
+            params.hires_model_path = opts.hires_model_path;
+        }
+        // 解析 upscaler 名称
+        std::string upscaler_lower = opts.hires_upscaler;
+        for (auto& c : upscaler_lower) c = std::tolower(c);
+        if (upscaler_lower == "latent") params.hires_upscaler = myimg::HiresUpscaler::Latent;
+        else if (upscaler_lower == "latent-nearest") params.hires_upscaler = myimg::HiresUpscaler::LatentNearest;
+        else if (upscaler_lower == "latent-nearest-exact") params.hires_upscaler = myimg::HiresUpscaler::LatentNearestExact;
+        else if (upscaler_lower == "latent-antialiased") params.hires_upscaler = myimg::HiresUpscaler::LatentAntialiased;
+        else if (upscaler_lower == "latent-bicubic") params.hires_upscaler = myimg::HiresUpscaler::LatentBicubic;
+        else if (upscaler_lower == "latent-bicubic-antialiased") params.hires_upscaler = myimg::HiresUpscaler::LatentBicubicAntialiased;
+        else if (upscaler_lower == "lanczos") params.hires_upscaler = myimg::HiresUpscaler::Lanczos;
+        else if (upscaler_lower == "nearest") params.hires_upscaler = myimg::HiresUpscaler::Nearest;
+        else if (upscaler_lower == "model") params.hires_upscaler = myimg::HiresUpscaler::Model;
+        else {
+            std::cerr << "Warning: Unknown hires upscaler '" << opts.hires_upscaler << "', using 'latent'\n";
+            params.hires_upscaler = myimg::HiresUpscaler::Latent;
+        }
     }
     
     // Outpainting

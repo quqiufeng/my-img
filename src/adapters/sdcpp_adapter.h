@@ -80,6 +80,19 @@ struct LoRAConfig {
     bool is_high_noise = false;
 };
 
+// HiRes Upscaler 类型
+enum class HiresUpscaler {
+    Latent,                    // 默认，latent 空间放大
+    LatentNearest,
+    LatentNearestExact,
+    LatentAntialiased,
+    LatentBicubic,
+    LatentBicubicAntialiased,
+    Lanczos,
+    Nearest,
+    Model,                     // 使用外部模型
+};
+
 // 生成参数
 struct GenerationParams {
     // 模型路径
@@ -129,6 +142,10 @@ struct GenerationParams {
     int hires_height = 1024;
     float hires_strength = 0.5f;
     int hires_sample_steps = 20;
+    HiresUpscaler hires_upscaler = HiresUpscaler::Latent;
+    float hires_scale = 2.0f;
+    std::string hires_model_path;  // 外部放大模型路径（upscaler=Model 时使用）
+    int hires_tile_size = 128;     // 放大 tile 大小
     
     // VAE Tiling
     bool vae_tiling = false;
