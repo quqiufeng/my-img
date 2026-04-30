@@ -13,14 +13,17 @@
 #
 # 【4090D 优化策略】
 # 3080 10G 显存只能以 1280x720 为基础，再放大到 2560x1440（2x放大，画质损失大）
-# 4090D 24G 显存充足，可以以 1920x1080 为基础，再放大到 2560x1440（1.33x放大）
+# 4090D 24G 显存充足，基础分辨率可以大幅提升：
+#   - 2560x1440 目标 → 2048x1152 基础（1.25x放大，latent 损失极小）
+#   - 3840x2160 目标 → 2560x1440 基础（1.5x放大，4K 出图）
 #   - 基础分辨率更高 → 初始构图和五官更清晰
 #   - 放大倍数更小 → latent 插值损失更少
 #   - HiRes refine 只需微调纹理 → 不易破坏原有结构
 #   - 最终出图质量显著优于低显存方案
 #
 # 【参考提示词示例 (人像)】
-# ./img2.sh "half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up" "~/portrait_2560x1440.png" 2560 1440
+# 2K: ./img2.sh "half body portrait..." "~/portrait_2560x1440.png" 2560 1440
+# 4K: ./img2.sh "half body portrait..." "~/portrait_3840x2160.png" 3840 2160
 #
 # 【参数说明】
 #   $1 - 提示词 (Prompt)
@@ -86,14 +89,15 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || [ "$WIDTH" -le 0 ]; then echo -e "${RED}Error: width must be positive integer${NC}"; exit 1; fi
 if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Error: height must be positive integer${NC}"; exit 1; fi
 
-# HD optimized parameters (实测调优)
-# 人像推荐: euler + discrete + cfg 3.2 + strength 0.30 + 1280x720低分辨率 (边缘最稳定)
+# HD optimized parameters (4090D 24G 实测调优)
+# 基础分辨率大幅提升 → 放大倍数更小 → 画质更好
+# 人像推荐: euler + discrete + cfg 3.2 + strength 0.30
 # 风景推荐: dpm++2m + karras + cfg 1.5 + strength 0.35
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
-STEPS="${STEPS:-50}"
-HIRES_STEPS="${HIRES_STEPS:-60}"
+STEPS="${STEPS:-30}"
+HIRES_STEPS="${HIRES_STEPS:-50}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
@@ -132,7 +136,7 @@ TARGET_LATENT_W=$((WIDTH / 8))
 TARGET_LATENT_H=$((HEIGHT / 8))
 
 # =============================================================================
-# 低分辨率计算 - 4090D 优化版
+# 低分辨率计算 - 4090D 24G 优化版
 # =============================================================================
 # HiRes Fix 需要两阶段生成来提升画质。低分辨率的选择原则：
 # 1. latent 宽高比必须与目标严格一致（避免变形）
@@ -140,24 +144,38 @@ TARGET_LATENT_H=$((HEIGHT / 8))
 # 3. 4090D 24G 显存可以承受更高的基础分辨率
 #
 # 对于 2560x1440 (latent 320x180, ratio=1.778)：
-#   1920x1080 -> latent 240x135 (ratio=1.778) ✓ 推荐，4090D可用，放大1.33x
-#   1536x864  -> latent 192x108 (ratio=1.778) ✓ 备选，放大1.67x  
-#   1280x720  -> latent 160x90  (ratio=1.778) ✓ 低显存，放大2x
+#   2048x1152 -> latent 256x144 (ratio=1.778) ✓ 推荐，放大1.25x，画质最佳
+#   1920x1080 -> latent 240x135 (ratio=1.778) ✓ 备选，放大1.33x
+#   1536x864  -> latent 192x108 (ratio=1.778) ✓ 备选，放大1.67x
+#
+# 对于 3840x2160 (latent 480x270, ratio=1.778)：
+#   2560x1440 -> latent 320x180 (ratio=1.778) ✓ 推荐，放大1.5x，4K出图
+#   2304x1296 -> latent 288x162 (ratio=1.778) ✓ 备选，放大1.67x
+#
+# 对于 1920x1080 (latent 240x135, ratio=1.778)：
+#   1536x864  -> latent 192x108 (ratio=1.778) ✓ 推荐，放大1.25x
 # =============================================================================
 
-if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
-    LOW_W=1920
-    LOW_H=1080
+if [ "$WIDTH" -eq 3840 ] && [ "$HEIGHT" -eq 2160 ]; then
+    # 4K: 2560x1440 基础 → 1.5x 放大
+    LOW_W=2560
+    LOW_H=1440
+elif [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
+    # 2K: 2048x1152 基础 → 1.25x 放大（画质最佳）
+    LOW_W=2048
+    LOW_H=1152
 elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
-    LOW_W=1280
-    LOW_H=720
+    # 1080p: 1536x864 基础 → 1.25x 放大
+    LOW_W=1536
+    LOW_H=864
 elif [ "$WIDTH" -eq 1280 ] && [ "$HEIGHT" -eq 720 ]; then
-    LOW_W=640
-    LOW_H=360
+    # 720p: 1024x576 基础 → 1.25x 放大
+    LOW_W=1024
+    LOW_H=576
 else
-    # 通用计算：使用目标分辨率的 75% 作为基础（4090D优化）
-    LOW_LATENT_W=$((TARGET_LATENT_W * 3 / 4))
-    LOW_LATENT_H=$((TARGET_LATENT_H * 3 / 4))
+    # 通用计算：使用目标分辨率的 80% 作为基础（4090D优化，更小放大倍数）
+    LOW_LATENT_W=$((TARGET_LATENT_W * 4 / 5))
+    LOW_LATENT_H=$((TARGET_LATENT_H * 4 / 5))
     
     # 对齐到 8 的倍数
     LOW_LATENT_W=$(((LOW_LATENT_W + 7) / 8 * 8))
