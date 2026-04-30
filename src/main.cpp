@@ -46,7 +46,7 @@ struct CliOptions {
     int batch_count = 1;
     
     // VRAM 优化
-    bool diffusion_fa = false;
+    bool diffusion_fa = true;
     bool vae_tiling = false;
     int vae_tile_size_w = 256;
     int vae_tile_size_h = 256;
