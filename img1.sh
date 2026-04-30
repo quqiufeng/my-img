@@ -28,6 +28,9 @@
 # =============================================================================
 set -euo pipefail
 
+# 设置 ONNX Runtime 库路径
+export LD_LIBRARY_PATH=/home/dministrator/onnxruntime-linux-x64-1.20.1/lib:$LD_LIBRARY_PATH
+
 RED="\033[0;31m"
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
