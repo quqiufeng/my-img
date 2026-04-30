@@ -421,12 +421,13 @@ sd_image_t* sd_images = generate_image(ctx_, &gen_params);
 | 目标分辨率 | 推荐基础分辨率 | latent 尺寸 | 放大倍数 | 适用显存 |
 |---|---|---|---|---|
 | 2560×1440 | **1280×720** | 160×90 | 2× | 10GB |
-| 2560×1440 | 1920×1080 | 240×135 | 1.33× | 16GB+ |
+| 2560×1440 | **2048×1152** | 256×144 | 1.25× | 24GB |
 | 1920×1080 | **1024×576** | 128×72 | 1.875× | 10GB |
-| 3840×2160 | 1920×1080 | 240×135 | 2× | 16GB+ |
+| 1920×1080 | **1536×864** | 192×108 | 1.25× | 24GB |
+| 3840×2160 | **2560×1440** | 320×180 | 1.5× | 24GB |
 
 **img1.sh（10GB 显存）**：基础分辨率必须 ≤ 1280×720，否则第一阶段就 OOM。
-**img2.sh（24GB 显存）**：可以用 1920×1080 作为基础，放大倍数更小，latent 插值损失更少，画质更好。
+**img2.sh（24GB 显存）**：可以用 2048×1152 作为基础，放大倍数仅 1.25x，latent 插值损失极少，画质显著优于低显存方案。同时支持 4K（3840×2160）出图。
 
 ### 5. 显存优化策略
 
@@ -461,17 +462,29 @@ HiRes Fix 两阶段都在显存中进行，必须配合以下优化：
   --diffusion-fa --vae-tiling \
   -o output.png
 
-# 24GB 显存：1920×1080 → 2560×1440（画质更好）
+# 24GB 显存：2048×1152 → 2560×1440（1.25x放大，画质最佳）
 ./myimg-cli \
   --diffusion-model model.gguf --vae vae.safetensors --llm llm.gguf \
   -p "masterpiece, best quality, portrait" \
-  -W 1920 -H 1080 \
+  -W 2048 -H 1152 \
   --hires --hires-width 2560 --hires-height 1440 \
-  --hires-strength 0.30 --hires-steps 45 \
+  --hires-strength 0.30 --hires-steps 50 \
   --sampling-method euler --scheduler discrete \
-  --cfg-scale 3.2 --steps 25 \
+  --cfg-scale 3.2 --steps 30 \
   --diffusion-fa \
   -o output.png
+
+# 24GB 显存：2560×1440 → 3840×2160（4K出图）
+./myimg-cli \
+  --diffusion-model model.gguf --vae vae.safetensors --llm llm.gguf \
+  -p "masterpiece, best quality, portrait" \
+  -W 2560 -H 1440 \
+  --hires --hires-width 3840 --hires-height 2160 \
+  --hires-strength 0.30 --hires-steps 50 \
+  --sampling-method euler --scheduler discrete \
+  --cfg-scale 3.2 --steps 30 \
+  --diffusion-fa \
+  -o output_4k.png
 ```
 
 ### 7. 与 ComfyUI HiRes Fix 的区别
@@ -706,7 +719,7 @@ BUILD_TYPE=Debug ./build.sh
 ```
 
 **特点**：
-- 更高基础分辨率（1920×1080）→ 更小的放大倍数，画质更好
+- 更高基础分辨率（2048×1152 / 2560×1440）→ 更小的放大倍数，画质更好
 - 与 img1.sh 相同的自动化质量优化
 - 充分利用 24GB 显存，减少 latent 插值损失
 
@@ -715,7 +728,7 @@ BUILD_TYPE=Debug ./build.sh
 | 脚本 | 目标显存 | 基础分辨率 | 放大倍数 | 适用场景 |
 |------|----------|------------|----------|----------|
 | `img1.sh` | 10GB | 1280×720 | 2× | RTX 3080 等低显存 |
-| `img2.sh` | 24GB | 1920×1080 | 1.33× | RTX 4090 等高显存 |
+| `img2.sh` | 24GB | 2048×1152 | 1.25× | RTX 4090 等高显存 |
 
 ---
 
