@@ -162,6 +162,13 @@ struct GenerationParams {
     bool enable_mmap = true;
     bool flash_attn = false;
     
+    // FreeU 参数
+    bool freeu_enabled = false;
+    float freeu_b1 = 1.3f;
+    float freeu_b2 = 1.4f;
+    float freeu_s1 = 0.9f;
+    float freeu_s2 = 0.2f;
+    
     // 类型设置
     std::string wtype = "default";  // 权重类型: "f32", "f16", "q4_0", "q5_k", etc.
 };

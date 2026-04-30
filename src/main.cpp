@@ -62,6 +62,13 @@ struct CliOptions {
     float hires_scale = 2.0f;
     std::string hires_model_path;
     int hires_tile_size = 128;
+    
+    // FreeU
+    bool freeu = false;
+    float freeu_b1 = 1.3f;
+    float freeu_b2 = 1.4f;
+    float freeu_s1 = 0.9f;
+    float freeu_s2 = 0.2f;
 
     
     // ESRGAN
@@ -238,6 +245,12 @@ static void print_usage(const char* argv0) {
     std::cout << "  --hires-scale FLOAT       HiRes scale factor (default: 2.0)\n";
     std::cout << "  --hires-model PATH        External upscaler model path (for model upscaler)\n";
     std::cout << "  --hires-tile-size INT     HiRes upscale tile size (default: 128)\n";
+    std::cout << "\nFreeU Options:\n";
+    std::cout << "  --freeu                   Enable FreeU (boost details and quality)\n";
+    std::cout << "  --freeu-b1 FLOAT          FreeU backbone scale 1 (default: 1.3)\n";
+    std::cout << "  --freeu-b2 FLOAT          FreeU backbone scale 2 (default: 1.4)\n";
+    std::cout << "  --freeu-s1 FLOAT          FreeU skip scale 1 (default: 0.9)\n";
+    std::cout << "  --freeu-s2 FLOAT          FreeU skip scale 2 (default: 0.2)\n";
     std::cout << "\nUpscale Options:\n";
     std::cout << "  --upscale-repeats INT     ESRGAN upscale repeats (default: 1)\n";
     std::cout << "  --upscale-tile-size INT   ESRGAN tile size (default: 1440)\n";
@@ -697,6 +710,20 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--hires-tile-size") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-tile-size\n"; return false; }
             opts.hires_tile_size = std::stoi(argv[i]);
+        } else if (arg == "--freeu") {
+            opts.freeu = true;
+        } else if (arg == "--freeu-b1") {
+            if (++i >= argc) { std::cerr << "Missing value for --freeu-b1\n"; return false; }
+            opts.freeu_b1 = std::stof(argv[i]);
+        } else if (arg == "--freeu-b2") {
+            if (++i >= argc) { std::cerr << "Missing value for --freeu-b2\n"; return false; }
+            opts.freeu_b2 = std::stof(argv[i]);
+        } else if (arg == "--freeu-s1") {
+            if (++i >= argc) { std::cerr << "Missing value for --freeu-s1\n"; return false; }
+            opts.freeu_s1 = std::stof(argv[i]);
+        } else if (arg == "--freeu-s2") {
+            if (++i >= argc) { std::cerr << "Missing value for --freeu-s2\n"; return false; }
+            opts.freeu_s2 = std::stof(argv[i]);
         } else if (arg == "--upscale-repeats") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-repeats\n"; return false; }
             opts.upscale_repeats = std::stoi(argv[i]);
@@ -1153,6 +1180,13 @@ int main(int argc, char** argv) {
     params.vae_tile_size_y = opts.vae_tile_size_h;
     params.vae_tile_overlap = opts.vae_tile_overlap;
     params.embedding_dir = opts.embedding_dir;
+    
+    // FreeU
+    params.freeu_enabled = opts.freeu;
+    params.freeu_b1 = opts.freeu_b1;
+    params.freeu_b2 = opts.freeu_b2;
+    params.freeu_s1 = opts.freeu_s1;
+    params.freeu_s2 = opts.freeu_s2;
     
     // ControlNet
     params.control_net_path = opts.control_net;

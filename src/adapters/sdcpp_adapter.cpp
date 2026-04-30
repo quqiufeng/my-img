@@ -329,6 +329,17 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
         }
     }
     
+    // FreeU
+    gen_params.freeu.enabled = params.freeu_enabled;
+    if (params.freeu_enabled) {
+        gen_params.freeu.b1 = params.freeu_b1;
+        gen_params.freeu.b2 = params.freeu_b2;
+        gen_params.freeu.s1 = params.freeu_s1;
+        gen_params.freeu.s2 = params.freeu_s2;
+        std::cout << "  FreeU: enabled (b1=" << params.freeu_b1 << ", b2=" << params.freeu_b2 
+                  << ", s1=" << params.freeu_s1 << ", s2=" << params.freeu_s2 << ")" << std::endl;
+    }
+    
     // VAE Tiling
     gen_params.vae_tiling_params.enabled = params.vae_tiling;
     if (params.vae_tiling) {

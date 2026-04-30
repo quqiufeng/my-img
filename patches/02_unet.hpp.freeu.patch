@@ -1,0 +1,46 @@
+--- /home/dministrator/my-img/patches/sd_cpp_backup/src/unet.hpp	2026-04-30 15:51:55.762743322 +0800
++++ /opt/stable-diffusion.cpp/src/unet.hpp	2026-04-30 16:12:55.419587337 +0800
+@@ -183,6 +183,19 @@
+ 
+ public:
+     int model_channels  = 320;
++    bool freeu_enabled = false;
++    float freeu_b1 = 1.3f;
++    float freeu_b2 = 1.4f;
++    float freeu_s1 = 0.9f;
++    float freeu_s2 = 0.2f;
++
++    void set_freeu(bool enabled, float b1, float b2, float s1, float s2) {
++        freeu_enabled = enabled;
++        freeu_b1 = b1;
++        freeu_b2 = b2;
++        freeu_s1 = s1;
++        freeu_s2 = s2;
++    }
+     int adm_in_channels = 2816;  // only for VERSION_SDXL/SVD
+ 
+     UnetModelBlock(SDVersion version = VERSION_SD1, const String2TensorStorage& tensor_storage_map = {})
+@@ -550,6 +563,13 @@
+                     control_offset--;
+                 }
+ 
++                if (freeu_enabled) {
++                    // FreeU: boost backbone, reduce skip connection
++                    float b = (output_block_idx < 3) ? freeu_b1 : freeu_b2;
++                    float s = (output_block_idx < 3) ? freeu_s1 : freeu_s2;
++                    h = ggml_scale(ctx->ggml_ctx, h, b);
++                    h_skip = ggml_scale(ctx->ggml_ctx, h_skip, s);
++                }
+                 h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
+ 
+                 std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
+@@ -612,6 +632,9 @@
+     void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string prefix) {
+         unet.get_param_tensors(tensors, prefix);
+     }
++    void set_freeu(bool enabled, float b1, float b2, float s1, float s2) {
++        unet.set_freeu(enabled, b1, b2, s1, s2);
++    }
+ 
+     ggml_cgraph* build_graph(const sd::Tensor<float>& x_tensor,
+                              const sd::Tensor<float>& timesteps_tensor,
