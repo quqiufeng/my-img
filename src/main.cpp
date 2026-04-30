@@ -94,7 +94,10 @@ struct CliOptions {
     // 输出
     std::string output = "output.png";
     bool embed_metadata = false;
-    
+
+    // 配置文件
+    std::string config_file;
+
     // Embeddings
     std::string embedding_dir;
     
@@ -263,6 +266,8 @@ static void print_usage(const char* argv0) {
     std::cout << "  --upscale-tile-size INT   ESRGAN tile size (default: 1440)\n";
     std::cout << "\nEmbedding Options:\n";
     std::cout << "  --embd-dir PATH           Embeddings directory (Textual Inversion)\n";
+    std::cout << "\nConfig Options:\n";
+    std::cout << "  --config PATH             Load generation parameters from JSON config file\n";
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
     std::cout << "  --embed-metadata          Embed generation parameters in PNG metadata\n";
@@ -598,6 +603,92 @@ static bool load_preset(CliOptions& opts, const std::string& preset_path) {
     return true;
 }
 
+static bool load_config(const std::string& config_path, CliOptions& opts) {
+    std::ifstream file(config_path);
+    if (!file) {
+        std::cerr << "Error: Cannot open config file: " << config_path << "\n";
+        return false;
+    }
+
+    nlohmann::json j;
+    try {
+        file >> j;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to parse config file: " << e.what() << "\n";
+        return false;
+    }
+
+    auto get_string = [&](const char* key, std::string& target) {
+        if (j.contains(key) && j[key].is_string()) target = j[key].get<std::string>();
+    };
+    auto get_int = [&](const char* key, int& target) {
+        if (j.contains(key) && j[key].is_number_integer()) target = j[key].get<int>();
+    };
+    auto get_float = [&](const char* key, float& target) {
+        if (j.contains(key) && j[key].is_number()) target = j[key].get<float>();
+    };
+    auto get_bool = [&](const char* key, bool& target) {
+        if (j.contains(key) && j[key].is_boolean()) target = j[key].get<bool>();
+    };
+
+    get_string("model", opts.model);
+    get_string("diffusion_model", opts.diffusion_model);
+    get_string("vae", opts.vae);
+    get_string("llm", opts.llm);
+    get_string("upscale_model", opts.upscale_model);
+    get_string("prompt", opts.prompt);
+    get_string("negative_prompt", opts.negative_prompt);
+    get_int("width", opts.width);
+    get_int("height", opts.height);
+    get_int("steps", opts.steps);
+    get_float("cfg_scale", opts.cfg_scale);
+    get_string("sampling_method", opts.sampling_method);
+    get_string("scheduler", opts.scheduler);
+    if (j.contains("seed")) {
+        if (j["seed"].is_number_integer()) opts.seed = j["seed"].get<int64_t>();
+    }
+    get_int("batch_count", opts.batch_count);
+    get_bool("diffusion_fa", opts.diffusion_fa);
+    get_bool("vae_tiling", opts.vae_tiling);
+    get_int("vae_tile_size_w", opts.vae_tile_size_w);
+    get_int("vae_tile_size_h", opts.vae_tile_size_h);
+    get_float("vae_tile_overlap", opts.vae_tile_overlap);
+    get_bool("hires", opts.hires);
+    get_int("hires_width", opts.hires_width);
+    get_int("hires_height", opts.hires_height);
+    get_float("hires_strength", opts.hires_strength);
+    get_int("hires_steps", opts.hires_steps);
+    get_string("hires_upscaler", opts.hires_upscaler);
+    get_float("hires_scale", opts.hires_scale);
+    get_string("hires_model_path", opts.hires_model_path);
+    get_int("hires_tile_size", opts.hires_tile_size);
+    get_bool("freeu", opts.freeu);
+    get_float("freeu_b1", opts.freeu_b1);
+    get_float("freeu_b2", opts.freeu_b2);
+    get_float("freeu_s1", opts.freeu_s1);
+    get_float("freeu_s2", opts.freeu_s2);
+    get_bool("sag", opts.sag);
+    get_float("sag_scale", opts.sag_scale);
+    get_bool("embed_metadata", opts.embed_metadata);
+    get_string("output", opts.output);
+    get_string("init_image", opts.init_image);
+    get_float("strength", opts.strength);
+    get_string("mask_image", opts.mask_image);
+    get_string("control_net", opts.control_net);
+    get_string("control_image", opts.control_image);
+    get_float("control_strength", opts.control_strength);
+    get_string("embedding_dir", opts.embedding_dir);
+
+    if (j.contains("loras") && j["loras"].is_array()) {
+        for (const auto& lora : j["loras"]) {
+            if (lora.is_string()) opts.loras.push_back(lora.get<std::string>());
+        }
+    }
+
+    std::cout << "Config loaded from: " << config_path << "\n";
+    return true;
+}
+
 static bool parse_args(int argc, char** argv, CliOptions& opts) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -627,6 +718,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--embd-dir") {
             if (++i >= argc) { std::cerr << "Missing value for --embd-dir\n"; return false; }
             opts.embedding_dir = argv[i];
+        } else if (arg == "--config") {
+            if (++i >= argc) { std::cerr << "Missing value for --config\n"; return false; }
+            opts.config_file = argv[i];
         } else if (arg == "-p" || arg == "--prompt") {
             if (++i >= argc) { std::cerr << "Missing value for -p/--prompt\n"; return false; }
             opts.prompt = argv[i];
