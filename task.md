@@ -496,12 +496,13 @@
 - **优先级**: P3
 - **难度**: 高
 
-#### Task 15.2: 元数据嵌入
-- [ ] 将生成参数写入 PNG metadata（PNG Info）
-- [ ] 读取 PNG metadata 复现生成
-- [ ] CLI 参数：`--embed-metadata`
+#### Task 15.2: 元数据嵌入 ✅
+- [x] 将生成参数写入 PNG metadata（PNG Info）
+- [x] 读取 PNG metadata 复现生成（已有 --read-metadata）
+- [x] CLI 参数：`--embed-metadata`
 - **优先级**: P2
 - **难度**: 低
+- **状态**: ✅ 已完成（2026-04-30）
 
 #### Task 15.3: 预览图
 - [ ] 生成过程中实时预览
@@ -693,7 +694,7 @@
 | 优化 | VAE Tiling | ✅ | - |
 | 优化 | Flash Attention | ✅ | - |
 | 体验 | CLI 参数 | ✅ | - |
-| 体验 | 元数据 | ⏳ | P2 |
+| 体验 | 元数据 | ✅ | P2 |
 | 体验 | 预览图 | ⏳ | P2 |
 | 体验 | 配置文件 | ⏳ | P2 |
 | 体验 | Workflow JSON | ⏳ | P2 |

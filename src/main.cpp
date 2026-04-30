@@ -93,6 +93,7 @@ struct CliOptions {
     
     // 输出
     std::string output = "output.png";
+    bool embed_metadata = false;
     
     // Embeddings
     std::string embedding_dir;
@@ -264,6 +265,7 @@ static void print_usage(const char* argv0) {
     std::cout << "  --embd-dir PATH           Embeddings directory (Textual Inversion)\n";
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
+    std::cout << "  --embed-metadata          Embed generation parameters in PNG metadata\n";
     std::cout << "  --quality INT             JPEG quality 1-100 (default: 95)\n";
     std::cout << "\nImage Transformation:\n";
     std::cout << "  --resize WxH              Resize image (e.g. 1920x1080)\n";
@@ -747,6 +749,8 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "-o" || arg == "--output") {
             if (++i >= argc) { std::cerr << "Missing value for -o/--output\n"; return false; }
             opts.output = argv[i];
+        } else if (arg == "--embed-metadata") {
+            opts.embed_metadata = true;
         } else if (arg == "--quality") {
             if (++i >= argc) { std::cerr << "Missing value for --quality\n"; return false; }
             opts.jpeg_quality = std::stoi(argv[i]);
@@ -2015,6 +2019,42 @@ int main(int argc, char** argv) {
         if (!image.save_to_file(output_file)) {
             std::cerr << "Failed to save image " << (i + 1) << "\n";
             continue;
+        }
+        
+        // 嵌入 PNG 元数据
+        if (opts.embed_metadata) {
+            std::map<std::string, std::string> metadata;
+            metadata["prompt"] = opts.prompt;
+            if (!opts.negative_prompt.empty()) {
+                metadata["negative_prompt"] = opts.negative_prompt;
+            }
+            metadata["seed"] = std::to_string(opts.seed + i);
+            metadata["cfg_scale"] = std::to_string(opts.cfg_scale);
+            metadata["steps"] = std::to_string(opts.steps);
+            metadata["width"] = std::to_string(opts.width);
+            metadata["height"] = std::to_string(opts.height);
+            metadata["sampler"] = opts.sampling_method;
+            metadata["scheduler"] = opts.scheduler;
+            if (!opts.diffusion_model.empty()) {
+                metadata["model"] = opts.diffusion_model;
+            }
+            if (opts.freeu) {
+                metadata["freeu"] = "true";
+            }
+            if (opts.sag) {
+                metadata["sag"] = "true";
+            }
+            if (opts.hires) {
+                metadata["hires"] = "true";
+                metadata["hires_width"] = std::to_string(opts.hires_width);
+                metadata["hires_height"] = std::to_string(opts.hires_height);
+                metadata["hires_strength"] = std::to_string(opts.hires_strength);
+            }
+            if (myimg::write_png_metadata(output_file, metadata)) {
+                std::cout << "  Metadata embedded\n";
+            } else {
+                std::cerr << "  Warning: Failed to embed metadata\n";
+            }
         }
         
         if (opts.batch_count > 1) {

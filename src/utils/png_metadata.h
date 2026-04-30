@@ -14,4 +14,8 @@ std::map<std::string, std::string> read_png_metadata(const std::string& path);
 // Check if file is a PNG
 bool is_png_file(const std::string& path);
 
+// Write PNG text chunks (tEXt) to embed metadata
+// Inserts tEXt chunks before IEND
+bool write_png_metadata(const std::string& path, const std::map<std::string, std::string>& metadata);
+
 } // namespace myimg

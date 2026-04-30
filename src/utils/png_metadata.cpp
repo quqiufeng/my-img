@@ -20,6 +20,59 @@ static uint32_t read_u32_be(const uint8_t* data) {
            static_cast<uint32_t>(data[3]);
 }
 
+// Write uint32 as big-endian
+static void write_u32_be(uint8_t* data, uint32_t value) {
+    data[0] = static_cast<uint8_t>((value >> 24) & 0xFF);
+    data[1] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    data[2] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    data[3] = static_cast<uint8_t>(value & 0xFF);
+}
+
+// PNG CRC32 table
+static uint32_t crc32_table[256];
+static bool crc32_table_initialized = false;
+
+static void init_crc32_table() {
+    if (crc32_table_initialized) return;
+    for (int i = 0; i < 256; ++i) {
+        uint32_t c = static_cast<uint32_t>(i);
+        for (int j = 0; j < 8; ++j) {
+            c = (c & 1) ? (0xEDB88320 ^ (c >> 1)) : (c >> 1);
+        }
+        crc32_table[i] = c;
+    }
+    crc32_table_initialized = true;
+}
+
+static uint32_t png_crc32(const uint8_t* data, size_t len) {
+    init_crc32_table();
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < len; ++i) {
+        crc = crc32_table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+    }
+    return crc ^ 0xFFFFFFFF;
+}
+
+// Build a tEXt chunk: key\0value
+static std::vector<uint8_t> build_text_chunk(const std::string& key, const std::string& value) {
+    std::vector<uint8_t> data;
+    data.insert(data.end(), key.begin(), key.end());
+    data.push_back(0); // null separator
+    data.insert(data.end(), value.begin(), value.end());
+    
+    std::vector<uint8_t> chunk;
+    chunk.resize(4 + 4 + data.size() + 4);
+    
+    write_u32_be(chunk.data(), static_cast<uint32_t>(data.size()));
+    std::memcpy(chunk.data() + 4, "tEXt", 4);
+    std::memcpy(chunk.data() + 8, data.data(), data.size());
+    
+    uint32_t crc = png_crc32(chunk.data() + 4, data.size() + 4);
+    write_u32_be(chunk.data() + 8 + data.size(), crc);
+    
+    return chunk;
+}
+
 bool is_png_file(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) return false;
@@ -139,6 +192,76 @@ std::map<std::string, std::string> read_png_metadata(const std::string& path) {
     }
     
     return metadata;
+}
+
+bool write_png_metadata(const std::string& path, const std::map<std::string, std::string>& metadata) {
+    // Read entire file
+    std::ifstream infile(path, std::ios::binary | std::ios::ate);
+    if (!infile) {
+        std::cerr << "[PNG Metadata] Failed to open file for writing: " << path << std::endl;
+        return false;
+    }
+    
+    std::streamsize size = infile.tellg();
+    infile.seekg(0, std::ios::beg);
+    std::vector<uint8_t> file_data(size);
+    if (!infile.read(reinterpret_cast<char*>(file_data.data()), size)) {
+        std::cerr << "[PNG Metadata] Failed to read file: " << path << std::endl;
+        return false;
+    }
+    infile.close();
+    
+    // Check PNG signature
+    if (size < 8 || std::memcmp(file_data.data(), PNG_SIGNATURE, 8) != 0) {
+        std::cerr << "[PNG Metadata] Not a PNG file: " << path << std::endl;
+        return false;
+    }
+    
+    // Find IEND chunk position
+    size_t pos = 8; // Skip signature
+    size_t iend_pos = 0;
+    while (pos + 8 <= file_data.size()) {
+        uint32_t length = read_u32_be(file_data.data() + pos);
+        std::string type(reinterpret_cast<char*>(file_data.data() + pos + 4), 4);
+        if (type == "IEND") {
+            iend_pos = pos;
+            break;
+        }
+        pos += 4 + 4 + length + 4; // length + type + data + crc
+    }
+    
+    if (iend_pos == 0) {
+        std::cerr << "[PNG Metadata] IEND chunk not found: " << path << std::endl;
+        return false;
+    }
+    
+    // Build tEXt chunks
+    std::vector<uint8_t> text_chunks;
+    for (const auto& [key, value] : metadata) {
+        if (key.empty() || key.size() > 79) continue; // PNG tEXt key limit
+        auto chunk = build_text_chunk(key, value);
+        text_chunks.insert(text_chunks.end(), chunk.begin(), chunk.end());
+    }
+    
+    if (text_chunks.empty()) {
+        return true; // Nothing to embed
+    }
+    
+    // Insert text chunks before IEND
+    std::vector<uint8_t> new_file;
+    new_file.reserve(file_data.size() + text_chunks.size());
+    new_file.insert(new_file.end(), file_data.begin(), file_data.begin() + iend_pos);
+    new_file.insert(new_file.end(), text_chunks.begin(), text_chunks.end());
+    new_file.insert(new_file.end(), file_data.begin() + iend_pos, file_data.end());
+    
+    // Write back
+    std::ofstream outfile(path, std::ios::binary | std::ios::trunc);
+    if (!outfile) {
+        std::cerr << "[PNG Metadata] Failed to open file for writing: " << path << std::endl;
+        return false;
+    }
+    outfile.write(reinterpret_cast<const char*>(new_file.data()), new_file.size());
+    return outfile.good();
 }
 
 } // namespace myimg
