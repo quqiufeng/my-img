@@ -179,6 +179,9 @@ set(MYIMG_SOURCES
     src/utils/png_metadata.cpp
     src/utils/lut_loader.cpp
     src/utils/dehaze.cpp
+    src/utils/log.cpp
+    src/utils/image_qa.cpp
+    src/utils/watermark.cpp
     src/utils/stb_impl.c
 )
 
@@ -553,6 +556,72 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_utils.cpp")
         ggml
     )
     set_target_properties(test_image_utils PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_qa.cpp")
+    add_executable(test_image_qa
+        tests/test_image_qa.cpp
+        src/utils/image_qa.cpp
+    )
+    target_include_directories(test_image_qa PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${TORCH_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_image_qa PRIVATE
+        ${TORCH_LIBRARIES}
+        ${OpenCV_LIBS}
+    )
+    set_target_properties(test_image_qa PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_watermark.cpp")
+    add_executable(test_watermark
+        tests/test_watermark.cpp
+        src/utils/watermark.cpp
+        src/utils/image_utils.cpp
+        src/utils/stb_impl.c
+    )
+    target_include_directories(test_watermark PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${STB_IMAGE_INCLUDE}
+        ${TORCH_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
+        /usr/include/freetype2
+    )
+    target_link_libraries(test_watermark PRIVATE
+        ${TORCH_LIBRARIES}
+        ${OpenCV_LIBS}
+        freetype
+        ggml
+    )
+    set_target_properties(test_watermark PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_log.cpp")
+    add_executable(test_log
+        tests/test_log.cpp
+        src/utils/log.cpp
+    )
+    target_include_directories(test_log PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+    )
+    target_link_libraries(test_log PRIVATE
+        ${CMAKE_THREAD_LIBS_INIT}
+    )
+    set_target_properties(test_log PROPERTIES
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
