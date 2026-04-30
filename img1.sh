@@ -3,27 +3,23 @@
 # 图像生成脚本 - RTX 3080 10G 专用版 (低显存优化)
 # =============================================================================
 #
-# 【出图原理 / Why HiRes Fix】
-# 直接生成高分辨率会导致"多人症"、畸形五官等问题，因为扩散模型训练时
-# 未见过高分辨率。HiRes Fix 分两阶段：
-#   1. 先生成低分辨率图像（构图、骨架正确）
-#   2. 在 latent 空间放大后 refine（保留结构 + 补充细节）
-#   3. 最后用 ESRGAN 放大到目标分辨率（后处理，不进入 diffusion 流程）
+# 【出图原理】
+# 两阶段出图策略：
+#   1. HiRes Fix 生成 1280x720（低分辨率基础图，避免 OOM）
+#   2. ESRGAN 放大 2x 到 2560x1440（后处理，不消耗 diffusion 显存）
 #
 # 【3080 10G 显存限制】
-# 10G 显存无法直接以高分辨率作为基础（会 OOM 爆显存），因此：
-#   - 基础分辨率只能到 1280x720（latent 160x90，刚好在显存极限）
-#   - 再通过 HiRes Fix 放大到目标 2560x1440（2x 放大）
+# 10G 显存无法直接生成 2560x1440，因此：
+#   - 先用 HiRes Fix 出 1280x720（基础 640x360 -> 1280x720）
+#   - 再用 ESRGAN 2x 放大到 2560x1440
 #   - ESRGAN 放大是后处理，不消耗 diffusion 显存
 #
 # 【参考提示词示例 (人像)】
-# ./img1.sh "half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up" "~/portrait_2560x1440.png" 2560 1440
+# ./img1.sh "half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up" "~/portrait_2560x1440.png"
 #
 # 【参数说明】
 #   $1 - 提示词 (Prompt)
-#   $2 - 输出文件路径
-#   $3 - 宽度 (Width)
-#   $4 - 高度 (Height)
+#   $2 - 输出文件路径（可选，默认 ~/YYYYMMDD_HHMMSS_<md5>.png）
 # =============================================================================
 set -euo pipefail
 
@@ -51,13 +47,14 @@ done
 
 PROMPT="${ARGS[0]:-A beautiful landscape}"
 OUTPUT_FILE="${ARGS[1]:-}"
-WIDTH="${ARGS[2]:-1280}"
-HEIGHT="${ARGS[3]:-720}"
 
-# 2560x1440 模式：参考 quqiufeng，基础 1280x720，HiRes Fix 直接到 2560x1440
-if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
-    echo -e "${BLUE}[INFO] 2560x1440 Mode: 1280x720 base -> HiRes Fix 2560x1440${NC}"
-fi
+# 固定参数：HiRes Fix 出 1280x720，然后 ESRGAN 放大到 2560x1440
+WIDTH=2560
+HEIGHT=1440
+HIRES_WIDTH=1280
+HIRES_HEIGHT=720
+
+echo -e "${BLUE}[INFO] 生成策略: HiRes Fix 1280x720 -> ESRGAN 2x -> 2560x1440${NC}"
 
 if [[ "$OUTPUT_FILE" == ~* ]]; then
     OUTPUT_FILE="${HOME}${OUTPUT_FILE:1}"
@@ -74,18 +71,16 @@ for model in "$DIFFUSION_MODEL" "$VAE_MODEL" "$LLM_MODEL"; do
     if [ ! -f "$model" ]; then echo -e "${RED}Error: model not found: $model${NC}"; exit 1; fi
 done
 
-if [ "${FORCE_UPSCALE:-0}" -eq 1 ]; then
-    if [ ! -f "$UPSCALE_MODEL" ]; then echo -e "${RED}Error: upscale model not found: $UPSCALE_MODEL${NC}"; exit 1; fi
-    echo -e "${CYAN}✓ Upscale mode enabled (2x ESRGAN)${NC}"
+# 检查放大模型（必需）
+if [ ! -f "$UPSCALE_MODEL" ]; then
+    echo -e "${RED}Error: upscale model not found: $UPSCALE_MODEL${NC}"
+    exit 1
 fi
+echo -e "${CYAN}✓ ESRGAN upscale enabled (2x -> 2560x1440)${NC}"
 
 echo -e "${GREEN}✓ All checks passed${NC}"
 
-if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || [ "$WIDTH" -le 0 ]; then echo -e "${RED}Error: width must be positive integer${NC}"; exit 1; fi
-if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Error: height must be positive integer${NC}"; exit 1; fi
-
 # HD optimized parameters - sharp and clear
-# Updated after testing: euler_a + higher cfg + more steps for better clarity
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler_a}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-2.5}"
@@ -93,11 +88,7 @@ STEPS="${STEPS:-40}"
 HIRES_STEPS="${HIRES_STEPS:-30}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 
-if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
-    echo -e "${BLUE}[INFO] Ultra HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
-else
-    echo -e "${BLUE}[INFO] HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
-fi
+echo -e "${BLUE}[INFO] HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 
 # Add quality keywords - sharp and detailed
 QUALITY_PREFIX="sharp focus, crisp details, realistic skin texture, natural lighting, professional portrait"
@@ -126,45 +117,25 @@ fi
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT"
 
-TARGET_LATENT_W=$((WIDTH / 8))
-TARGET_LATENT_H=$((HEIGHT / 8))
+# 固定分辨率策略
+# 基础生成: 640x360 -> HiRes Fix: 1280x720 -> ESRGAN 2x: 2560x1440
+LOW_W=640
+LOW_H=360
 TARGET_W=$WIDTH
 TARGET_H=$HEIGHT
-
-# quqiufeng 逻辑：目标分辨率直接作为基础，不再折半
-# 2560x1440 -> 基础 1280x720 (latent 160x90) -> HiRes 2560x1440
-# 1920x1080 -> 基础 1024x576 (latent 128x72) -> HiRes 1920x1080
-# 1280x720  -> 基础 640x360 (latent 80x45) -> HiRes 1280x720
-if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
-    LOW_W=1280
-    LOW_H=720
-elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
-    LOW_W=1024
-    LOW_H=576
-elif [ "$WIDTH" -eq 1280 ] && [ "$HEIGHT" -eq 720 ]; then
-    LOW_W=640
-    LOW_H=360
-else
-    # 通用计算
-    LOW_LATENT_W=$(((TARGET_LATENT_W / 2 + 7) / 8 * 8))
-    LOW_LATENT_H=$(((TARGET_LATENT_H / 2 + 7) / 8 * 8))
-    LOW_W=$((LOW_LATENT_W * 8))
-    LOW_H=$((LOW_LATENT_H * 8))
-fi
 
 echo ""
 echo "========================================"
 echo "  HD Image Generation"
 echo "========================================"
-echo -e "Target Size: ${GREEN}${WIDTH}x${HEIGHT}${NC}"
-echo -e "Low-res Pass: ${GREEN}${LOW_W}x${LOW_H} -> ${WIDTH}x${HEIGHT}${NC}"
+echo -e "Final Size: ${GREEN}${WIDTH}x${HEIGHT}${NC}"
+echo -e "Stage 1: ${GREEN}${LOW_W}x${LOW_H} -> HiRes Fix -> ${HIRES_WIDTH}x${HIRES_HEIGHT}${NC}"
+echo -e "Stage 2: ${GREEN}${HIRES_WIDTH}x${HIRES_HEIGHT} -> ESRGAN 2x -> ${WIDTH}x${HEIGHT}${NC}"
 echo -e "Steps: $STEPS -> $HIRES_STEPS (HiRes)"
 echo -e "CFG Scale: ${CYAN}$CFG_SCALE${NC}"
 echo -e "HiRes Strength: $HIRES_STRENGTH"
 echo -e "Sampler: ${CYAN}$SAMPLING_METHOD${NC} + ${CYAN}$SCHEDULER${NC}"
-if [ "${FORCE_UPSCALE:-0}" -eq 1 ]; then
-    echo -e "Upscale: ${CYAN}2x ESRGAN -> ${TARGET_W}x${TARGET_H}${NC}"
-fi
+echo -e "Upscale: ${CYAN}2x ESRGAN${NC}"
 echo "----------------------------------------"
 echo -e "Prompt: ${YELLOW}$PROMPT${NC}"
 echo -e "Output: ${GREEN}$OUTPUT_PATH${NC}"
@@ -190,18 +161,14 @@ SD_CMD=("$SD_CLI"
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires
-  --hires-width "$WIDTH"
-  --hires-height "$HEIGHT"
+  --hires-width "$HIRES_WIDTH"
+  --hires-height "$HIRES_HEIGHT"
   --hires-strength "$HIRES_STRENGTH"
   --hires-steps "$HIRES_STEPS"
+  --upscale-model "$UPSCALE_MODEL"
   -s "$SEED"
   -o "$OUTPUT_PATH"
 )
-
-# ESRGAN 放大
-if [ "${FORCE_UPSCALE:-0}" -eq 1 ]; then
-    SD_CMD+=(--upscale-model "$UPSCALE_MODEL")
-fi
 
 "${SD_CMD[@]}"
 
