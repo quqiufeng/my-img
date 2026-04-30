@@ -1,9 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# FreeU Patch Application Script for stable-diffusion.cpp
+# Patch Application Script for stable-diffusion.cpp
 # =============================================================================
 # 
-# 用途: 在升级 stable-diffusion.cpp 后重新应用 FreeU 补丁
+# 用途: 在升级 stable-diffusion.cpp 后重新应用所有质量增强补丁
 # 
 # 修改的文件列表:
 #   1. /opt/stable-diffusion.cpp/include/stable-diffusion.h
@@ -11,11 +11,19 @@
 #   3. /opt/stable-diffusion.cpp/src/diffusion_model.hpp
 #   4. /opt/stable-diffusion.cpp/src/stable-diffusion.cpp
 #
-# FreeU 原理:
-#   在 UNet 解码器的跳跃连接处注入频域加权:
-#   - backbone 特征 × b1/b2 (放大)
-#   - skip 特征 × s1/s2 (缩小)
-#   - 默认参数: b1=1.3, b2=1.4, s1=0.9, s2=0.2
+# 支持的功能:
+#   - FreeU: 在 UNet 解码器的跳跃连接处注入频域加权
+#     - backbone 特征 × b1/b2 (放大)
+#     - skip 特征 × s1/s2 (缩小)
+#     - 默认参数: b1=1.3, b2=1.4, s1=0.9, s2=0.2
+#   
+#   - SAG (Self-Attention Guidance): 自注意力引导
+#     - 改善图像一致性和细节
+#     - 默认参数: scale=1.0
+#   
+#   - Dynamic CFG: 动态 CFG 阈值
+#     - 防止 CFG 过高导致的过饱和
+#     - 自动调整 CFG 强度
 #
 # 使用方法:
 #   cd /home/dministrator/my-img/patches
@@ -30,14 +38,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDCPP_DIR="/opt/stable-diffusion.cpp"
 
 PATCH_FILES=(
-    "01_stable-diffusion.h.freeu.patch"
-    "02_unet.hpp.freeu.patch"
-    "03_diffusion_model.hpp.freeu.patch"
-    "04_stable-diffusion.cpp.freeu.patch"
+    "01_stable-diffusion.h.patch"
+    "02_unet.hpp.patch"
+    "03_diffusion_model.hpp.patch"
+    "04_stable-diffusion.cpp.patch"
 )
 
 apply_patches() {
-    echo "=== Applying FreeU patches to stable-diffusion.cpp ==="
+    echo "=== Applying patches to stable-diffusion.cpp ==="
     for patch in "${PATCH_FILES[@]}"; do
         echo "Applying: $patch"
         if [ -f "$SCRIPT_DIR/$patch" ]; then
@@ -55,7 +63,7 @@ apply_patches() {
 }
 
 revert_patches() {
-    echo "=== Reverting FreeU patches ==="
+    echo "=== Reverting patches ==="
     for patch in "${PATCH_FILES[@]}"; do
         echo "Reverting: $patch"
         if [ -f "$SCRIPT_DIR/$patch" ]; then

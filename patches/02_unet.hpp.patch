@@ -1,5 +1,5 @@
 --- /home/dministrator/my-img/patches/sd_cpp_backup/src/unet.hpp	2026-04-30 15:51:55.762743322 +0800
-+++ /opt/stable-diffusion.cpp/src/unet.hpp	2026-04-30 16:12:55.419587337 +0800
++++ src/unet.hpp	2026-04-30 16:12:55.419587337 +0800
 @@ -183,6 +183,19 @@
  
  public:

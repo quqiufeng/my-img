@@ -175,19 +175,30 @@
 - **优先级**: P2
 - **难度**: 中
 
-#### Task 9.2: Self-Attention Guidance (SAG)
-- [ ] 提升图像细节和构图
-- [ ] 无需额外模型
-- [ ] CLI 参数：`--sag-scale FLOAT`
+#### Task 9.2: Self-Attention Guidance (SAG) ✅
+- [x] 提升图像细节和构图
+- [x] 无需额外模型
+- [x] CLI 参数：`--sag`, `--sag-scale FLOAT`
 - **优先级**: P2
 - **难度**: 中
+- **完成时间**: 2026-04-30
 
-#### Task 9.3: FreeU / FreeU_V2
-- [ ] 在 UNet 中注入 FreeU 参数
-- [ ] 提升图像质量和细节
-- [ ] CLI 参数：`--freeu`（启用 FreeU）
+#### Task 9.2b: Dynamic CFG (Dynamic Thresholding) ✅
+- [x] 防止 CFG 过高导致的过饱和
+- [x] 自动调整 CFG 强度
+- [x] CLI 参数：`--dynamic-cfg`
+- **优先级**: P2
+- **难度**: 中
+- **完成时间**: 2026-04-30
+
+#### Task 9.3: FreeU / FreeU_V2 ✅
+- [x] 在 UNet 中注入 FreeU 参数（通过 patch 系统，最小化修改 sd.cpp）
+- [x] 提升图像质量和细节（实测：纹理更丰富，边缘更清晰）
+- [x] CLI 参数：`--freeu`（启用 FreeU）
+- [x] Patch 系统：`patches/diff.sh` 支持 apply/revert/status
 - **优先级**: P3
 - **难度**: 中
+- **完成时间**: 2026-04-30
 
 #### Task 9.4: Style Transfer
 - [ ] 加载风格参考图
@@ -591,8 +602,8 @@
 | | IPAdapterApply | ⏳ | 8.1 |
 | | T2IAdapterApply | ⏳ | 7.2 |
 | **增强** | HiResFix | ✅ | - |
-| | FreeU | ⏳ | 9.3 |
-| | SAG | ⏳ | 9.2 |
+| | FreeU | ✅ | 9.3 |
+| | SAG | ✅ | 9.2 |
 | | FaceRestore | ⏳ | 11.1 |
 | | AnimateDiff | ⏳ | 14.1 |
 | **其他** | BatchGenerate | ⏳ | 13.2 |
@@ -667,8 +678,9 @@
 | 图像条件 | IPAdapter | ⏳ | P2 |
 | 图像条件 | IPAdapter FaceID | ⏳ | P2 |
 | 图像条件 | PhotoMaker | ⏳ | P3 |
-| 增强 | SAG | ⏳ | P2 |
-| 增强 | FreeU | ⏳ | P3 |
+| 增强 | SAG | ✅ | P2 |
+| 增强 | Dynamic CFG | ✅ | P2 |
+| 增强 | FreeU | ✅ | P3 |
 | 增强 | Face Restore | ⏳ | P2 |
 | 增强 | Style Transfer | ⏳ | P3 |
 | 图像操作 | Latent Composite | ⏳ | P2 |

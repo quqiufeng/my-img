@@ -70,7 +70,13 @@ struct CliOptions {
     float freeu_s1 = 0.9f;
     float freeu_s2 = 0.2f;
 
-    
+    // SAG
+    bool sag = false;
+    float sag_scale = 1.0f;
+
+    // Dynamic CFG
+    bool dynamic_cfg = false;
+
     // ESRGAN
     int upscale_repeats = 1;
     int upscale_tile_size = 1440;
@@ -251,6 +257,11 @@ static void print_usage(const char* argv0) {
     std::cout << "  --freeu-b2 FLOAT          FreeU backbone scale 2 (default: 1.4)\n";
     std::cout << "  --freeu-s1 FLOAT          FreeU skip scale 1 (default: 0.9)\n";
     std::cout << "  --freeu-s2 FLOAT          FreeU skip scale 2 (default: 0.2)\n";
+    std::cout << "\nSAG Options:\n";
+    std::cout << "  --sag                     Enable Self-Attention Guidance (improves coherence)\n";
+    std::cout << "  --sag-scale FLOAT         SAG scale (default: 1.0)\n";
+    std::cout << "\nDynamic CFG Options:\n";
+    std::cout << "  --dynamic-cfg             Enable Dynamic CFG (prevents over-saturation)\n";
     std::cout << "\nUpscale Options:\n";
     std::cout << "  --upscale-repeats INT     ESRGAN upscale repeats (default: 1)\n";
     std::cout << "  --upscale-tile-size INT   ESRGAN tile size (default: 1440)\n";
@@ -724,6 +735,13 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--freeu-s2") {
             if (++i >= argc) { std::cerr << "Missing value for --freeu-s2\n"; return false; }
             opts.freeu_s2 = std::stof(argv[i]);
+        } else if (arg == "--sag") {
+            opts.sag = true;
+        } else if (arg == "--sag-scale") {
+            if (++i >= argc) { std::cerr << "Missing value for --sag-scale\n"; return false; }
+            opts.sag_scale = std::stof(argv[i]);
+        } else if (arg == "--dynamic-cfg") {
+            opts.dynamic_cfg = true;
         } else if (arg == "--upscale-repeats") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-repeats\n"; return false; }
             opts.upscale_repeats = std::stoi(argv[i]);
@@ -1187,7 +1205,14 @@ int main(int argc, char** argv) {
     params.freeu_b2 = opts.freeu_b2;
     params.freeu_s1 = opts.freeu_s1;
     params.freeu_s2 = opts.freeu_s2;
-    
+
+    // SAG
+    params.sag_enabled = opts.sag;
+    params.sag_scale = opts.sag_scale;
+
+    // Dynamic CFG
+    params.dynamic_cfg_enabled = opts.dynamic_cfg;
+
     // ControlNet
     params.control_net_path = opts.control_net;
     if (!opts.control_image.empty()) {

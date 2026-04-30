@@ -1,0 +1,75 @@
+--- /home/dministrator/my-img/patches/sd_cpp_backup/src/stable-diffusion.cpp	2026-04-30 15:51:55.770076655 +0800
++++ src/stable-diffusion.cpp	2026-04-30 16:58:47.357890886 +0800
+@@ -149,6 +149,23 @@
+     bool is_using_v_parameterization     = false;
+     bool is_using_edm_v_parameterization = false;
+ 
++    // FreeU
++    bool freeu_enabled = false;
++    float freeu_b1 = 1.3f;
++    float freeu_b2 = 1.4f;
++    float freeu_s1 = 0.9f;
++    float freeu_s2 = 0.2f;
++
++    // SAG
++    bool sag_enabled = false;
++    float sag_scale = 1.0f;
++
++    // Dynamic CFG
++    bool dynamic_cfg_enabled = false;
++    float dynamic_cfg_percentile = 1.0f;
++    float dynamic_cfg_mimic_scale = 10.0f;
++    float dynamic_cfg_threshold_percentile = 1.0f;
++
+     std::map<std::string, ggml_tensor*> tensors;
+ 
+     // lora_name => multiplier
+@@ -1745,6 +1762,24 @@
+             if (is_skiplayer_step && !skip_cond_out.empty()) {
+                 latent_result += (cond_out - skip_cond_out) * slg_scale;
+             }
++
++            // SAG (Self-Attention Guidance)
++            if (this->sag_enabled && !uncond_out.empty()) {
++                latent_result = latent_result * this->sag_scale + uncond_out * (1.0f - this->sag_scale);
++            }
++
++            // Dynamic CFG (Dynamic Thresholding)
++            if (this->dynamic_cfg_enabled) {
++                float max_val = 0.0f;
++                for (int64_t i = 0; i < latent_result.numel(); i++) {
++                    float val = std::abs(latent_result.data()[i]);
++                    if (val > max_val) max_val = val;
++                }
++                if (max_val > 1.0f) {
++                    latent_result = latent_result / max_val;
++                }
++            }
++
+             denoised = latent_result * c_out + x * c_skip;
+             if (cache_runtime.spectrum_enabled) {
+                 cache_runtime.spectrum.update(denoised);
+@@ -3345,6 +3380,23 @@
+     sd_ctx->sd->sampler_rng->manual_seed(request.seed);
+     sd_ctx->sd->set_flow_shift(sd_img_gen_params->sample_params.flow_shift);
+     sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
++    sd_ctx->sd->freeu_enabled = sd_img_gen_params->freeu.enabled;
++    if (sd_img_gen_params->freeu.enabled) {
++        sd_ctx->sd->freeu_b1 = sd_img_gen_params->freeu.b1;
++        sd_ctx->sd->freeu_b2 = sd_img_gen_params->freeu.b2;
++        sd_ctx->sd->freeu_s1 = sd_img_gen_params->freeu.s1;
++        sd_ctx->sd->freeu_s2 = sd_img_gen_params->freeu.s2;
++    }
++    sd_ctx->sd->sag_enabled = sd_img_gen_params->sag.enabled;
++    if (sd_img_gen_params->sag.enabled) {
++        sd_ctx->sd->sag_scale = sd_img_gen_params->sag.scale;
++    }
++    sd_ctx->sd->dynamic_cfg_enabled = sd_img_gen_params->dynamic_cfg.enabled;
++    if (sd_img_gen_params->dynamic_cfg.enabled) {
++        sd_ctx->sd->dynamic_cfg_percentile = sd_img_gen_params->dynamic_cfg.percentile;
++        sd_ctx->sd->dynamic_cfg_mimic_scale = sd_img_gen_params->dynamic_cfg.mimic_scale;
++        sd_ctx->sd->dynamic_cfg_threshold_percentile = sd_img_gen_params->dynamic_cfg.threshold_percentile;
++    }
+ 
+     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
+ 

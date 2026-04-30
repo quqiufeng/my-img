@@ -1,5 +1,5 @@
 --- /home/dministrator/my-img/patches/sd_cpp_backup/src/diffusion_model.hpp	2026-04-30 15:51:55.766409989 +0800
-+++ /opt/stable-diffusion.cpp/src/diffusion_model.hpp	2026-04-30 16:10:09.373530816 +0800
++++ src/diffusion_model.hpp	2026-04-30 16:10:09.373530816 +0800
 @@ -29,6 +29,11 @@
      const sd::Tensor<float>* vace_context             = nullptr;
      float vace_strength                               = 1.f;
