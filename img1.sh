@@ -132,15 +132,16 @@ TARGET_LATENT_H=$((HEIGHT / 8))
 
 # 关键修复：确保低分辨率 latent 宽高比与目标严格匹配
 # Z-Image 模型 latent 对齐到 8 的倍数后，比例必须保持一致
-# 对于 2560x1440 (latent 320x180, ratio=1.778)：
-#   640x360 → latent 80x45 (ratio=1.778) ✓ 严格匹配 (推荐，人像清晰)
-#   1024x576 → latent 128x72 (ratio=1.778) ✓ 严格匹配
-
+# 
+# 修复出图不清晰问题：提高基础分辨率，避免 640x360 细节丢失
+# 1024x576 -> HiRes Fix -> 1280x720 (放大 1.25x，latent 插值损失小)
+#
 # 对于 16:9 比例，使用已知正确的低分辨率对
-# 关键：低分辨率 latent 宽高比必须与目标严格一致
 # 2560x1440 (latent 320x180, ratio=1.778):
 #   1280x720 -> latent 160x90 (ratio=1.778) 推荐，放大倍数最小，边缘最稳定
 #   1024x576 -> latent 128x72 (ratio=1.778) 备选，放大倍数适中
+# 1280x720 (latent 160x90, ratio=1.778):
+#   1024x576 -> latent 128x72 (ratio=1.778) 修复版，避免 640x360 模糊
 if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
     LOW_W=1280
     LOW_H=720
@@ -148,8 +149,9 @@ elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
     LOW_W=1024
     LOW_H=576
 elif [ "$WIDTH" -eq 1280 ] && [ "$HEIGHT" -eq 720 ]; then
-    LOW_W=640
-    LOW_H=360
+    # 修复：从 640x360 提高到 1024x576，避免细节丢失
+    LOW_W=1024
+    LOW_H=576
 else
     # 通用计算：确保 latent 能被 8 整除且比例匹配
     LOW_LATENT_W=$((TARGET_LATENT_W / 2))
