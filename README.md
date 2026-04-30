@@ -167,7 +167,13 @@ image.save_to_file("output.png");
 - 两阶段生成：低分辨率基础图 + latent 放大 refine
 - 自动计算低分辨率（保持宽高比）
 - 支持自定义 hires_strength 和 hires_steps
-- 实测：1280×720 → 2560×1440，RTX 3080 10GB 可跑
+- **实测最佳参数（RTX 3080 10GB）**：
+  - 基础步数：25 步（构图稳定）
+  - HiRes 步数：45 步（细节丰富）
+  - HiRes Strength：0.30（平衡重绘幅度）
+  - CFG：3.2（避免过饱和）
+  - 采样器：euler + discrete（边缘最稳定）
+- 2560×1440 出图约 11 分钟，峰值显存 ~9.5GB
 
 #### 5. VAE Tiling（显存优化）
 - 大分辨率图像分块解码
@@ -282,14 +288,16 @@ elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
 fi
 ```
 
-**参数配置**（`img1.sh:88-94`）：
+**参数配置**（`img1.sh:88-96`）：
 ```bash
-SAMPLING_METHOD="euler"
-SCHEDULER="discrete"
-CFG_SCALE="2.8"
-STEPS="55"
-HIRES_STEPS="25"
-HIRES_STRENGTH="0.28"
+# 实测调优参数（RTX 3080 10G）
+# 人像推荐: euler + discrete + cfg 3.2 + strength 0.30 + 25步基础
+SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
+SCHEDULER="${SCHEDULER:-discrete}"
+CFG_SCALE="${CFG_SCALE:-3.2}"
+STEPS="${STEPS:-25}"
+HIRES_STEPS="${HIRES_STEPS:-45}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 ```
 
 **CLI 调用**（`img1.sh:174-196`）：
@@ -378,7 +386,9 @@ sd_image_t* sd_images = generate_image(ctx_, &gen_params);
 
 **原理**：strength 对应 img2img 的 denoising strength。低 strength 只去除少量噪声，保留基础图结构；高 strength 加入更多噪声，生成结果偏离基础图。
 
-**img1.sh 默认值**：`0.28`（低显存下保守值，避免过度修改导致显存激增）
+**img1.sh 默认值**：`0.30`
+- **0.30**：3080 10G 的最佳平衡点，重绘幅度适中，不会破坏五官结构
+- **注意**：超过 0.40 容易导致面部变形、边缘破裂（尤其是高 CFG 时）
 
 #### 4.2 `--hires-steps`（ refine 步数）
 
@@ -386,12 +396,12 @@ sd_image_t* sd_images = generate_image(ctx_, &gen_params);
 
 | 值 | 效果 | 适用场景 |
 |---|---|---|
-| 15 ~ 20 | 快速 refine，可能细节不足 | 测试、草稿 |
-| **20 ~ 30** | **平衡，推荐值** | **日常出图** |
-| 40 ~ 60 | 精细 refine，细节更丰富 | 高质量要求 |
-| > 60 | 收益递减，耗时增加 | 极致画质 |
+| 20 ~ 30 | 快速 refine，可能细节不足 | 测试、草稿 |
+| **40 ~ 50** | **平衡，推荐值** | **日常出图（约 10-12 分钟）** |
+| 60 | 精细 refine，细节更丰富 | 高质量要求（约 15 分钟） |
+| > 60 | 收益递减，耗时显著增加 | 极致画质 |
 
-**img1.sh 默认值**：`25`（RTX 3080 10G 的显存和时间平衡）
+**img1.sh 默认值**：`45`（RTX 3080 10G 的画质与时间平衡，约 11 分钟）
 
 #### 4.3 `--hires-upscaler`（放大算法）
 
@@ -439,13 +449,15 @@ HiRes Fix 两阶段都在显存中进行，必须配合以下优化：
 ### 6. 完整示例
 
 ```bash
-# 10GB 显存：1280×720 → 2560×1440
+# 10GB 显存：1280×720 → 2560×1440（推荐参数）
 ./myimg-cli \
   --diffusion-model model.gguf --vae vae.safetensors --llm llm.gguf \
   -p "masterpiece, best quality, portrait" \
   -W 1280 -H 720 \
   --hires --hires-width 2560 --hires-height 1440 \
-  --hires-strength 0.28 --hires-steps 25 \
+  --hires-strength 0.30 --hires-steps 45 \
+  --sampling-method euler --scheduler discrete \
+  --cfg-scale 3.2 --steps 25 \
   --diffusion-fa --vae-tiling \
   -o output.png
 
@@ -455,7 +467,9 @@ HiRes Fix 两阶段都在显存中进行，必须配合以下优化：
   -p "masterpiece, best quality, portrait" \
   -W 1920 -H 1080 \
   --hires --hires-width 2560 --hires-height 1440 \
-  --hires-strength 0.30 --hires-steps 30 \
+  --hires-strength 0.30 --hires-steps 45 \
+  --sampling-method euler --scheduler discrete \
+  --cfg-scale 3.2 --steps 25 \
   --diffusion-fa \
   -o output.png
 ```
@@ -620,7 +634,7 @@ make -j$(nproc)
   -p "a beautiful landscape" \
   -o output.png
 
-# 带 HiRes Fix 的 2560x1440 人像
+# 带 HiRes Fix 的 2560x1440 人像（推荐参数）
 ./myimg-cli \
   --diffusion-model /path/to/z_image_turbo-Q5_K_M.gguf \
   --vae /path/to/ae.safetensors \
@@ -628,7 +642,9 @@ make -j$(nproc)
   -p "portrait of a young woman, soft lighting" \
   -W 1280 -H 720 \
   --hires --hires-width 2560 --hires-height 1440 \
-  --hires-strength 0.30 --hires-steps 60 \
+  --hires-strength 0.30 --hires-steps 45 \
+  --sampling-method euler --scheduler discrete \
+  --cfg-scale 3.2 --steps 25 \
   --diffusion-fa --vae-tiling \
   -o portrait_2k.png
 
@@ -672,9 +688,10 @@ BUILD_TYPE=Debug ./build.sh
 
 **特点**：
 - 低分辨率基础（1280×720）→ HiRes 放大到目标分辨率
+- **推荐参数**：25 步基础 + 45 步 HiRes，0.30 strength，3.2 CFG
 - 自动添加质量前缀词和负面提示词
 - 启用 VAE Tiling 和 Flash Attention 节省显存
-- 针对人像/风景优化采样参数
+- 针对人像/风景优化采样参数（euler + discrete）
 
 #### `img2.sh` - RTX 4090D 24G 优化出图
 
