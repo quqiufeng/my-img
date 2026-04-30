@@ -91,8 +91,8 @@ if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Err
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
-STEPS="${STEPS:-50}"
-HIRES_STEPS="${HIRES_STEPS:-60}"
+STEPS="${STEPS:-25}"
+HIRES_STEPS="${HIRES_STEPS:-45}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
@@ -215,7 +215,7 @@ SD_CMD=("$SD_CLI"
   --diffusion-fa
   --vae-tiling
   --vae-tile-size 256x256
-  --vae-tile-overlap 0.8
+  --vae-tile-overlap 0.5
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires
