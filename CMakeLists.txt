@@ -182,6 +182,8 @@ set(MYIMG_SOURCES
     src/utils/log.cpp
     src/utils/image_qa.cpp
     src/utils/watermark.cpp
+    src/utils/shadow_effect.cpp
+    src/utils/oom_handler.cpp
     src/utils/stb_impl.c
 )
 
@@ -609,6 +611,27 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_watermark.cpp")
     )
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shadow_effect.cpp")
+    add_executable(test_shadow_effect
+        tests/test_shadow_effect.cpp
+        src/utils/shadow_effect.cpp
+    )
+    target_include_directories(test_shadow_effect PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${TORCH_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
+    )
+    target_link_libraries(test_shadow_effect PRIVATE
+        ${TORCH_LIBRARIES}
+        ${OpenCV_LIBS}
+    )
+    set_target_properties(test_shadow_effect PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_log.cpp")
     add_executable(test_log
         tests/test_log.cpp
@@ -622,6 +645,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_log.cpp")
         ${CMAKE_THREAD_LIBS_INIT}
     )
     set_target_properties(test_log PROPERTIES
+        INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oom_handler.cpp")
+    add_executable(test_oom_handler
+        tests/test_oom_handler.cpp
+        src/utils/oom_handler.cpp
+    )
+    target_include_directories(test_oom_handler PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+    )
+    set_target_properties(test_oom_handler PROPERTIES
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
