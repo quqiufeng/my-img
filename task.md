@@ -395,6 +395,116 @@
   - 电商：批量处理成千上万张产品图
   - 摄影：批量调色导出
 
+### Phase 10.6: 电商/摄影专用工具 🛒（新增）
+
+#### Task 10.6.1: 背景移除（Background Removal）🛒
+- [ ] AI 自动抠图（支持人物/产品/物体）
+- [ ] 边缘细化（ hair/matting 精细边缘）
+- [ ] 透明背景输出（PNG with alpha channel）
+- [ ] 背景色替换（白底/透明/自定义颜色）
+- [ ] CLI 参数：`--remove-bg`（自动检测主体类型）
+- [ ] CLI 参数：`--remove-bg-model {u2net|modnet|rvm}`
+- [ ] CLI 参数：`--bg-color #FFFFFF` 或 `--bg-transparent`
+- [ ] CLI 参数：`--bg-feather 2`（边缘羽化像素）
+- **优先级**: 🛒 P0（电商第一刚需）
+- **难度**: 高（需要 ONNX 模型 + 前后处理）
+- **用途**:
+  - 电商：产品图白底/透明底（淘宝/亚马逊主图要求）
+  - 摄影：人像换背景
+  - 设计：素材提取
+
+#### Task 10.6.2: 智能裁剪（Smart Crop / Subject-aware Crop）🛒
+- [ ] 自动检测图像主体（人脸/产品/显著性区域）
+- [ ] 智能居中裁剪（保持主体完整）
+- [ ] 多平台尺寸预设（一键适配）
+  - 淘宝主图：800×800, 1200×1200
+  - 京东：800×800, 1000×1000
+  - 亚马逊：2000×2000（白底）
+  - 小红书：3:4 (900×1200)
+  - 抖音：9:16 (1080×1920)
+  - Instagram：1:1, 4:5
+  - 微信公众号：2.35:1 (900×383)
+- [ ] 批量智能裁剪（保持同系列产品构图一致）
+- [ ] CLI 参数：`--smart-crop width,height`
+- [ ] CLI 参数：`--platform {taobao|jd|amazon|xiaohongshu|douyin}`
+- [ ] CLI 参数：`--subject-center`（强制主体居中）
+- **优先级**: 🛒 P1（电商刚需）
+- **难度**: 中（OpenCV 显著性检测 + 人脸检测）
+- **用途**:
+  - 电商：批量生成各平台适配尺寸
+  - 摄影：快速出图到社交媒体
+
+#### Task 10.6.3: 产品图阴影生成（Drop Shadow）🛒
+- [ ] 自动生成投影阴影（自然光效果）
+- [ ] 阴影角度/距离/模糊度可调
+- [ ] 反射倒影（Reflection）
+- [ ] 地面接触阴影（Contact Shadow）
+- [ ] CLI 参数：`--drop-shadow angle,distance,blur,opacity`
+- [ ] CLI 参数：`--reflection opacity,blur,height`
+- **优先级**: 🛒 P1（电商专业度）
+- **难度**: 低（纯图像处理，无需 AI）
+- **用途**:
+  - 电商：产品悬浮/站立效果，提升立体感
+  - 摄影：快速添加专业阴影
+
+#### Task 10.6.4: 批量水印（Batch Watermark）🛒
+- [ ] 文字水印（字体/大小/颜色/透明度/旋转）
+- [ ] 图片水印（Logo 叠加）
+- [ ] 水印位置（9宫格 + 自定义坐标）
+- [ ] 平铺水印（防截图盗用）
+- [ ] 隐形水印（Steganography，频域嵌入）
+- [ ] CLI 参数：`--watermark-text "© 2026 MyBrand"`
+- [ ] CLI 参数：`--watermark-logo logo.png`
+- [ ] CLI 参数：`--watermark-position {center|top-left|bottom-right|tile}`
+- [ ] CLI 参数：`--watermark-opacity 0.5`
+- **优先级**: 🛒 P1（品牌保护）
+- **难度**: 低
+- **用途**:
+  - 电商：产品图防盗图
+  - 摄影：版权保护
+
+#### Task 10.6.5: 自动质检（Auto QA / Quality Assurance）🛒
+- [ ] 模糊检测（拉普拉斯方差 < 阈值报警）
+- [ ] 过曝/欠曝检测（直方图分析）
+- [ ] 色偏检测（灰度世界算法，偏色报警）
+- [ ] 低分辨率检测（尺寸不足报警）
+- [ ] 压缩瑕疵检测（JPEG 块效应检测）
+- [ ] 批量质检报告（输出 CSV/JSON）
+- [ ] CLI 参数：`--qa-check {blur|exposure|color|resolution|compression|all}`
+- [ ] CLI 参数：`--qa-report report.json`
+- [ ] CLI 参数：`--qa-fail-dir /path/to/failed_images`
+- **优先级**: 🛒 P1（电商品控）
+- **难度**: 低-中
+- **用途**:
+  - 电商：上架前自动质检，避免劣质图
+  - 摄影：批量筛选废片
+
+#### Task 10.6.6: 内容感知填充（Content-Aware Fill / Generative Fill）🛒
+- [ ] 涂抹区域智能填充（移除不需要的物体）
+- [ ] 图像扩展（Outpainting 升级版，内容感知）
+- [ ] 重复图案去除（去水印/去文字）
+- [ ] CLI 参数：`--generative-fill mask.png`
+- [ ] CLI 参数：`--remove-object "person"`（配合检测模型）
+- **优先级**: P2
+- **难度**: 高（需要 inpainting 模型）
+- **用途**:
+  - 电商：去除产品上的灰尘、反光、杂线
+  - 摄影：移除路人、电线等干扰物
+
+#### Task 10.6.7: EXIF 与元数据管理 🛒
+- [ ] 读取 EXIF（相机参数、拍摄时间、GPS）
+- [ ] 写入 EXIF（版权信息、关键词）
+- [ ] 批量清除 EXIF（保护隐私）
+- [ ] 根据 EXIF 自动旋转（修正手机拍摄方向）
+- [ ] CLI 参数：`--strip-exif`
+- [ ] CLI 参数：`--exif-copyright "© Photographer Name"`
+- [ ] CLI 参数：`--exif-keywords "product,photography"`
+- **优先级**: P2
+- **难度**: 低
+- **用途**:
+  - 摄影：版权信息嵌入
+  - 电商：清理无用元数据减小文件体积
+
 ### Phase 11: 人脸与细节增强
 
 #### Task 11.1: Face Restoration
@@ -485,6 +595,57 @@
 - [ ] 保持时间一致性
 - **优先级**: P3
 - **难度**: 高
+
+### Phase 17: 缓存与性能优化（新增）
+
+#### Task 17.1: 条件编码缓存
+- [ ] 缓存文本编码结果（相同 prompt 不重复编码）
+- [ ] 缓存键：prompt + model + 编码器参数
+- [ ] LRU 淘汰策略
+- [ ] CLI 参数：`--cache-text-encodings`
+- **优先级**: P1
+- **效果**: 批量生成时节省 30-50% 时间
+- **用途**:
+  - 电商：同系列产品批量出图，prompt 相似
+  - 摄影：套图生成，风格统一
+
+#### Task 17.2: 模型缓存管理
+- [ ] 多模型驻留内存（不重复加载）
+- [ ] 引用计数 + LRU 卸载
+- [ ] 显存不足时自动 offload 到 CPU
+- **优先级**: P1
+- **用途**:
+  - 频繁切换 LoRA/ControlNet 时避免重复加载基模
+
+#### Task 17.3: 性能基准测试
+- [ ] 建立 benchmark 测试集
+- [ ] 监控：每步耗时、VRAM 峰值、生成速度
+- [ ] 防止性能退化（CI 检查）
+- [ ] 输出 JSON 报告
+- **优先级**: P2
+
+### Phase 18: 鲁棒性与错误处理（新增）
+
+#### Task 18.1: OOM 优雅降级
+- [ ] 捕获 CUDA OOM 异常
+- [ ] 自动降低分辨率重试
+- [ ] 自动启用更激进的 tiling
+- [ ] 用户提示显存不足建议
+- **优先级**: P1
+- **用途**:
+  - 电商：批量生成时不因单张图 OOM 中断整个批次
+
+#### Task 18.2: 模型校验
+- [ ] 加载前校验 SHA256
+- [ ] 格式自动检测（GGUF/Safetensors/CKPT）
+- [ ] 损坏文件友好提示
+- **优先级**: P2
+
+#### Task 18.3: 生成中断恢复
+- [ ] 捕获 SIGINT/SIGTERM
+- [ ] 保存当前 latent 状态
+- [ ] 支持 `--resume` 从中断点继续
+- **优先级**: P3
 
 ### Phase 15: 工程优化
 
@@ -680,13 +841,13 @@
 | 图像条件 | IPAdapter FaceID | ⏳ | P2 |
 | 图像条件 | PhotoMaker | ⏳ | P3 |
 | 增强 | SAG | ✅ | P2 |
-| 增强 | Dynamic CFG | ❌ | P2 |
+| 增强 | Dynamic CFG | ✅ | P2 |
 | 增强 | FreeU | ✅ | P3 |
 | 增强 | Face Restore | ⏳ | P2 |
 | 增强 | Style Transfer | ⏳ | P3 |
 | 图像操作 | Latent Composite | ⏳ | P2 |
 | 图像操作 | Image Composite | ⏳ | P2 |
-| 图像操作 | Scale/Crop | ⏳ | P2 |
+| 图像操作 | Scale/Crop | ✅ | P2 |
 | 提示词 | Regional Prompting | ⏳ | P2 |
 | 提示词 | Prompt Schedule | ⏳ | P3 |
 | 动画 | AnimateDiff | ⏳ | P3 |

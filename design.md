@@ -876,16 +876,321 @@ public:
 
 ---
 
-## 15. 总结
+## 15. 错误处理与鲁棒性架构
 
-**my-img** 是纯 C++ 版 ComfyUI，使用 libtorch 作为推理后端：
+### 15.1 异常分级
+
+| 级别 | 类型 | 示例 | 处理方式 |
+|------|------|------|----------|
+| 致命 | ModelError | 模型文件损坏/不兼容 | 立即终止，返回错误码 1 |
+| 可恢复 | OOMError | 显存不足 | 降级策略（降分辨率/开 tiling/CPU offload）|
+| 可恢复 | TimeoutError | 生成超时 | 保存中间状态，提示用户 |
+| 警告 | QualityWarning | 放大倍数过大/步数过低 | 继续生成，输出警告到 stderr |
+| 提示 | InfoTip | 使用了默认参数 | 输出提示信息 |
+
+### 15.2 OOM 优雅降级策略
+
+```
+用户请求：2560×1440，HiRes 45步
+    ↓
+尝试标准生成
+    ↓ 失败（CUDA OOM）
+自动降级：
+  1. 降低 HiRes 步数：45 → 25
+  2. 增大 VAE tile overlap：0.5 → 0.8
+  3. 降低基础分辨率：1280×720 → 1024×576
+    ↓ 仍失败
+启用紧急模式：
+  4. 强制 CPU offload（文本编码器）
+  5. 关闭 FreeU/SAG（节省显存）
+    ↓ 仍失败
+友好提示：
+  "显存不足（当前 10GB，需要约 12GB）。建议：
+   - 降低分辨率到 1920×1080
+   - 关闭 --freeu 和 --sag
+   - 关闭其他占用显存的程序"
+```
+
+### 15.3 批量生成容错
+
+```cpp
+// 批量生成时不因单张失败中断整个批次
+for (int i = 0; i < batch_count; ++i) {
+    try {
+        auto image = generate_single(params);
+        image.save(output_path);
+    } catch (const OOMError& e) {
+        // 单张 OOM：降级参数重试
+        LOG_WARN("Batch %d OOM, retrying with reduced resolution", i);
+        retry_with_fallback(params);
+    } catch (const std::exception& e) {
+        // 其他错误：记录失败，继续下一张
+        LOG_ERROR("Batch %d failed: %s", i, e.what());
+        failed_indices.push_back(i);
+    }
+}
+// 最后输出失败摘要
+```
+
+### 15.4 用户友好错误消息
+
+- ❌ 不说 "CUDA out of memory"
+- ✅ 而说 "显存不足（当前 10GB，需要约 12GB）。建议降低分辨率到 1920×1080"
+
+- ❌ 不说 "Failed to load tensor 247"
+- ✅ 而说 "模型文件可能损坏或不兼容，请检查文件完整性（SHA256: xxx）"
+
+## 16. 缓存设计
+
+### 16.1 文本编码缓存
+
+- **缓存对象**：`sd_image_t* condition_vectors`
+- **缓存键**：`hash(prompt + negative_prompt + model_path + clip_skip)`
+- **存储位置**：VRAM（如果足够）或 RAM
+- **TTL**：与进程生命周期相同（模型切换时清空）
+- **性能收益**：批量同 prompt 生成 → 节省 95% 文本编码时间（~200ms → 0ms）
+
+### 16.2 模型权重缓存
+
+```cpp
+class ModelCache {
+    std::unordered_map<std::string, std::shared_ptr<ModelEntry>> cache_;
+    size_t max_vram_mb_ = 8192;  // 最大缓存显存
+    
+public:
+    std::shared_ptr<SDModel> get_or_load(const std::string& path);
+    void unload_lru();  // 显存不足时卸载最近最少使用
+};
+```
+
+- **策略**：LRU，最大同时驻留 2-3 个模型
+- **卸载顺序**：ControlNet → LoRA → VAE → Text Encoder → UNet（最后卸载）
+
+### 16.3 图像处理缓存
+
+- 批量处理时缓存：解码后的图像、调整大小后的版本、LUT 查找表
+- 避免重复 I/O 和计算
+
+## 17. 并发与线程模型
+
+### 17.1 线程安全边界
+
+| 组件 | 线程安全 | 说明 |
+|------|----------|------|
+| sd_ctx_t | ❌ | 每个线程独立实例 |
+| 模型权重（只读） | ✅ | 多线程共享安全 |
+| 图像 I/O | ⚠️ | 需互斥锁保护 |
+| 进度回调 | ⚠️ | 原子变量 + 条件变量 |
+| 日志系统 | ✅ | 线程安全队列 |
+
+### 17.2 批量生成并发
+
+```cpp
+// 多线程批量生成（每个线程独立 sd_ctx）
+std::vector<std::thread> threads;
+for (int t = 0; t < num_threads; ++t) {
+    threads.emplace_back([&](int thread_id) {
+        auto adapter = create_adapter();  // 每个线程独立
+        for (int i = thread_id; i < batch_count; i += num_threads) {
+            auto image = adapter.generate(params[i]);
+            save_queue.push(image);
+        }
+    }, t);
+}
+```
+
+### 17.3 图像后处理线程池
+
+- 生成管线与后处理管线分离
+- 生成线程专注 GPU 推理
+- 后处理线程池处理：缩放、锐化、水印、格式转换
+- 通过队列解耦，避免 GPU 等待 CPU
+
+## 18. 可观测性
+
+### 18.1 结构化日志
+
+```json
+{
+  "timestamp": "2026-04-30T20:00:00Z",
+  "level": "INFO",
+  "component": "SDCPPAdapter",
+  "event": "generation_complete",
+  "params": {
+    "width": 2560,
+    "height": 1440,
+    "steps": 25,
+    "hires_steps": 45,
+    "sampler": "euler"
+  },
+  "performance": {
+    "duration_ms": 420000,
+    "sampling_ms": 380000,
+    "vae_decode_ms": 25000,
+    "vram_peak_mb": 9728,
+    "vram_avg_mb": 8500
+  },
+  "seed": 32762
+}
+```
+
+### 18.2 生成报告
+
+CLI 参数：`--report report.json`
+
+```json
+{
+  "summary": {
+    "total_images": 10,
+    "success": 9,
+    "failed": 1,
+    "total_duration_sec": 4200,
+    "avg_duration_sec": 466
+  },
+  "images": [
+    {
+      "output": "output_001.png",
+      "status": "success",
+      "duration_ms": 420000,
+      "vram_peak_mb": 9728,
+      "warnings": ["hires_steps reduced from 45 to 25 due to OOM"]
+    }
+  ]
+}
+```
+
+### 18.3 实时监控（Server 模式预留）
+
+- Prometheus 指标导出（可选）
+- 队列长度、等待时间、显存使用率
+- 生成速度（it/s）实时统计
+
+## 19. 电商/摄影专用工具设计
+
+### 19.1 背景移除管线
+
+```
+输入图像
+    ↓
+主体检测（显著性 / 人脸 / 物体检测）
+    ↓
+AI 抠图模型（U²Net / MODNet / RVM）
+    ↓
+边缘细化（guided filter / matting）
+    ↓
+Alpha 通道优化（边缘羽化 / 去毛边）
+    ↓
+输出：PNG with alpha / 背景替换
+```
+
+**设计要点**：
+- 支持 ONNX Runtime（不依赖 Python）
+- 模型自动下载（~30MB）
+- 边缘羽化参数可调（避免硬边）
+- 批量处理复用模型实例
+
+### 19.2 智能裁剪策略
+
+```cpp
+struct SmartCrop {
+    // 1. 检测主体（优先级：人脸 > 显著性 > 中心）
+    cv::Rect detect_subject(const cv::Mat& image);
+    
+    // 2. 计算最佳裁剪框
+    cv::Rect compute_crop(int target_w, int target_h, 
+                          const cv::Rect& subject);
+    
+    // 3. 确保主体完整 + 构图美感（三分法）
+    cv::Rect apply_composition_rules(cv::Rect crop);
+};
+```
+
+**平台预设**：
+```cpp
+const std::map<std::string, std::pair<int, int>> kPlatformSizes = {
+    {"taobao", {800, 800}},      // 淘宝主图
+    {"taobao_detail", {790, 不限}},  // 淘宝详情
+    {"jd", {800, 800}},          // 京东
+    {"amazon", {2000, 2000}},    // 亚马逊（白底）
+    {"xiaohongshu", {900, 1200}}, // 小红书 3:4
+    {"douyin", {1080, 1920}},    // 抖音 9:16
+    {"wechat", {900, 383}},      // 公众号 2.35:1
+    {"instagram", {1080, 1080}}, // Instagram 1:1
+};
+```
+
+### 19.3 批量水印设计
+
+- **文字水印**：FreeType 渲染，支持 TTF 字体
+- **图片水印**：PNG with alpha 叠加
+- **平铺模式**：网格排列，防截图
+- **隐形水印**：DCT 频域嵌入，不影响视觉
+
+```cpp
+struct WatermarkConfig {
+    enum Type { Text, Image, Invisible };
+    Type type;
+    std::string content;      // 文字内容或图片路径
+    Position position;        // 9宫格 + 自定义
+    float opacity = 0.5;
+    float rotation = 0;       // 旋转角度
+    int tile_spacing = 0;     // 平铺间距（0=不平铺）
+    
+    // 隐形水印专用
+    float invisible_strength = 0.1;  // 频域嵌入强度
+};
+```
+
+### 19.4 自动质检规则引擎
+
+```cpp
+struct QARule {
+    enum Type { Blur, Exposure, ColorCast, Resolution, Compression };
+    Type type;
+    float threshold;          // 阈值
+    Severity severity;        // Error / Warning
+};
+
+// 预设规则集
+const std::vector<QARule> kEcommerceRules = {
+    {Blur, 100.0, Error},           // 拉普拉斯方差 < 100 视为模糊
+    {Exposure, 0.95, Warning},      // 高光占比 > 95% 视为过曝
+    {ColorCast, 15.0, Warning},     // 色偏角度 > 15 度
+    {Resolution, 800, Error},       // 短边 < 800px
+};
+```
+
+**输出报告**：
+```json
+{
+  "pass": false,
+  "issues": [
+    {
+      "file": "product_001.jpg",
+      "rule": "blur",
+      "severity": "error",
+      "value": 45.2,
+      "threshold": 100.0,
+      "message": "图像过于模糊（清晰度 45.2，要求 ≥ 100）"
+    }
+  ],
+  "recommendation": "建议使用三脚架或提高快门速度重新拍摄"
+}
+```
+
+## 20. 总结
+
+**my-img** 是纯 C++ 版 ComfyUI，使用 sd.cpp + libtorch 混合架构：
 
 - **零 Python 依赖**
 - **支持 GGUF 格式**（Phase 1：Z-Image）
-- **纯 libtorch 推理**（无 GGML 参与计算）
+- **sd.cpp（GGML）负责核心推理**，libtorch 负责扩展功能与图像处理
 - **直接翻译 ComfyUI 逻辑**
-- **后续扩展 Safetensors/CKPT**
+- **电商/摄影专用工具**（背景移除、智能裁剪、批量水印、自动质检）
+- **后续扩展 Safetensors/CKPT + Workflow JSON**
 
-**核心价值**：保留 ComfyUI 的能力，去除 Python 的痛苦。
+**核心价值**：保留 ComfyUI 的生成能力 + 摄影后期的专业工具，去除 Python 的痛苦。
 
 **第一个里程碑**：命令行生成一张 Z-Image 512x512 图片，与 stable-diffusion.cpp 输出一致。
+
+**终极目标**：AI 图像生成与自动化后期处理的一站式工具，摄影师和电商设计师的生产力利器。
