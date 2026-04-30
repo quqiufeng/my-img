@@ -347,15 +347,6 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
         std::cout << "  SAG: enabled (scale=" << params.sag_scale << ")" << std::endl;
     }
 
-    // Dynamic CFG
-    gen_params.dynamic_cfg.enabled = params.dynamic_cfg_enabled;
-    if (params.dynamic_cfg_enabled) {
-        gen_params.dynamic_cfg.percentile = params.dynamic_cfg_percentile;
-        gen_params.dynamic_cfg.mimic_scale = params.dynamic_cfg_mimic_scale;
-        gen_params.dynamic_cfg.threshold_percentile = params.dynamic_cfg_threshold_percentile;
-        std::cout << "  Dynamic CFG: enabled" << std::endl;
-    }
-    
     // VAE Tiling
     gen_params.vae_tiling_params.enabled = params.vae_tiling;
     if (params.vae_tiling) {

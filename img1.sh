@@ -218,7 +218,6 @@ SD_CMD=("$SD_CLI"
   --vae-tile-overlap 0.5
   --freeu
   --sag
-  --dynamic-cfg
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires

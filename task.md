@@ -665,21 +665,21 @@
 |------|------|------|--------|
 | 生成 | txt2img | ✅ | - |
 | 生成 | HiRes Fix | ✅ | - |
-| 生成 | img2img | ⏳ | 🌟 P0 |
-| 生成 | Inpainting | ⏳ | P1 |
-| 生成 | Outpainting | ⏳ | P1 |
-| 生成 | Batch | ⏳ | P1 |
-| 模型 | LoRA | ⏳ | 🌟 P0 |
-| 模型 | Checkpoint | ⏳ | P0 |
-| 模型 | Embeddings | ⏳ | P1 |
+| 生成 | img2img | ✅ | 🌟 P0 |
+| 生成 | Inpainting | ✅ | P1 |
+| 生成 | Outpainting | ✅ | P1 |
+| 生成 | Batch | ✅ | P1 |
+| 模型 | LoRA | ✅ | 🌟 P0 |
+| 模型 | Checkpoint | ✅ | P0 |
+| 模型 | Embeddings | ✅ | P1 |
 | 模型 | Model Merge | ⏳ | P3 |
-| 控制 | ControlNet | ⏳ | P1 |
+| 控制 | ControlNet | ✅ | P1 |
 | 控制 | T2I-Adapter | ⏳ | P2 |
 | 图像条件 | IPAdapter | ⏳ | P2 |
 | 图像条件 | IPAdapter FaceID | ⏳ | P2 |
 | 图像条件 | PhotoMaker | ⏳ | P3 |
 | 增强 | SAG | ✅ | P2 |
-| 增强 | Dynamic CFG | ✅ | P2 |
+| 增强 | Dynamic CFG | ❌ | P2 |
 | 增强 | FreeU | ✅ | P3 |
 | 增强 | Face Restore | ⏳ | P2 |
 | 增强 | Style Transfer | ⏳ | P3 |

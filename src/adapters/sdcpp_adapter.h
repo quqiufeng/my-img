@@ -173,12 +173,6 @@ struct GenerationParams {
     bool sag_enabled = false;
     float sag_scale = 1.0f;
 
-    // Dynamic CFG 参数
-    bool dynamic_cfg_enabled = false;
-    float dynamic_cfg_percentile = 1.0f;
-    float dynamic_cfg_mimic_scale = 10.0f;
-    float dynamic_cfg_threshold_percentile = 1.0f;
-
     // 类型设置
     std::string wtype = "default";  // 权重类型: "f32", "f16", "q4_0", "q5_k", etc.
 };
