@@ -13,7 +13,7 @@ my-img (C++ Application)
 ├── src/adapters/sdcpp_adapter.{h,cpp}  ← 适配器层（唯一接触 sd.cpp API 的地方）
 ├── src/main.cpp                        ← CLI 入口
 ├── src/utils/                          ← 工具函数
-└── third_party/stable-diffusion.cpp/   ← sd.cpp 源码（独立构建）
+└── /opt/stable-diffusion.cpp/          ← sd.cpp 源码（系统级安装）
     ├── build/libstable-diffusion.a     ← 静态库输出
     ├── build/ggml/src/libggml.a        ← GGML 库
     └── include/stable-diffusion.h      ← C API 头文件
@@ -31,7 +31,7 @@ my-img (C++ Application)
 ### 2.1 sd.cpp 位置
 
 ```bash
-third_party/stable-diffusion.cpp/          # sd.cpp 根目录
+/opt/stable-diffusion.cpp/                # sd.cpp 根目录
 ├── include/stable-diffusion.h             # C API 头文件（适配器引用）
 ├── src/stable-diffusion.cpp               # 核心实现
 ├── src/sd-engine/                         # sd.cpp 的引擎组件
@@ -69,16 +69,16 @@ src/adapters/
 ```bash
 # 1. Clone sd.cpp（在项目根目录执行）
 git clone --recursive https://github.com/leejet/stable-diffusion.git \
-    third_party/stable-diffusion.cpp
+    /opt/stable-diffusion.cpp
 
 # 2. 构建 sd.cpp（生成静态库）
-cd third_party/stable-diffusion.cpp
+cd /opt/stable-diffusion.cpp
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DGGML_CUDA=ON
 make -j$(nproc) stable-diffusion
 
 # 3. 构建 my-img
-cd ../../..
+cd /path/to/your/my-img
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc) myimg-cli
@@ -104,7 +104,7 @@ make -j$(nproc) myimg-cli
 
 ```cmake
 # sd.cpp 路径
-set(SDCPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stable-diffusion.cpp)
+set(SDCPP_DIR /opt/stable-diffusion.cpp)
 set(SDCPP_BUILD_DIR ${SDCPP_DIR}/build)
 
 # 检查静态库是否存在
@@ -152,96 +152,16 @@ set(SDCPP_LINK_END "-Wl,--end-group")
 **升级时只需做一件事**：
 ```bash
 # 1. 覆盖新版 sd.cpp
-cd third_party/stable-diffusion.cpp
+cd /opt/stable-diffusion.cpp
 git pull origin master
-
-# 2. 检查 stable-diffusion.h 是否有 API 变化
-# 3. 在适配器中调整参数映射
-# 4. 编译测试
-```
-
-**不需要做的**：
-- ❌ 不需要修改 sd.cpp 内部实现
-- ❌ 不需要维护扩展 API
-- ❌ 不需要处理 `#include` 嵌入导致的符号冲突
-
-### 4.2 核心职责
-
-`SDCPPAdapter` 是 my-img 与 sd.cpp 之间的**唯一接口**：
-
-| 职责 | 说明 |
-|------|------|
-| **类型转换** | my-img 枚举 → sd.cpp C 枚举（`SampleMethod` → `sample_method_t`） |
-| **参数映射** | `GenerationParams` → `sd_img_gen_params_t` / `sd_ctx_params_t` |
-| **图像转换** | `Image`（C++ 结构） ↔ `sd_image_t`（C 结构） |
-| **资源管理** | RAII 封装 `sd_ctx_t` 生命周期（构造/析构/移动语义） |
-| **错误处理** | 将 sd.cpp 错误码转换为 my-img 异常/返回值 |
-
-### 4.2 关键数据流
-
-```
-用户输入 (CLI/GUI)
-    ↓
-GenerationParams (my-img 结构)
-    ↓
-sdcpp_adapter.cpp:
-  - convert_sample_method()
-  - convert_scheduler()
-  - convert_hires_upscaler()
-  - image_to_sd_image()
-    ↓
-sd_img_gen_params_t (sd.cpp C 结构)
-    ↓
-generate_image() [sd.cpp C API]
-    ↓
-sd_image_t* (原始图像数据)
-    ↓
-sd_image_to_image() → Image (my-img 结构)
-    ↓
-保存/显示
-```
-
-### 4.3 版本隔离
-
-如果 sd.cpp 升级导致 API 变化，**只需修改适配器文件**：
-
-```cpp
-// src/adapters/sdcpp_adapter.cpp
-// 例如 sd.cpp 新增参数时，在此添加映射
-
-// HiRes Fix 参数映射示例
-gen_params.hires.enabled = params.enable_hires;
-gen_params.hires.upscaler = convert_hires_upscaler(params.hires_upscaler);
-gen_params.hires.target_width = params.hires_width;
-// ... 其他字段
-```
-
----
-
-## 5. 更新 sd.cpp（git pull）
-
-### 5.1 标准更新流程
-
-当 sd.cpp 上游有更新时，按以下步骤操作：
-
-```bash
-# 1. 进入 sd.cpp 目录
-cd third_party/stable-diffusion.cpp
-
-# 2. 拉取最新代码
-git pull origin master
-
-# 3. 更新子模块（ggml 等）
 git submodule update --init --recursive
-
-# 4. 重新编译 sd.cpp
 rm -rf build  # 清理旧构建（重要！）
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DGGML_CUDA=ON
 make -j$(nproc) stable-diffusion
 
 # 5. 返回项目根目录，重新编译 my-img
-cd ../../..
+cd /path/to/your/my-img
 rm -rf build  # 建议清理，避免 CMake 缓存问题
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
@@ -337,7 +257,7 @@ gen_params.cache.mode = SD_CACHE_DISABLED;  // 或映射 my-img 参数
 **解决**：
 ```bash
 # 强制重新初始化 GGML 子模块
-cd third_party/stable-diffusion.cpp
+cd /opt/stable-diffusion.cpp
 git submodule update --force --init --recursive
 ```
 
@@ -361,8 +281,8 @@ list(APPEND SDCPP_LINK_LIBRARIES
 
 ```bash
 # 记录当前使用的 commit
-cd third_party/stable-diffusion.cpp
-git log --oneline -1 > ../../SD_VERSION.lock
+cd /opt/stable-diffusion.cpp
+git log --oneline -1 > /path/to/your/my-img/SD_VERSION.lock
 
 # 在 README/文档中注明兼容版本
 echo "Compatible sd.cpp commit: $(cat SD_VERSION.lock)"
@@ -371,7 +291,7 @@ echo "Compatible sd.cpp commit: $(cat SD_VERSION.lock)"
 如果更新后发现问题，可快速回退：
 
 ```bash
-cd third_party/stable-diffusion.cpp
+cd /opt/stable-diffusion.cpp
 git checkout <locked_commit>
 git submodule update --init --recursive
 # 重新编译...

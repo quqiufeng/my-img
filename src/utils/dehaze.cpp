@@ -8,7 +8,6 @@ torch::Tensor dehaze(const torch::Tensor& image, float strength) {
     if (strength <= 0.0f) return image.clone();
     
     auto img = image.clone();
-    auto device = img.device();
     int h = img.size(1);
     int w = img.size(2);
     

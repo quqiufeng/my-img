@@ -16,7 +16,7 @@ CYAN="\033[0;36m"
 NC="\033[0m"
 
 # 配置
-SD_DIR="${SCRIPT_DIR}/third_party/stable-diffusion.cpp"
+SD_DIR="/opt/stable-diffusion.cpp"
 SD_BUILD_DIR="${SD_DIR}/build"
 BUILD_DIR="${SCRIPT_DIR}/build"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
@@ -51,7 +51,7 @@ echo -e "${BLUE}[1/3] 编译 stable-diffusion.cpp...${NC}"
 
 if [ ! -d "${SD_DIR}" ]; then
     echo -e "${RED}Error: stable-diffusion.cpp 未找到${NC}"
-    echo "请运行: git clone --recursive https://github.com/leejet/stable-diffusion.git third_party/stable-diffusion.cpp"
+    echo "请确保 /opt/stable-diffusion.cpp 已安装"
     exit 1
 fi
 

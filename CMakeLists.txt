@@ -91,7 +91,7 @@ set(STB_IMAGE_INCLUDE ${THIRDPARTY_DIR}/stb)
 # ============================================================
 # 4. stable-diffusion.cpp 集成
 # ============================================================
-set(SDCPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stable-diffusion.cpp)
+set(SDCPP_DIR /opt/stable-diffusion.cpp)
 set(SDCPP_BUILD_DIR ${SDCPP_DIR}/build)
 
 # 检查 sd.cpp 是否已编译

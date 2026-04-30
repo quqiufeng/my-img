@@ -654,7 +654,7 @@ BUILD_TYPE=Debug ./build.sh
 
 **功能**：
 - 自动检测 NVIDIA GPU 并启用 CUDA
-- 编译 `third_party/stable-diffusion.cpp` 静态库
+- 编译 `/opt/stable-diffusion.cpp` 静态库
 - 编译 `myimg-cli` 可执行文件
 - 编译测试程序
 

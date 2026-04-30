@@ -105,7 +105,6 @@ torch::Tensor adjust_vibrance(const torch::Tensor& image, float strength) {
     if (strength == 0.0f) return image.clone();
     
     auto img = image.clone();
-    auto device = img.device();
     
     // Calculate saturation for each pixel
     auto max_result = torch::max(img, 0);
@@ -254,7 +253,6 @@ torch::Tensor adjust_tint(const torch::Tensor& image, float strength) {
 // Calculates average color and neutralizes color cast
 torch::Tensor auto_white_balance(const torch::Tensor& image) {
     auto img = image.clone();
-    auto device = img.device();
     
     // Calculate mean of each channel
     float mean_r = img[0].mean().item<float>();

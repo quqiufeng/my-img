@@ -159,7 +159,7 @@ public:
 ```
 
 **适配层设计原则**：
-1. **封装隔离**：所有 sd.cpp C API 调用都通过适配层（源码位于 `third_party/stable-diffusion.cpp`）
+1. **封装隔离**：所有 sd.cpp C API 调用都通过适配层（源码位于 `/opt/stable-diffusion.cpp`）
 2. **类型转换**：C 结构体 <-> C++ 对象（Image、参数结构体等）
 3. **资源管理**：RAII 封装 sd_ctx_t 生命周期
 4. **版本兼容**：sd.cpp 升级时只需修改适配层实现

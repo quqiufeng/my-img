@@ -31,7 +31,7 @@
 
 ```bash
 # Step 1: 覆盖新版 sd.cpp（无需担心冲突）
-cd third_party/stable-diffusion.cpp
+cd /opt/stable-diffusion.cpp
 git pull origin master
 
 # Step 2: 检查公开 API 变化
@@ -57,7 +57,7 @@ vimdiff include/stable-diffusion.h /tmp/sd.h.old
 ```
 stable-diffusion.cpp 已升级，请检查适配器代码是否需要更新。
 
-1. 读取 sd.cpp 最新头文件：third_party/stable-diffusion.cpp/include/stable-diffusion.h
+1. 读取 sd.cpp 最新头文件：/opt/stable-diffusion.cpp/include/stable-diffusion.h
 2. 读取适配器实现：src/adapters/sdcpp_adapter.cpp
 3. 读取适配器头文件：src/adapters/sdcpp_adapter.h
 4. 读取 CLI 入口：src/main.cpp
@@ -79,19 +79,19 @@ stable-diffusion.cpp 已升级，请检查适配器代码是否需要更新。
 ### Step 1: 更新 sd.cpp
 
 ```bash
-cd third_party/stable-diffusion.cpp
+cd /opt/stable-diffusion.cpp
 git pull origin master
 git submodule update --init --recursive
 rm -rf build && mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DGGML_CUDA=ON
 make -j$(nproc) stable-diffusion
-cd ../../..
+cd /path/to/your/my-img
 ```
 
 ### Step 2: 使用 AI 检查适配性
 
 将以下文件内容提供给 AI：
-- `third_party/stable-diffusion.cpp/include/stable-diffusion.h`
+- `/opt/stable-diffusion.cpp/include/stable-diffusion.h`
 - `src/adapters/sdcpp_adapter.cpp`
 - `src/adapters/sdcpp_adapter.h`
 - `src/main.cpp`
@@ -245,7 +245,7 @@ case SampleMethod::NewMethod: return NEW_METHOD_SAMPLE_METHOD;
 
 3. **记录当前兼容版本**
    ```bash
-   cd third_party/stable-diffusion.cpp
+   cd /opt/stable-diffusion.cpp
    git log --oneline -1 > ../../SD_VERSION.lock
    ```
 
