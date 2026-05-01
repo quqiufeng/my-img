@@ -43,7 +43,7 @@ NC="\033[0m"
 
 MODEL_DIR="${MODEL_DIR:-/opt/image/model}"
 # 使用 my-img 编译后的二进制（开发完成后验证用）
-SD_CLI="${SD_CLI:-$HOME/my-img/build/myimg-cli}"
+SD_CLI="${SD_CLI:-/opt/my-img/build/myimg-cli}"
 DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z_image_turbo-Q8_0.gguf}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
@@ -96,8 +96,8 @@ if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Err
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
-STEPS="${STEPS:-30}"
-HIRES_STEPS="${HIRES_STEPS:-50}"
+STEPS="${STEPS:-25}"
+HIRES_STEPS="${HIRES_STEPS:-55}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then

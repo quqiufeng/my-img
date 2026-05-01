@@ -5,9 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# 启用 LTO 以与 sd.cpp 兼容
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+# LTO 仅在 Release 模式下启用
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
 
 # ============================================================
 # 1. 查找 libtorch
@@ -154,6 +154,8 @@ if(DEFINED ENV{ONNXRUNTIME_ROOT})
     set(ONNXRUNTIME_ROOT $ENV{ONNXRUNTIME_ROOT})
 elseif(EXISTS /home/dministrator/onnxruntime-linux-x64-1.20.1)
     set(ONNXRUNTIME_ROOT /home/dministrator/onnxruntime-linux-x64-1.20.1)
+elseif(EXISTS /opt/onnxruntime-linux-x64-1.20.1)
+    set(ONNXRUNTIME_ROOT /opt/onnxruntime-linux-x64-1.20.1)
 elseif(EXISTS /opt/onnxruntime-linux-x64-gpu-1.16.3)
     set(ONNXRUNTIME_ROOT /opt/onnxruntime-linux-x64-gpu-1.16.3)
 endif()
@@ -225,6 +227,7 @@ target_include_directories(myimg-cli PRIVATE
     ${SDCPP_DIR}/ggml/include
     ${OpenCV_INCLUDE_DIRS}
     ${ONNXRUNTIME_INCLUDE_DIRS}
+    /usr/include/freetype2
 )
 
 # 查找 zlib
@@ -255,37 +258,29 @@ endif()
         ${SDCPP_LINK_LIBRARIES}
         ${SDCPP_LINK_END}
         ${CMAKE_THREAD_LIBS_INIT}
+        freetype
     )
     if(ONNXRUNTIME_FOUND)
         target_link_libraries(myimg-cli PRIVATE
             ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so
         )
     endif()
-    if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
-    else()
-    endif()
-
 # ============================================================
 # 6. 编译选项
 # ============================================================
 if(MSVC)
     target_compile_options(myimg-cli PRIVATE /W4 /WX-)
 else()
-    target_compile_options(myimg-cli PRIVATE 
-        -Wall 
-        -Wextra 
-        -Wno-unused-parameter
-        -Wno-unused-variable
-        -O3
-        -march=native
+    target_compile_options(myimg-cli PRIVATE
+        -Wall
+        -Wextra
+        -Werror
+        $<$<CONFIG:Release>:-O3 -march=native>
+        $<$<CONFIG:Debug>:-O0 -g>
     )
 endif()
 
-# 禁用 LTO 以避免与 sd.cpp 的 LTO 版本冲突
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_target_properties(myimg-cli PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
-endif()
+# LTO 已在顶部统一配置，此处无需重复
 
 # 设置 RPATH，使二进制能找到 libtorch 库
 if(UNIX)
@@ -317,8 +312,10 @@ message(STATUS "")
 # ============================================================
 # 9. 测试
 # ============================================================
+enable_testing()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gguf_loader.cpp")
-    add_executable(test_gguf_loader 
+    add_executable(test_gguf_loader
         tests/test_gguf_loader.cpp
         src/utils/gguf_loader.cpp
     )
@@ -335,6 +332,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gguf_loader.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_gguf_loader COMMAND test_gguf_loader)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vae.cpp")
@@ -362,6 +360,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vae.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_vae COMMAND test_vae)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix.cpp")
@@ -390,6 +389,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_hires_fix COMMAND test_hires_fix)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_model.cpp")
@@ -415,6 +415,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_model.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_z_image_model COMMAND test_z_image_model)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_quick.cpp")
@@ -440,6 +441,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_quick.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_z_image_quick COMMAND test_z_image_quick)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
@@ -467,14 +469,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
         ${WEBPMUX_LIBRARY}
     )
     target_compile_definitions(test_sdcpp_adapter PRIVATE MYIMG_ENABLE_LIBTORCH=1)
-    if(EXISTS "${SDCPP_BUILD_DIR}/ggml/src/ggml-cuda/libggml-cuda.a")
-    else()
-    endif()
     set_target_properties(test_sdcpp_adapter PROPERTIES
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
         INTERPROCEDURAL_OPTIMIZATION FALSE
     )
+    add_test(NAME test_sdcpp_adapter COMMAND test_sdcpp_adapter)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
@@ -507,6 +507,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
         BUILD_WITH_INSTALL_RPATH TRUE
         INTERPROCEDURAL_OPTIMIZATION FALSE
     )
+    add_test(NAME test_txt2img COMMAND test_txt2img)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
@@ -539,6 +540,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         BUILD_WITH_INSTALL_RPATH TRUE
         INTERPROCEDURAL_OPTIMIZATION FALSE
     )
+    add_test(NAME test_hires_fix_real COMMAND test_hires_fix_real)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_utils.cpp")
@@ -561,6 +563,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_utils.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_image_utils COMMAND test_image_utils)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_qa.cpp")
@@ -582,6 +585,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_qa.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_image_qa COMMAND test_image_qa)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_watermark.cpp")
@@ -609,6 +613,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_watermark.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_watermark COMMAND test_watermark)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shadow_effect.cpp")
@@ -630,6 +635,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shadow_effect.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_shadow_effect COMMAND test_shadow_effect)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_log.cpp")
@@ -648,6 +654,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_log.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_log COMMAND test_log)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oom_handler.cpp")
@@ -663,4 +670,5 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oom_handler.cpp")
         INSTALL_RPATH "${LIBTORCH_ROOT}/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
+    add_test(NAME test_oom_handler COMMAND test_oom_handler)
 endif()

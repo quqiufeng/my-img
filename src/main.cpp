@@ -425,12 +425,17 @@ static std::string expand_output_template(const std::string& template_str,
     while ((pos = result.find("{index:", pos)) != std::string::npos) {
         size_t end = result.find('}', pos);
         if (end != std::string::npos) {
-            int padding = std::stoi(result.substr(pos + 7, end - pos - 7));
-            std::ostringstream oss;
-            oss << std::setw(padding) << std::setfill('0') << index;
-            std::string idx_str = oss.str();
-            result.replace(pos, end - pos + 1, idx_str);
-            pos += idx_str.size();
+            try {
+                int padding = std::stoi(result.substr(pos + 7, end - pos - 7));
+                std::ostringstream oss;
+                oss << std::setw(padding) << std::setfill('0') << index;
+                std::string idx_str = oss.str();
+                result.replace(pos, end - pos + 1, idx_str);
+                pos += idx_str.size();
+            } catch (const std::exception&) {
+                std::cerr << "Warning: Invalid index padding in template, skipping\n";
+                break;
+            }
         } else {
             break;
         }
@@ -689,6 +694,166 @@ static bool load_config(const std::string& config_path, CliOptions& opts) {
     return true;
 }
 
+// Helper for safe type conversion with error handling
+template <typename T>
+static bool safe_convert(const char* str, T& out, const std::string& arg_name) {
+    try {
+        if constexpr (std::is_same_v<T, int>) {
+            out = std::stoi(str);
+        } else if constexpr (std::is_same_v<T, float>) {
+            out = std::stof(str);
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            out = std::stoll(str);
+        }
+        return true;
+    } catch (const std::exception&) {
+        std::cerr << "Error: Invalid value for " << arg_name << ": " << str << "\n";
+        return false;
+    }
+}
+
+static myimg::ImageData apply_photo_adjustments(myimg::ImageData img_data, const CliOptions& opts) {
+    // Check if any adjustments are needed
+    if (opts.temperature != 0.0f || opts.brightness != 0.0f ||
+        opts.contrast != 0.0f || opts.saturation != 0.0f ||
+        opts.exposure != 0.0f || opts.highlights != 0.0f ||
+        opts.shadows != 0.0f || opts.auto_enhance ||
+        !opts.curves.empty() ||
+        opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
+        opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
+        opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
+        !opts.skin_tone.empty() || opts.skin_even_strength > 0.0f ||
+        !opts.preset.empty() ||
+        opts.vignette_strength > 0.0f ||
+        !opts.radial_filter.empty() ||
+        !opts.graduated_filter.empty() ||
+        !opts.lut_path.empty() ||
+        opts.dehaze_strength > 0.0f ||
+        opts.vibrance != 0.0f || opts.clarity > 0.0f ||
+        opts.split_tone_strength > 0.0f ||
+        opts.tint != 0.0f || opts.auto_white_balance ||
+        opts.blacks != 0.0f || opts.whites != 0.0f ||
+        !opts.brightness_curves.empty() ||
+        !opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
+        
+        auto tensor = myimg::image_data_to_tensor(img_data);
+        
+        if (opts.auto_enhance) {
+            tensor = myimg::auto_enhance(tensor);
+        } else {
+            if (opts.temperature != 0.0f) tensor = myimg::adjust_temperature(tensor, opts.temperature);
+            if (opts.brightness != 0.0f) tensor = myimg::adjust_brightness(tensor, opts.brightness);
+            if (opts.contrast != 0.0f) tensor = myimg::adjust_contrast(tensor, opts.contrast);
+            if (opts.saturation != 0.0f) tensor = myimg::adjust_saturation(tensor, opts.saturation);
+            if (opts.exposure != 0.0f) tensor = myimg::adjust_exposure(tensor, opts.exposure);
+            if (opts.highlights != 0.0f) tensor = myimg::adjust_highlights(tensor, opts.highlights);
+            if (opts.shadows != 0.0f) tensor = myimg::adjust_shadows(tensor, opts.shadows);
+        }
+        
+        if (opts.denoise_strength > 0.0f) {
+            tensor = myimg::denoise(tensor, opts.denoise_strength);
+        }
+        if (opts.luminance_denoise_strength > 0.0f) {
+            tensor = myimg::luminance_denoise(tensor, opts.luminance_denoise_strength);
+        }
+        if (opts.color_denoise_strength > 0.0f) {
+            tensor = myimg::color_denoise(tensor, opts.color_denoise_strength);
+        }
+        if (opts.sharpen_amount > 0.0f) {
+            tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
+        }
+        
+        if (!opts.curves.empty()) {
+            tensor = myimg::apply_curves(tensor, opts.curves);
+        }
+        
+        if (!opts.brightness_curves.empty()) {
+            tensor = myimg::apply_brightness_curves(tensor, opts.brightness_curves);
+        }
+        
+        if (!opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
+            tensor = myimg::apply_channel_curves(tensor, opts.r_curves, opts.g_curves, opts.b_curves);
+        }
+        
+        if (!opts.preset.empty()) {
+            tensor = myimg::apply_preset(tensor, opts.preset);
+        }
+        
+        if (opts.vignette_strength > 0.0f) {
+            tensor = myimg::vignette(tensor, opts.vignette_strength, opts.vignette_radius);
+        }
+        
+        if (!opts.radial_filter.empty()) {
+            std::stringstream ss(opts.radial_filter);
+            float cx, cy, radius, exp_val, cont_val, sat_val;
+            char comma;
+            ss >> cx >> comma >> cy >> comma >> radius >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
+            tensor = myimg::radial_filter(tensor, cx, cy, radius, exp_val, cont_val, sat_val);
+        }
+        
+        if (!opts.graduated_filter.empty()) {
+            std::stringstream ss(opts.graduated_filter);
+            float angle, pos, width, exp_val, cont_val, sat_val;
+            char comma;
+            ss >> angle >> comma >> pos >> comma >> width >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
+            tensor = myimg::graduated_filter(tensor, angle, pos, width, exp_val, cont_val, sat_val);
+        }
+        
+        if (!opts.lut_path.empty()) {
+            myimg::LUT3D lut;
+            if (lut.load_from_file(opts.lut_path)) {
+                tensor = lut.apply(tensor);
+            }
+        }
+        
+        if (opts.dehaze_strength > 0.0f) {
+            tensor = myimg::dehaze(tensor, opts.dehaze_strength);
+        }
+        
+        if (opts.vibrance != 0.0f) {
+            tensor = myimg::adjust_vibrance(tensor, opts.vibrance);
+        }
+        
+        if (opts.clarity > 0.0f) {
+            tensor = myimg::enhance_clarity(tensor, opts.clarity);
+        }
+        
+        if (opts.split_tone_strength > 0.0f) {
+            tensor = myimg::split_tone(tensor, opts.split_tone_highlights, opts.split_tone_shadows, opts.split_tone_strength);
+        }
+        
+        if (opts.tint != 0.0f) {
+            tensor = myimg::adjust_tint(tensor, opts.tint);
+        }
+        
+        if (opts.auto_white_balance) {
+            tensor = myimg::auto_white_balance(tensor);
+        }
+        
+        if (opts.blacks != 0.0f || opts.whites != 0.0f) {
+            tensor = myimg::adjust_levels(tensor, opts.blacks, opts.whites);
+        }
+        
+        if (opts.whiten_strength > 0.0f) {
+            tensor = myimg::whiten(tensor, opts.whiten_strength);
+        }
+        if (opts.skin_smooth_strength > 0.0f) {
+            tensor = myimg::skin_smooth(tensor, opts.skin_smooth_strength);
+        }
+        
+        if (!opts.skin_tone.empty()) {
+            tensor = myimg::skin_tone_match(tensor, opts.skin_tone, opts.skin_tone_strength);
+        }
+        if (opts.skin_even_strength > 0.0f) {
+            tensor = myimg::skin_tone_even(tensor, opts.skin_even_strength);
+        }
+        
+        img_data = myimg::tensor_to_image_data(tensor);
+    }
+    
+    return img_data;
+}
+
 static bool parse_args(int argc, char** argv, CliOptions& opts) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -729,16 +894,16 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.negative_prompt = argv[i];
         } else if (arg == "-W" || arg == "--width") {
             if (++i >= argc) { std::cerr << "Missing value for -W/--width\n"; return false; }
-            opts.width = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.width, "--width")) return false;
         } else if (arg == "-H" || arg == "--height") {
             if (++i >= argc) { std::cerr << "Missing value for -H/--height\n"; return false; }
-            opts.height = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.height, "--height")) return false;
         } else if (arg == "--steps") {
             if (++i >= argc) { std::cerr << "Missing value for --steps\n"; return false; }
-            opts.steps = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.steps, "--steps")) return false;
         } else if (arg == "--cfg-scale") {
             if (++i >= argc) { std::cerr << "Missing value for --cfg-scale\n"; return false; }
-            opts.cfg_scale = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.cfg_scale, "--cfg-scale")) return false;
         } else if (arg == "--sampling-method") {
             if (++i >= argc) { std::cerr << "Missing value for --sampling-method\n"; return false; }
             opts.sampling_method = argv[i];
@@ -747,16 +912,16 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.scheduler = argv[i];
         } else if (arg == "-s" || arg == "--seed") {
             if (++i >= argc) { std::cerr << "Missing value for -s/--seed\n"; return false; }
-            opts.seed = std::stoll(argv[i]);
+            if (!safe_convert(argv[i], opts.seed, "--seed")) return false;
         } else if (arg == "--batch-count") {
             if (++i >= argc) { std::cerr << "Missing value for --batch-count\n"; return false; }
-            opts.batch_count = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.batch_count, "--batch-count")) return false;
         } else if (arg == "-i" || arg == "--init-img") {
             if (++i >= argc) { std::cerr << "Missing value for -i/--init-img\n"; return false; }
             opts.init_image = argv[i];
         } else if (arg == "--strength") {
             if (++i >= argc) { std::cerr << "Missing value for --strength\n"; return false; }
-            opts.strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.strength, "--strength")) return false;
         } else if (arg == "--mask") {
             if (++i >= argc) { std::cerr << "Missing value for --mask\n"; return false; }
             opts.mask_image = argv[i];
@@ -768,7 +933,7 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.control_image = argv[i];
         } else if (arg == "--control-strength") {
             if (++i >= argc) { std::cerr << "Missing value for --control-strength\n"; return false; }
-            opts.control_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.control_strength, "--control-strength")) return false;
         } else if (arg == "--diffusion-fa") {
             opts.diffusion_fa = true;
         } else if (arg == "--vae-tiling") {
@@ -778,68 +943,70 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             std::string val = argv[i];
             size_t x = val.find('x');
             if (x != std::string::npos) {
-                opts.vae_tile_size_w = std::stoi(val.substr(0, x));
-                opts.vae_tile_size_h = std::stoi(val.substr(x + 1));
+                if (!safe_convert(val.substr(0, x).c_str(), opts.vae_tile_size_w, "--vae-tile-size")) return false;
+                if (!safe_convert(val.substr(x + 1).c_str(), opts.vae_tile_size_h, "--vae-tile-size")) return false;
             } else {
-                opts.vae_tile_size_w = opts.vae_tile_size_h = std::stoi(val);
+                int tile_size;
+                if (!safe_convert(val.c_str(), tile_size, "--vae-tile-size")) return false;
+                opts.vae_tile_size_w = opts.vae_tile_size_h = tile_size;
             }
         } else if (arg == "--vae-tile-overlap") {
             if (++i >= argc) { std::cerr << "Missing value for --vae-tile-overlap\n"; return false; }
-            opts.vae_tile_overlap = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.vae_tile_overlap, "--vae-tile-overlap")) return false;
         } else if (arg == "--hires") {
             opts.hires = true;
         } else if (arg == "--hires-width") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-width\n"; return false; }
-            opts.hires_width = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.hires_width, "--hires-width")) return false;
         } else if (arg == "--hires-height") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-height\n"; return false; }
-            opts.hires_height = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.hires_height, "--hires-height")) return false;
         } else if (arg == "--hires-strength") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-strength\n"; return false; }
-            opts.hires_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.hires_strength, "--hires-strength")) return false;
         } else if (arg == "--hires-steps") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-steps\n"; return false; }
-            opts.hires_steps = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.hires_steps, "--hires-steps")) return false;
         } else if (arg == "--hires-upscaler") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-upscaler\n"; return false; }
             opts.hires_upscaler = argv[i];
         } else if (arg == "--hires-scale") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-scale\n"; return false; }
-            opts.hires_scale = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.hires_scale, "--hires-scale")) return false;
         } else if (arg == "--hires-model") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-model\n"; return false; }
             opts.hires_model_path = argv[i];
         } else if (arg == "--hires-tile-size") {
             if (++i >= argc) { std::cerr << "Missing value for --hires-tile-size\n"; return false; }
-            opts.hires_tile_size = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.hires_tile_size, "--hires-tile-size")) return false;
         } else if (arg == "--freeu") {
             opts.freeu = true;
         } else if (arg == "--freeu-b1") {
             if (++i >= argc) { std::cerr << "Missing value for --freeu-b1\n"; return false; }
-            opts.freeu_b1 = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.freeu_b1, "--freeu-b1")) return false;
         } else if (arg == "--freeu-b2") {
             if (++i >= argc) { std::cerr << "Missing value for --freeu-b2\n"; return false; }
-            opts.freeu_b2 = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.freeu_b2, "--freeu-b2")) return false;
         } else if (arg == "--freeu-s1") {
             if (++i >= argc) { std::cerr << "Missing value for --freeu-s1\n"; return false; }
-            opts.freeu_s1 = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.freeu_s1, "--freeu-s1")) return false;
         } else if (arg == "--freeu-s2") {
             if (++i >= argc) { std::cerr << "Missing value for --freeu-s2\n"; return false; }
-            opts.freeu_s2 = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.freeu_s2, "--freeu-s2")) return false;
         } else if (arg == "--sag") {
             opts.sag = true;
         } else if (arg == "--sag-scale") {
             if (++i >= argc) { std::cerr << "Missing value for --sag-scale\n"; return false; }
-            opts.sag_scale = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.sag_scale, "--sag-scale")) return false;
         } else if (arg == "--upscale-repeats") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-repeats\n"; return false; }
-            opts.upscale_repeats = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.upscale_repeats, "--upscale-repeats")) return false;
         } else if (arg == "--lora") {
             if (++i >= argc) { std::cerr << "Missing value for --lora\n"; return false; }
             opts.loras.push_back(argv[i]);
         } else if (arg == "--upscale-tile-size") {
             if (++i >= argc) { std::cerr << "Missing value for --upscale-tile-size\n"; return false; }
-            opts.upscale_tile_size = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.upscale_tile_size, "--upscale-tile-size")) return false;
         } else if (arg == "-o" || arg == "--output") {
             if (++i >= argc) { std::cerr << "Missing value for -o/--output\n"; return false; }
             opts.output = argv[i];
@@ -847,39 +1014,39 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.embed_metadata = true;
         } else if (arg == "--quality") {
             if (++i >= argc) { std::cerr << "Missing value for --quality\n"; return false; }
-            opts.jpeg_quality = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.jpeg_quality, "--jpeg-quality")) return false;
         } else if (arg == "--threads") {
             if (++i >= argc) { std::cerr << "Missing value for --threads\n"; return false; }
-            opts.threads = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.threads, "--threads")) return false;
         } else if (arg == "--temperature") {
             if (++i >= argc) { std::cerr << "Missing value for --temperature\n"; return false; }
-            opts.temperature = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.temperature, "--temperature")) return false;
         } else if (arg == "--brightness") {
             if (++i >= argc) { std::cerr << "Missing value for --brightness\n"; return false; }
-            opts.brightness = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.brightness, "--brightness")) return false;
         } else if (arg == "--contrast") {
             if (++i >= argc) { std::cerr << "Missing value for --contrast\n"; return false; }
-            opts.contrast = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.contrast, "--contrast")) return false;
         } else if (arg == "--saturation") {
             if (++i >= argc) { std::cerr << "Missing value for --saturation\n"; return false; }
-            opts.saturation = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.saturation, "--saturation")) return false;
         } else if (arg == "--exposure") {
             if (++i >= argc) { std::cerr << "Missing value for --exposure\n"; return false; }
-            opts.exposure = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.exposure, "--exposure")) return false;
         } else if (arg == "--highlights") {
             if (++i >= argc) { std::cerr << "Missing value for --highlights\n"; return false; }
-            opts.highlights = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.highlights, "--highlights")) return false;
         } else if (arg == "--shadows") {
             if (++i >= argc) { std::cerr << "Missing value for --shadows\n"; return false; }
-            opts.shadows = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.shadows, "--shadows")) return false;
         } else if (arg == "--auto-enhance") {
             opts.auto_enhance = true;
         } else if (arg == "--vibrance") {
             if (++i >= argc) { std::cerr << "Missing value for --vibrance\n"; return false; }
-            opts.vibrance = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.vibrance, "--vibrance")) return false;
         } else if (arg == "--clarity") {
             if (++i >= argc) { std::cerr << "Missing value for --clarity\n"; return false; }
-            opts.clarity = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.clarity, "--clarity")) return false;
         } else if (arg == "--split-tone-highlights") {
             if (++i >= argc) { std::cerr << "Missing value for --split-tone-highlights\n"; return false; }
             opts.split_tone_highlights = argv[i];
@@ -888,27 +1055,27 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.split_tone_shadows = argv[i];
         } else if (arg == "--split-tone-strength") {
             if (++i >= argc) { std::cerr << "Missing value for --split-tone-strength\n"; return false; }
-            opts.split_tone_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.split_tone_strength, "--split-tone-strength")) return false;
         } else if (arg == "--tint") {
             if (++i >= argc) { std::cerr << "Missing value for --tint\n"; return false; }
-            opts.tint = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.tint, "--tint")) return false;
         } else if (arg == "--auto-white-balance") {
             opts.auto_white_balance = true;
         } else if (arg == "--blacks") {
             if (++i >= argc) { std::cerr << "Missing value for --blacks\n"; return false; }
-            opts.blacks = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.blacks, "--blacks")) return false;
         } else if (arg == "--whites") {
             if (++i >= argc) { std::cerr << "Missing value for --whites\n"; return false; }
-            opts.whites = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.whites, "--whites")) return false;
         } else if (arg == "--curves") {
             if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
             opts.curves = argv[i];
         } else if (arg == "--vignette") {
             if (++i >= argc) { std::cerr << "Missing value for --vignette\n"; return false; }
-            opts.vignette_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.vignette_strength, "--vignette-strength")) return false;
         } else if (arg == "--vignette-radius") {
             if (++i >= argc) { std::cerr << "Missing value for --vignette-radius\n"; return false; }
-            opts.vignette_radius = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.vignette_radius, "--vignette-radius")) return false;
         } else if (arg == "--preset") {
             if (++i >= argc) { std::cerr << "Missing value for --preset\n"; return false; }
             opts.preset = argv[i];
@@ -917,55 +1084,55 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.lut_path = argv[i];
         } else if (arg == "--whiten") {
             if (++i >= argc) { std::cerr << "Missing value for --whiten\n"; return false; }
-            opts.whiten_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.whiten_strength, "--whiten-strength")) return false;
         } else if (arg == "--skin-smooth") {
             if (++i >= argc) { std::cerr << "Missing value for --skin-smooth\n"; return false; }
-            opts.skin_smooth_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.skin_smooth_strength, "--skin-smooth-strength")) return false;
         } else if (arg == "--skin-tone") {
             if (++i >= argc) { std::cerr << "Missing value for --skin-tone\n"; return false; }
             opts.skin_tone = argv[i];
         } else if (arg == "--skin-tone-strength") {
             if (++i >= argc) { std::cerr << "Missing value for --skin-tone-strength\n"; return false; }
-            opts.skin_tone_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.skin_tone_strength, "--skin-tone-strength")) return false;
         } else if (arg == "--skin-even") {
             if (++i >= argc) { std::cerr << "Missing value for --skin-even\n"; return false; }
-            opts.skin_even_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.skin_even_strength, "--skin-even-strength")) return false;
         } else if (arg == "--dehaze") {
             if (++i >= argc) { std::cerr << "Missing value for --dehaze\n"; return false; }
-            opts.dehaze_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.dehaze_strength, "--dehaze-strength")) return false;
         } else if (arg == "--sharpen") {
             if (++i >= argc) { std::cerr << "Missing value for --sharpen\n"; return false; }
-            opts.sharpen_amount = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.sharpen_amount, "--sharpen-amount")) return false;
         } else if (arg == "--sharpen-radius") {
             if (++i >= argc) { std::cerr << "Missing value for --sharpen-radius\n"; return false; }
-            opts.sharpen_radius = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.sharpen_radius, "--sharpen-radius")) return false;
         } else if (arg == "--sharpen-threshold") {
             if (++i >= argc) { std::cerr << "Missing value for --sharpen-threshold\n"; return false; }
-            opts.sharpen_threshold = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.sharpen_threshold, "--sharpen-threshold")) return false;
         } else if (arg == "--smart-sharpen") {
             if (++i >= argc) { std::cerr << "Missing value for --smart-sharpen\n"; return false; }
-            opts.smart_sharpen_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.smart_sharpen_strength, "--smart-sharpen-strength")) return false;
         } else if (arg == "--smart-sharpen-radius") {
             if (++i >= argc) { std::cerr << "Missing value for --smart-sharpen-radius\n"; return false; }
-            opts.smart_sharpen_radius = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.smart_sharpen_radius, "--smart-sharpen-radius")) return false;
         } else if (arg == "--edge-sharpen") {
             if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen\n"; return false; }
-            opts.edge_sharpen_amount = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.edge_sharpen_amount, "--edge-sharpen-amount")) return false;
         } else if (arg == "--edge-sharpen-radius") {
             if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen-radius\n"; return false; }
-            opts.edge_sharpen_radius = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.edge_sharpen_radius, "--edge-sharpen-radius")) return false;
         } else if (arg == "--edge-sharpen-threshold") {
             if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen-threshold\n"; return false; }
-            opts.edge_sharpen_threshold = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.edge_sharpen_threshold, "--edge-sharpen-threshold")) return false;
         } else if (arg == "--denoise") {
             if (++i >= argc) { std::cerr << "Missing value for --denoise\n"; return false; }
-            opts.denoise_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.denoise_strength, "--denoise-strength")) return false;
         } else if (arg == "--luminance-denoise") {
             if (++i >= argc) { std::cerr << "Missing value for --luminance-denoise\n"; return false; }
-            opts.luminance_denoise_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.luminance_denoise_strength, "--luminance-denoise-strength")) return false;
         } else if (arg == "--color-denoise") {
             if (++i >= argc) { std::cerr << "Missing value for --color-denoise\n"; return false; }
-            opts.color_denoise_strength = std::stof(argv[i]);
+            if (!safe_convert(argv[i], opts.color_denoise_strength, "--color-denoise-strength")) return false;
         } else if (arg == "--brightness-curves") {
             if (++i >= argc) { std::cerr << "Missing value for --brightness-curves\n"; return false; }
             opts.brightness_curves = argv[i];
@@ -980,27 +1147,28 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.b_curves = argv[i];
         } else if (arg == "--outpaint-top") {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint-top\n"; return false; }
-            opts.outpaint_top = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.outpaint_top, "--outpaint-top")) return false;
         } else if (arg == "--outpaint-bottom") {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint-bottom\n"; return false; }
-            opts.outpaint_bottom = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.outpaint_bottom, "--outpaint-bottom")) return false;
         } else if (arg == "--outpaint-left") {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint-left\n"; return false; }
-            opts.outpaint_left = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.outpaint_left, "--outpaint-left")) return false;
         } else if (arg == "--outpaint-right") {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint-right\n"; return false; }
-            opts.outpaint_right = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.outpaint_right, "--outpaint-right")) return false;
         } else if (arg == "--outpaint") {
             if (++i >= argc) { std::cerr << "Missing value for --outpaint\n"; return false; }
-            int val = std::stoi(argv[i]);
+            int val;
+            if (!safe_convert(argv[i], val, "--outpaint")) return false;
             opts.outpaint_top = opts.outpaint_bottom = opts.outpaint_left = opts.outpaint_right = val;
         } else if (arg == "--resize") {
             if (++i >= argc) { std::cerr << "Missing value for --resize\n"; return false; }
             std::string val = argv[i];
             size_t x = val.find('x');
             if (x != std::string::npos) {
-                opts.resize_width = std::stoi(val.substr(0, x));
-                opts.resize_height = std::stoi(val.substr(x + 1));
+                if (!safe_convert(val.substr(0, x).c_str(), opts.resize_width, "--resize")) return false;
+                if (!safe_convert(val.substr(x + 1).c_str(), opts.resize_height, "--resize")) return false;
             }
         } else if (arg == "--resize-mode") {
             if (++i >= argc) { std::cerr << "Missing value for --resize-mode\n"; return false; }
@@ -1011,7 +1179,7 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.flip_v = true;
         } else if (arg == "--rotate") {
             if (++i >= argc) { std::cerr << "Missing value for --rotate\n"; return false; }
-            opts.rotate = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.rotate, "--rotate")) return false;
         } else if (arg == "--crop") {
             if (++i >= argc) { std::cerr << "Missing value for --crop\n"; return false; }
             opts.crop = argv[i];
@@ -1026,10 +1194,10 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
             opts.control_preprocessor = argv[i];
         } else if (arg == "--control-preprocessor-param1") {
             if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor-param1\n"; return false; }
-            opts.control_preprocessor_param1 = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.control_preprocessor_param1, "--control-preprocessor-param1")) return false;
         } else if (arg == "--control-preprocessor-param2") {
             if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor-param2\n"; return false; }
-            opts.control_preprocessor_param2 = std::stoi(argv[i]);
+            if (!safe_convert(argv[i], opts.control_preprocessor_param2, "--control-preprocessor-param2")) return false;
         } else if (arg == "--depth-model") {
             if (++i >= argc) { std::cerr << "Missing value for --depth-model\n"; return false; }
             opts.depth_model = argv[i];
@@ -1428,7 +1596,12 @@ int main(int argc, char** argv) {
             myimg::LoRAConfig lora;
             if (colon != std::string::npos) {
                 lora.path = lora_str.substr(0, colon);
-                lora.multiplier = std::stof(lora_str.substr(colon + 1));
+                try {
+                    lora.multiplier = std::stof(lora_str.substr(colon + 1));
+                } catch (const std::exception&) {
+                    std::cerr << "Error: Invalid LoRA weight: " << lora_str.substr(colon + 1) << "\n";
+                    return 1;
+                }
             } else {
                 lora.path = lora_str;
                 lora.multiplier = 1.0f;
@@ -1553,180 +1726,31 @@ int main(int argc, char** argv) {
             } else if (!opts.crop_ratio.empty()) {
                 size_t colon = opts.crop_ratio.find(':');
                 if (colon != std::string::npos) {
-                    float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
-                    float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
-                    float img_ratio = (float)img_data.width / img_data.height;
-                    float target_ratio = ratio_w / ratio_h;
-                    int w, h, x, y;
-                    if (img_ratio > target_ratio) {
-                        h = img_data.height;
-                        w = (int)(h * target_ratio);
-                        x = (img_data.width - w) / 2;
-                        y = 0;
-                    } else {
-                        w = img_data.width;
-                        h = (int)(w / target_ratio);
-                        x = 0;
-                        y = (img_data.height - h) / 2;
-                    }
-                    img_data = myimg::crop_image(img_data, x, y, w, h);
-                }
-            }
-            
-            // Apply photo adjustments
-            if (opts.temperature != 0.0f || opts.brightness != 0.0f ||
-                opts.contrast != 0.0f || opts.saturation != 0.0f ||
-                opts.exposure != 0.0f || opts.highlights != 0.0f ||
-                opts.shadows != 0.0f || opts.auto_enhance ||
-                !opts.curves.empty() ||
-                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
-                opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
-                !opts.skin_tone.empty() || opts.skin_even_strength > 0.0f ||
-                !opts.preset.empty() ||
-                opts.vignette_strength > 0.0f ||
-                !opts.radial_filter.empty() ||
-                !opts.graduated_filter.empty() ||
-                !opts.lut_path.empty() ||
-                opts.dehaze_strength > 0.0f ||
-                opts.vibrance != 0.0f || opts.clarity > 0.0f ||
-                opts.split_tone_strength > 0.0f ||
-                opts.tint != 0.0f || opts.auto_white_balance ||
-                opts.blacks != 0.0f || opts.whites != 0.0f ||
-                !opts.brightness_curves.empty() ||
-                !opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
-                
-                auto tensor = myimg::image_data_to_tensor(img_data);
-                
-                if (opts.auto_enhance) {
-                    tensor = myimg::auto_enhance(tensor);
-                } else {
-                    if (opts.temperature != 0.0f) tensor = myimg::adjust_temperature(tensor, opts.temperature);
-                    if (opts.brightness != 0.0f) tensor = myimg::adjust_brightness(tensor, opts.brightness);
-                    if (opts.contrast != 0.0f) tensor = myimg::adjust_contrast(tensor, opts.contrast);
-                    if (opts.saturation != 0.0f) tensor = myimg::adjust_saturation(tensor, opts.saturation);
-                    if (opts.exposure != 0.0f) tensor = myimg::adjust_exposure(tensor, opts.exposure);
-                    if (opts.highlights != 0.0f) tensor = myimg::adjust_highlights(tensor, opts.highlights);
-                    if (opts.shadows != 0.0f) tensor = myimg::adjust_shadows(tensor, opts.shadows);
-                }
-                
-                if (opts.denoise_strength > 0.0f) {
-                    tensor = myimg::denoise(tensor, opts.denoise_strength);
-                }
-                if (opts.luminance_denoise_strength > 0.0f) {
-                    tensor = myimg::luminance_denoise(tensor, opts.luminance_denoise_strength);
-                }
-                if (opts.color_denoise_strength > 0.0f) {
-                    tensor = myimg::color_denoise(tensor, opts.color_denoise_strength);
-                }
-                if (opts.sharpen_amount > 0.0f) {
-                    tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
-                }
-                
-                // RGB curves
-                if (!opts.curves.empty()) {
-                    tensor = myimg::apply_curves(tensor, opts.curves);
-                }
-                
-                // Brightness curves (luma only)
-                if (!opts.brightness_curves.empty()) {
-                    tensor = myimg::apply_brightness_curves(tensor, opts.brightness_curves);
-                }
-                
-                // Per-channel RGB curves
-                if (!opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
-                    tensor = myimg::apply_channel_curves(tensor, opts.r_curves, opts.g_curves, opts.b_curves);
-                }
-                
-                // Filter preset
-                if (!opts.preset.empty()) {
-                    tensor = myimg::apply_preset(tensor, opts.preset);
-                }
-                
-                // Vignette
-                if (opts.vignette_strength > 0.0f) {
-                    tensor = myimg::vignette(tensor, opts.vignette_strength, opts.vignette_radius);
-                }
-                
-                // 径向滤镜
-                if (!opts.radial_filter.empty()) {
-                    std::stringstream ss(opts.radial_filter);
-                    float cx, cy, radius, exp_val, cont_val, sat_val;
-                    char comma;
-                    ss >> cx >> comma >> cy >> comma >> radius >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
-                    tensor = myimg::radial_filter(tensor, cx, cy, radius, exp_val, cont_val, sat_val);
-                }
-                
-                // 渐变滤镜
-                if (!opts.graduated_filter.empty()) {
-                    std::stringstream ss(opts.graduated_filter);
-                    float angle, pos, width, exp_val, cont_val, sat_val;
-                    char comma;
-                    ss >> angle >> comma >> pos >> comma >> width >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
-                    tensor = myimg::graduated_filter(tensor, angle, pos, width, exp_val, cont_val, sat_val);
-                }
-                
-                // LUT 颜色分级
-                if (!opts.lut_path.empty()) {
-                    myimg::LUT3D lut;
-                    if (lut.load_from_file(opts.lut_path)) {
-                        tensor = lut.apply(tensor);
+                    try {
+                        float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
+                        float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
+                        float img_ratio = (float)img_data.width / img_data.height;
+                        float target_ratio = ratio_w / ratio_h;
+                        int w, h, x, y;
+                        if (img_ratio > target_ratio) {
+                            h = img_data.height;
+                            w = (int)(h * target_ratio);
+                            x = (img_data.width - w) / 2;
+                            y = 0;
+                        } else {
+                            w = img_data.width;
+                            h = (int)(w / target_ratio);
+                            x = 0;
+                            y = (img_data.height - h) / 2;
+                        }
+                        img_data = myimg::crop_image(img_data, x, y, w, h);
+                    } catch (const std::exception&) {
+                        std::cerr << "Error: Invalid crop ratio: " << opts.crop_ratio << "\n";
                     }
                 }
-                
-                // 去雾
-                if (opts.dehaze_strength > 0.0f) {
-                    tensor = myimg::dehaze(tensor, opts.dehaze_strength);
-                }
-                
-                // Vibrance
-                if (opts.vibrance != 0.0f) {
-                    tensor = myimg::adjust_vibrance(tensor, opts.vibrance);
-                }
-                
-                // Clarity
-                if (opts.clarity > 0.0f) {
-                    tensor = myimg::enhance_clarity(tensor, opts.clarity);
-                }
-                
-                // Split toning
-                if (opts.split_tone_strength > 0.0f) {
-                    tensor = myimg::split_tone(tensor, opts.split_tone_highlights, opts.split_tone_shadows, opts.split_tone_strength);
-                }
-                
-                // Tint
-                if (opts.tint != 0.0f) {
-                    tensor = myimg::adjust_tint(tensor, opts.tint);
-                }
-                
-                // Auto white balance
-                if (opts.auto_white_balance) {
-                    tensor = myimg::auto_white_balance(tensor);
-                }
-                
-                // Black/White levels
-                if (opts.blacks != 0.0f || opts.whites != 0.0f) {
-                    tensor = myimg::adjust_levels(tensor, opts.blacks, opts.whites);
-                }
-                
-                // Portrait retouching
-                if (opts.whiten_strength > 0.0f) {
-                    tensor = myimg::whiten(tensor, opts.whiten_strength);
-                }
-                if (opts.skin_smooth_strength > 0.0f) {
-                    tensor = myimg::skin_smooth(tensor, opts.skin_smooth_strength);
-                }
-                
-                // Skin tone matching
-                if (!opts.skin_tone.empty()) {
-                    tensor = myimg::skin_tone_match(tensor, opts.skin_tone, opts.skin_tone_strength);
-                }
-                if (opts.skin_even_strength > 0.0f) {
-                    tensor = myimg::skin_tone_even(tensor, opts.skin_even_strength);
-                }
-                
-                img_data = myimg::tensor_to_image_data(tensor);
             }
+
+            img_data = apply_photo_adjustments(img_data, opts);
             
             myimg::Image image;
             image.width = img_data.width;
@@ -1851,184 +1875,18 @@ int main(int argc, char** argv) {
         }
         
         // 摄影后期调整
-        bool has_adjustments = opts.temperature != 0.0f || opts.brightness != 0.0f ||
-                               opts.contrast != 0.0f || opts.saturation != 0.0f ||
-                               opts.exposure != 0.0f || opts.highlights != 0.0f ||
-                               opts.shadows != 0.0f || opts.auto_enhance ||
-                               opts.vibrance != 0.0f || opts.clarity > 0.0f ||
-                               opts.split_tone_strength > 0.0f ||
-                               opts.tint != 0.0f || opts.auto_white_balance ||
-                               opts.blacks != 0.0f || opts.whites != 0.0f ||
-                               !opts.brightness_curves.empty() ||
-                               !opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty() ||
-                               !opts.curves.empty() ||
-                opts.sharpen_amount > 0.0f || opts.denoise_strength > 0.0f ||
-                opts.luminance_denoise_strength > 0.0f || opts.color_denoise_strength > 0.0f ||
-                               opts.whiten_strength > 0.0f || opts.skin_smooth_strength > 0.0f ||
-                               !opts.skin_tone.empty() || opts.skin_even_strength > 0.0f ||
-                               !opts.preset.empty() ||
-                               opts.vignette_strength > 0.0f ||
-                               !opts.radial_filter.empty() ||
-                               !opts.graduated_filter.empty() ||
-                               !opts.lut_path.empty() ||
-                               opts.dehaze_strength > 0.0f;
-        if (has_adjustments) {
-            std::cout << "Applying photo adjustments...\n";
-            myimg::ImageData img_data;
-            img_data.width = image.width;
-            img_data.height = image.height;
-            img_data.channels = image.channels;
-            img_data.data = std::move(image.data);
-            
-            auto tensor = myimg::image_data_to_tensor(img_data);
-            
-            if (opts.auto_enhance) {
-                tensor = myimg::auto_enhance(tensor);
-            } else {
-                if (opts.temperature != 0.0f) tensor = myimg::adjust_temperature(tensor, opts.temperature);
-                if (opts.brightness != 0.0f) tensor = myimg::adjust_brightness(tensor, opts.brightness);
-                if (opts.contrast != 0.0f) tensor = myimg::adjust_contrast(tensor, opts.contrast);
-                if (opts.saturation != 0.0f) tensor = myimg::adjust_saturation(tensor, opts.saturation);
-                if (opts.exposure != 0.0f) tensor = myimg::adjust_exposure(tensor, opts.exposure);
-                if (opts.highlights != 0.0f) tensor = myimg::adjust_highlights(tensor, opts.highlights);
-                if (opts.shadows != 0.0f) tensor = myimg::adjust_shadows(tensor, opts.shadows);
-            }
-            
-            // 降噪（在锐化之前）
-            if (opts.denoise_strength > 0.0f) {
-                std::cout << "Applying denoise...\n";
-                tensor = myimg::denoise(tensor, opts.denoise_strength);
-            }
-            if (opts.luminance_denoise_strength > 0.0f) {
-                std::cout << "Applying luminance denoise: " << opts.luminance_denoise_strength << "\n";
-                tensor = myimg::luminance_denoise(tensor, opts.luminance_denoise_strength);
-            }
-            if (opts.color_denoise_strength > 0.0f) {
-                std::cout << "Applying color denoise: " << opts.color_denoise_strength << "\n";
-                tensor = myimg::color_denoise(tensor, opts.color_denoise_strength);
-            }
-            /* Smart denoise (disabled - conv2d crash under investigation)
-            if (opts.smart_denoise_flag) {
-                std::cout << "Applying smart denoise...\n";
-                tensor = myimg::smart_denoise(tensor, 0.5f);
-            }
-            */
-            
-            // USM 锐化
-            if (opts.sharpen_amount > 0.0f) {
-                std::cout << "Applying USM sharpen...\n";
-                tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
-            }
-            
-            /* Smart sharpen (disabled - conv2d crash under investigation)
-            if (opts.smart_sharpen_strength > 0.0f) {
-                std::cout << "Applying smart sharpen...\n";
-                tensor = myimg::smart_sharpen(tensor, opts.smart_sharpen_strength, opts.smart_sharpen_radius);
-            }
-            */
-            
-            /* Edge-mask sharpening (disabled - conv2d crash under investigation)
-            if (opts.edge_sharpen_amount > 0.0f) {
-                std::cout << "Applying edge-mask sharpen: amount=" << opts.edge_sharpen_amount
-                          << " radius=" << opts.edge_sharpen_radius
-                          << " threshold=" << opts.edge_sharpen_threshold << "\n";
-                tensor = myimg::edge_mask_sharpen(tensor, opts.edge_sharpen_amount, opts.edge_sharpen_radius, opts.edge_sharpen_threshold);
-            }
-            */
-            
-            // RGB 曲线
-            if (!opts.curves.empty()) {
-                std::cout << "Applying curves: " << opts.curves << "\n";
-                tensor = myimg::apply_curves(tensor, opts.curves);
-            }
-            
-            // Brightness curves (luma only)
-            if (!opts.brightness_curves.empty()) {
-                std::cout << "Applying brightness curves: " << opts.brightness_curves << "\n";
-                tensor = myimg::apply_brightness_curves(tensor, opts.brightness_curves);
-            }
-            
-            // Per-channel RGB curves
-            if (!opts.r_curves.empty() || !opts.g_curves.empty() || !opts.b_curves.empty()) {
-                std::cout << "Applying channel curves...\n";
-                tensor = myimg::apply_channel_curves(tensor, opts.r_curves, opts.g_curves, opts.b_curves);
-            }
-            
-            // 滤镜预设
-            if (!opts.preset.empty()) {
-                std::cout << "Applying preset: " << opts.preset << "\n";
-                tensor = myimg::apply_preset(tensor, opts.preset);
-            }
-            
-            // 暗角
-            if (opts.vignette_strength > 0.0f) {
-                std::cout << "Applying vignette...\n";
-                tensor = myimg::vignette(tensor, opts.vignette_strength, opts.vignette_radius);
-            }
-            
-            // 径向滤镜
-            if (!opts.radial_filter.empty()) {
-                std::cout << "Applying radial filter: " << opts.radial_filter << "\n";
-                // 格式: cx,cy,radius,exposure,contrast,saturation
-                std::stringstream ss(opts.radial_filter);
-                float cx, cy, radius, exp_val, cont_val, sat_val;
-                char comma;
-                ss >> cx >> comma >> cy >> comma >> radius >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
-                tensor = myimg::radial_filter(tensor, cx, cy, radius, exp_val, cont_val, sat_val);
-            }
-            
-            // 渐变滤镜
-            if (!opts.graduated_filter.empty()) {
-                std::cout << "Applying graduated filter: " << opts.graduated_filter << "\n";
-                // 格式: angle,position,width,exposure,contrast,saturation
-                std::stringstream ss(opts.graduated_filter);
-                float angle, pos, width, exp_val, cont_val, sat_val;
-                char comma;
-                ss >> angle >> comma >> pos >> comma >> width >> comma >> exp_val >> comma >> cont_val >> comma >> sat_val;
-                tensor = myimg::graduated_filter(tensor, angle, pos, width, exp_val, cont_val, sat_val);
-            }
-            
-            // LUT 颜色分级
-            if (!opts.lut_path.empty()) {
-                std::cout << "Applying LUT: " << opts.lut_path << "\n";
-                myimg::LUT3D lut;
-                if (lut.load_from_file(opts.lut_path)) {
-                    tensor = lut.apply(tensor);
-                }
-            }
-            
-            // 去雾
-            if (opts.dehaze_strength > 0.0f) {
-                std::cout << "Applying dehaze...\n";
-                tensor = myimg::dehaze(tensor, opts.dehaze_strength);
-            }
-            
-            // 人像修饰
-            if (opts.whiten_strength > 0.0f) {
-                std::cout << "Applying whitening...\n";
-                tensor = myimg::whiten(tensor, opts.whiten_strength);
-            }
-            if (opts.skin_smooth_strength > 0.0f) {
-                std::cout << "Applying skin smoothing...\n";
-                tensor = myimg::skin_smooth(tensor, opts.skin_smooth_strength);
-            }
-            
-            // Skin tone matching
-            if (!opts.skin_tone.empty()) {
-                std::cout << "Applying skin tone: " << opts.skin_tone << " (strength: " << opts.skin_tone_strength << ")\n";
-                tensor = myimg::skin_tone_match(tensor, opts.skin_tone, opts.skin_tone_strength);
-            }
-            if (opts.skin_even_strength > 0.0f) {
-                std::cout << "Applying skin tone evening: " << opts.skin_even_strength << "\n";
-                tensor = myimg::skin_tone_even(tensor, opts.skin_even_strength);
-            }
-            
-            img_data = myimg::tensor_to_image_data(tensor);
-            image.width = img_data.width;
-            image.height = img_data.height;
-            image.channels = img_data.channels;
-            image.data = std::move(img_data.data);
-        }
+        myimg::ImageData img_data;
+        img_data.width = image.width;
+        img_data.height = image.height;
+        img_data.channels = image.channels;
+        img_data.data = std::move(image.data);
+        
+        img_data = apply_photo_adjustments(img_data, opts);
+        
+        image.width = img_data.width;
+        image.height = img_data.height;
+        image.channels = img_data.channels;
+        image.data = std::move(img_data.data);
         
         // 后处理变换
         bool has_transform = opts.resize_width > 0 || opts.resize_height > 0 ||
@@ -2073,26 +1931,30 @@ int main(int argc, char** argv) {
             } else if (!opts.crop_ratio.empty()) {
                 size_t colon = opts.crop_ratio.find(':');
                 if (colon != std::string::npos) {
-                    float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
-                    float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
-                    float img_ratio = (float)img_data.width / img_data.height;
-                    float target_ratio = ratio_w / ratio_h;
-                    int w, h, x, y;
-                    if (img_ratio > target_ratio) {
-                        h = img_data.height;
-                        w = (int)(h * target_ratio);
-                        x = (img_data.width - w) / 2;
-                        y = 0;
-                    } else {
-                        w = img_data.width;
-                        h = (int)(w / target_ratio);
-                        x = 0;
-                        y = (img_data.height - h) / 2;
+                    try {
+                        float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
+                        float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
+                        float img_ratio = (float)img_data.width / img_data.height;
+                        float target_ratio = ratio_w / ratio_h;
+                        int w, h, x, y;
+                        if (img_ratio > target_ratio) {
+                            h = img_data.height;
+                            w = (int)(h * target_ratio);
+                            x = (img_data.width - w) / 2;
+                            y = 0;
+                        } else {
+                            w = img_data.width;
+                            h = (int)(w / target_ratio);
+                            x = 0;
+                            y = (img_data.height - h) / 2;
+                        }
+                        img_data = myimg::crop_image(img_data, x, y, w, h);
+                    } catch (const std::exception&) {
+                        std::cerr << "Error: Invalid crop ratio: " << opts.crop_ratio << "\n";
                     }
-                    img_data = myimg::crop_image(img_data, x, y, w, h);
                 }
             }
-            
+
             image.width = img_data.width;
             image.height = img_data.height;
             image.channels = img_data.channels;
