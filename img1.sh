@@ -107,7 +107,7 @@ if [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
 fi
 
-NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders}"
+NEGATIVE_PROMPT="${NEGATIVE_PROMPT:-blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5}"
 
 if [ -n "$OUTPUT_FILE" ]; then
     if [[ "$OUTPUT_FILE" == *"/"* ]]; then
@@ -217,7 +217,18 @@ SD_CMD=("$SD_CLI"
   --vae-tile-size 256x256
   --vae-tile-overlap 0.5
   --freeu
-  # --sag  # 默认禁用 SAG（性能开销较大，效果提升有限）
+  --sag
+  --sag-scale 1.0
+  --auto-enhance
+  --clarity 0.6
+  --sharpen 1.5
+  --sharpen-radius 2
+  --smart-sharpen 1.2
+  --smart-sharpen-radius 2
+  --edge-sharpen 1.0
+  --edge-sharpen-radius 2
+  --edge-sharpen-threshold 0.3
+  --embedding-dir "$MODEL_DIR/embeddings"
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires
