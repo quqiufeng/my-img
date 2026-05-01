@@ -192,6 +192,24 @@ image.save_to_file("output.png");
 - PNG/JPG 加载和保存
 - 元数据嵌入（预留）
 
+#### 9. Self-Attention Guidance (SAG)
+- 通过自注意力引导减少结构崩坏
+- 显著提升面部和花卉的连贯性
+- 有效抑制多人症、畸形五官等问题
+
+#### 10. 图像后处理增强
+- **USM 锐化**：通用细节增强（amount/radius/threshold 可调）
+- **Smart Sharpen**：边缘感知锐化，避免噪点放大
+- **Edge Sharpen**：边缘遮罩锐化，强化花瓣/发丝边缘无光环
+- **Clarity 清晰度**：中间调纹理增强（类似 Lightroom Clarity）
+- **Auto-Enhance**：一键自动对比度/色彩/细节优化
+
+#### 11. Negative Embeddings (Textual Inversion)
+- 加载负面嵌入模型（.pt / .safetensors）
+- 比纯文本负面提示更精准地抑制畸形
+- 默认加载 EasyNegative + bad-hands-5
+- 通过 `--embd-dir` 指定嵌入目录
+
 ### 开发中功能 🚧
 
 #### 1. img2img（图像到图像）
@@ -647,18 +665,27 @@ make -j$(nproc)
   -p "a beautiful landscape" \
   -o output.png
 
-# 带 HiRes Fix 的 2560x1440 人像（推荐参数）
+# 带 HiRes Fix 的 2560x1440 人像（推荐参数 + 图像增强）
 ./myimg-cli \
   --diffusion-model /path/to/z_image_turbo-Q5_K_M.gguf \
   --vae /path/to/ae.safetensors \
   --llm /path/to/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
   -p "portrait of a young woman, soft lighting" \
+  -n "blurry, low quality, embedding:EasyNegative, embedding:bad-hands-5" \
   -W 1280 -H 720 \
   --hires --hires-width 2560 --hires-height 1440 \
   --hires-strength 0.30 --hires-steps 45 \
   --sampling-method euler --scheduler discrete \
   --cfg-scale 3.2 --steps 25 \
   --diffusion-fa --vae-tiling \
+  --sag --sag-scale 1.0 \
+  --freeu \
+  --auto-enhance \
+  --clarity 0.6 \
+  --sharpen 1.5 --sharpen-radius 2 \
+  --smart-sharpen 1.2 --smart-sharpen-radius 2 \
+  --edge-sharpen 1.0 --edge-sharpen-radius 2 --edge-sharpen-threshold 0.3 \
+  --embd-dir /path/to/embeddings \
   -o portrait_2k.png
 
 # 查看所有参数
@@ -702,9 +729,16 @@ BUILD_TYPE=Debug ./build.sh
 **特点**：
 - 低分辨率基础（1280×720）→ HiRes 放大到目标分辨率
 - **推荐参数**：25 步基础 + 45 步 HiRes，0.30 strength，3.2 CFG
-- 自动添加质量前缀词和负面提示词
+- 自动添加质量前缀词和负面提示词（含 EasyNegative + bad-hands-5 嵌入）
 - 启用 VAE Tiling 和 Flash Attention 节省显存
 - 针对人像/风景优化采样参数（euler + discrete）
+- **图像增强算法（默认启用）**：
+  - SAG（Self-Attention Guidance）：提升面部/花卉结构连贯性
+  - FreeU：增强细节和质量
+  - 三重锐化（USM + Smart + Edge-mask）：强化花瓣/发丝边缘
+  - Clarity 清晰度：中间调纹理增强
+  - Auto-Enhance：一键自动对比度/色彩优化
+  - Negative Embeddings：精准抑制畸形手部/低质量伪影
 
 #### `img2.sh` - RTX 4090D 24G 优化出图
 
@@ -720,8 +754,15 @@ BUILD_TYPE=Debug ./build.sh
 
 **特点**：
 - 更高基础分辨率（2048×1152 / 2560×1440）→ 更小的放大倍数，画质更好
-- 与 img1.sh 相同的自动化质量优化
+- 与 img1.sh 相同的自动化质量优化和图像增强算法
 - 充分利用 24GB 显存，减少 latent 插值损失
+- **图像增强算法（默认启用）**：
+  - SAG（Self-Attention Guidance）：提升面部/花卉结构连贯性
+  - FreeU：增强细节和质量
+  - 三重锐化（USM + Smart + Edge-mask）：强化花瓣/发丝边缘
+  - Clarity 清晰度：中间调纹理增强
+  - Auto-Enhance：一键自动对比度/色彩优化
+  - Negative Embeddings：精准抑制畸形手部/低质量伪影
 
 **脚本对比**：
 

@@ -228,7 +228,7 @@ SD_CMD=("$SD_CLI"
   --edge-sharpen 1.0
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
-  --embedding-dir "$MODEL_DIR/embeddings"
+  --embd-dir "$MODEL_DIR/embeddings"
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires
