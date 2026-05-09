@@ -1372,6 +1372,7 @@ int main(int argc, char** argv) {
         image.width = result.width;
         image.height = result.height;
         image.channels = result.channels;
+        image.jpeg_quality = opts.jpeg_quality;
         image.data = std::move(result.data);
         
         if (image.save_to_file(output_file)) {
@@ -1762,6 +1763,7 @@ int main(int argc, char** argv) {
             image.width = img_data.width;
             image.height = img_data.height;
             image.channels = img_data.channels;
+            image.jpeg_quality = opts.jpeg_quality;
             image.data = std::move(img_data.data);
             
             if (!image.save_to_file(output_file)) {
@@ -1829,9 +1831,6 @@ int main(int argc, char** argv) {
     std::cout << "Output: " << opts.output << "\n";
     std::cout << "========================================\n\n";
     
-    // 设置 JPEG 质量
-    myimg::set_jpeg_quality(opts.jpeg_quality);
-    
     // 初始化适配器
     myimg::SDCPPAdapter adapter;
     if (!adapter.initialize(params)) {
@@ -1865,6 +1864,7 @@ int main(int argc, char** argv) {
         
         // 生成图像
         myimg::Image image = adapter.generate_single(params);
+        image.jpeg_quality = opts.jpeg_quality;
         if (image.empty()) {
             std::cerr << "Generation failed for image " << (i + 1) << "\n";
             continue;

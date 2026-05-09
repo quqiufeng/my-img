@@ -1,8 +1,38 @@
 #include "utils/image_utils.h"
+#include "utils/log.h"
 #include <torch/torch.h>
 #include <cmath>
 
 namespace myimg {
+
+namespace {
+// ============================================================
+// 内部辅助函数
+// ============================================================
+
+// 创建 3x3 高斯核 [1, 1, 3, 3]
+torch::Tensor make_gaussian_kernel_3x3(const torch::Device& device) {
+    auto kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f},
+                                   {0.125f, 0.25f, 0.125f},
+                                   {0.0625f, 0.125f, 0.0625f}}},
+                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    return kernel.unsqueeze(0).unsqueeze(0).contiguous();
+}
+
+// 应用 3x3 高斯模糊
+torch::Tensor apply_gaussian_blur_3x3(const torch::Tensor& image) {
+    auto device = image.device();
+    auto kernel = make_gaussian_kernel_3x3(device);
+    auto blurred = torch::zeros_like(image);
+    for (int c = 0; c < image.size(0); ++c) {
+        auto ch = image[c].unsqueeze(0).unsqueeze(0);
+        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, 1);
+        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
+    }
+    return blurred;
+}
+
+} // anonymous namespace
 
 // 色温调整：使用简单的 RGB 通道比例
 torch::Tensor adjust_temperature(const torch::Tensor& image, float temperature) {
@@ -142,18 +172,7 @@ torch::Tensor enhance_clarity(const torch::Tensor& image, float strength) {
     auto device = img.device();
     
     // High-pass filter for mid-frequency details
-    auto blur_kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f},
-                                       {0.125f, 0.25f, 0.125f},
-                                       {0.0625f, 0.125f, 0.0625f}}},
-                                      torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    blur_kernel = blur_kernel.unsqueeze(0).unsqueeze(0);
-    
-    auto blurred = torch::zeros_like(img);
-    for (int c = 0; c < img.size(0); ++c) {
-        auto ch = img[c].unsqueeze(0).unsqueeze(0);
-        auto blurred_ch = torch::conv2d(ch, blur_kernel, {}, 1, 1);
-        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
-    }
+    auto blurred = apply_gaussian_blur_3x3(img);
     
     // Detail = original - blurred
     auto detail = img - blurred;
@@ -525,17 +544,7 @@ torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
     auto edge_mask = (edge < edge.mean().item<float>() * 2.0f).to(torch::kFloat32); // 非边缘区域
     
     // 轻量高斯模糊
-    (void)1;  // radius = 1
-    auto kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f}, {0.125f, 0.25f, 0.125f}, {0.0625f, 0.125f, 0.0625f}}},
-                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    kernel = kernel.unsqueeze(0).unsqueeze(0).contiguous();
-    
-    auto blurred = torch::zeros_like(img);
-    for (int c = 0; c < img.size(0); ++c) {
-        auto ch = img[c].unsqueeze(0).unsqueeze(0);
-        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, 1);
-        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
-    }
+    auto blurred = apply_gaussian_blur_3x3(img);
     
     // 只在非边缘区域应用降噪
     float blend = std::min(strength * 0.7f, 1.0f);
@@ -573,16 +582,7 @@ torch::Tensor edge_mask_sharpen(const torch::Tensor& image, float amount, int ra
     auto edge_mask = (edge < thresh).to(torch::kFloat32);
     
     // Gaussian blur using the same kernel pattern as smart_denoise
-    auto kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f}, {0.125f, 0.25f, 0.125f}, {0.0625f, 0.125f, 0.0625f}}},
-                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    kernel = kernel.unsqueeze(0).unsqueeze(0);
-    
-    auto blurred = torch::zeros_like(img);
-    for (int c = 0; c < img.size(0); ++c) {
-        auto ch = img[c].unsqueeze(0).unsqueeze(0);
-        auto blurred_ch = torch::conv2d(ch, kernel, {}, 1, 1);
-        blurred[c] = blurred_ch.squeeze(0).squeeze(0);
-    }
+    auto blurred = apply_gaussian_blur_3x3(img);
     
     // USM: detail = original - blurred
     auto detail = img - blurred;

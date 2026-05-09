@@ -16,6 +16,7 @@ struct Image {
     int width = 0;
     int height = 0;
     int channels = 3;
+    int jpeg_quality = 95;  // JPEG 质量 (1-100)
     std::vector<uint8_t> data;
 
     bool empty() const { return data.empty(); }
@@ -24,10 +25,6 @@ struct Image {
     // 保存图像到文件 (支持 PNG/BMP/TGA/JPG，自动检测扩展名)
     bool save_to_file(const std::string& path) const;
 };
-
-// JPEG 质量设置 (1-100, 默认 95)
-void set_jpeg_quality(int quality);
-int get_jpeg_quality();
 
 // 采样方法
 enum class SampleMethod {
@@ -178,6 +175,109 @@ struct GenerationParams {
     
     // 显存限制（GB, 0 = 不限制）
     float max_vram = 0.0f;
+};
+
+// sd_image_t 的 RAII 封装（避免裸 malloc/free）
+class SDImageGuard {
+public:
+    SDImageGuard() = default;
+    explicit SDImageGuard(sd_image_t img) : img_(img) {}
+    
+    ~SDImageGuard() {
+        free_data();
+    }
+    
+    // 禁止拷贝
+    SDImageGuard(const SDImageGuard&) = delete;
+    SDImageGuard& operator=(const SDImageGuard&) = delete;
+    
+    // 允许移动
+    SDImageGuard(SDImageGuard&& other) noexcept : img_(other.img_) {
+        other.img_.data = nullptr;
+    }
+    
+    SDImageGuard& operator=(SDImageGuard&& other) noexcept {
+        if (this != &other) {
+            free_data();
+            img_ = other.img_;
+            other.img_.data = nullptr;
+        }
+        return *this;
+    }
+    
+    sd_image_t* get() { return &img_; }
+    const sd_image_t* get() const { return &img_; }
+    
+    sd_image_t release() {
+        sd_image_t tmp = img_;
+        img_.data = nullptr;
+        return tmp;
+    }
+    
+    bool empty() const { return img_.data == nullptr; }
+    
+private:
+    void free_data() {
+        if (img_.data) {
+            free(img_.data);
+            img_.data = nullptr;
+        }
+    }
+    
+    sd_image_t img_ = {};
+};
+
+// sd_image_t 数组的 RAII 封装（用于 generate_image 返回的数组）
+class SDImageArrayGuard {
+public:
+    SDImageArrayGuard() = default;
+    explicit SDImageArrayGuard(sd_image_t* ptr) : ptr_(ptr) {}
+    
+    ~SDImageArrayGuard() {
+        free_array();
+    }
+    
+    // 禁止拷贝
+    SDImageArrayGuard(const SDImageArrayGuard&) = delete;
+    SDImageArrayGuard& operator=(const SDImageArrayGuard&) = delete;
+    
+    // 允许移动
+    SDImageArrayGuard(SDImageArrayGuard&& other) noexcept : ptr_(other.ptr_) {
+        other.ptr_ = nullptr;
+    }
+    
+    SDImageArrayGuard& operator=(SDImageArrayGuard&& other) noexcept {
+        if (this != &other) {
+            free_array();
+            ptr_ = other.ptr_;
+            other.ptr_ = nullptr;
+        }
+        return *this;
+    }
+    
+    sd_image_t* get() { return ptr_; }
+    const sd_image_t* get() const { return ptr_; }
+    
+    sd_image_t* release() {
+        sd_image_t* tmp = ptr_;
+        ptr_ = nullptr;
+        return tmp;
+    }
+    
+    bool empty() const { return ptr_ == nullptr; }
+    
+    sd_image_t& operator[](size_t idx) { return ptr_[idx]; }
+    const sd_image_t& operator[](size_t idx) const { return ptr_[idx]; }
+    
+private:
+    void free_array() {
+        if (ptr_) {
+            free(ptr_);
+            ptr_ = nullptr;
+        }
+    }
+    
+    sd_image_t* ptr_ = nullptr;
 };
 
 // 进度回调

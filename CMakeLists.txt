@@ -448,6 +448,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
     add_executable(test_sdcpp_adapter
         tests/test_sdcpp_adapter.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/log.cpp
         src/utils/stb_impl.c
     )
     target_include_directories(test_sdcpp_adapter PRIVATE
@@ -481,6 +482,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
     add_executable(test_txt2img
         tests/test_txt2img.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/log.cpp
         src/utils/stb_impl.c
     )
     target_include_directories(test_txt2img PRIVATE
@@ -514,6 +516,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
     add_executable(test_hires_fix_real
         tests/test_hires_fix_real.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/log.cpp
         src/utils/stb_impl.c
     )
     target_include_directories(test_hires_fix_real PRIVATE

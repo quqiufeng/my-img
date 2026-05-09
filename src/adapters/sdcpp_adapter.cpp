@@ -1,4 +1,5 @@
 #include "adapters/sdcpp_adapter.h"
+#include "utils/log.h"
 #include <stable-diffusion.h>
 
 #include <iostream>
@@ -15,9 +16,6 @@
 
 namespace fs = std::filesystem;
 
-// JPEG quality (0-100, default 95)
-static int g_jpeg_quality = 95;
-
 // 日志回调函数
 static void sd_log_callback(enum sd_log_level_t level, const char* text, void* data) {
     (void)data;
@@ -32,17 +30,6 @@ static void sd_log_callback(enum sd_log_level_t level, const char* text, void* d
 }
 
 namespace myimg {
-
-// ============================================================
-// JPEG 质量设置
-// ============================================================
-void set_jpeg_quality(int quality) {
-    g_jpeg_quality = std::max(1, std::min(100, quality));
-}
-
-int get_jpeg_quality() {
-    return g_jpeg_quality;
-}
 
 // ============================================================
 // 辅助函数：枚举转换
@@ -237,7 +224,7 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
     
     if (!ctx_) {
-        std::cerr << "[SDCPPAdapter] Failed to load model after " << duration << " seconds" << std::endl;
+        LOG_ERROR("Failed to load model after %ld seconds", duration);
         return false;
     }
     
@@ -255,7 +242,7 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     std::vector<Image> images;
     
     if (!ctx_) {
-        std::cerr << "[SDCPPAdapter] Model not initialized!" << std::endl;
+        LOG_ERROR("Model not initialized!");
         return images;
     }
     
@@ -284,19 +271,25 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     // Guidance (CFG scale)
     gen_params.sample_params.guidance.txt_cfg = params.cfg_scale;
     
-    // img2img
+    // img2img (使用 RAII 管理临时 sd_image_t 内存)
+    SDImageGuard init_image_guard;
     if (!params.init_image.empty() && params.strength < 1.0f) {
-        gen_params.init_image = image_to_sd_image(params.init_image);
+        init_image_guard = SDImageGuard(image_to_sd_image(params.init_image));
+        gen_params.init_image = *init_image_guard.get();
     }
     
     // Inpainting
+    SDImageGuard mask_image_guard;
     if (!params.mask_image.empty()) {
-        gen_params.mask_image = image_to_sd_image(params.mask_image);
+        mask_image_guard = SDImageGuard(image_to_sd_image(params.mask_image));
+        gen_params.mask_image = *mask_image_guard.get();
     }
     
     // ControlNet
+    SDImageGuard control_image_guard;
     if (!params.control_image.empty()) {
-        gen_params.control_image = image_to_sd_image(params.control_image);
+        control_image_guard = SDImageGuard(image_to_sd_image(params.control_image));
+        gen_params.control_image = *control_image_guard.get();
         gen_params.control_strength = params.control_strength;
     }
     
@@ -376,17 +369,16 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     }
     
     auto start = std::chrono::high_resolution_clock::now();
-    sd_image_t* sd_images = generate_image(ctx_, &gen_params);
+    SDImageArrayGuard sd_images(generate_image(ctx_, &gen_params));
     auto end = std::chrono::high_resolution_clock::now();
     
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start).count();
     std::cout << "[SDCPPAdapter] Generation completed in " << duration << " seconds" << std::endl;
     
-    if (sd_images) {
+    if (!sd_images.empty()) {
         for (int i = 0; i < params.batch_count; i++) {
             images.push_back(sd_image_to_image(sd_images[i]));
         }
-        free(sd_images);
     }
     
     return images;
@@ -405,7 +397,7 @@ Image SDCPPAdapter::generate_single(const GenerationParams& params) {
 std::vector<float> SDCPPAdapter::encode_prompt(const std::string& /*prompt*/, int /*clip_skip*/) {
     // TODO: 实现文本编码，返回 conditioning
     // 这需要更底层的 API，可能需要修改 sd.cpp 暴露更多接口
-    std::cerr << "[SDCPPAdapter] encode_prompt not yet implemented" << std::endl;
+    LOG_WARN("encode_prompt not yet implemented");
     return std::vector<float>();
 }
 
@@ -481,7 +473,7 @@ std::string SDCPPAdapter::get_commit() {
 // ============================================================
 bool Image::save_to_file(const std::string& path) const {
     if (empty()) {
-        std::cerr << "[Image] Cannot save empty image" << std::endl;
+        LOG_ERROR("Cannot save empty image");
         return false;
     }
     int success = 0;
@@ -500,15 +492,15 @@ bool Image::save_to_file(const std::string& path) const {
         WebPConfig config;
         WebPPicture picture;
         if (!WebPConfigInit(&config) || !WebPPictureInit(&picture)) {
-            std::cerr << "[Image] Failed to init WebP" << std::endl;
+            LOG_ERROR("Failed to init WebP");
             return false;
         }
-        config.quality = g_jpeg_quality; // Reuse quality setting (0-100)
+        config.quality = jpeg_quality; // Reuse quality setting (0-100)
         picture.width = width;
         picture.height = height;
         picture.use_argb = 1;
         if (!WebPPictureAlloc(&picture)) {
-            std::cerr << "[Image] Failed to alloc WebP picture" << std::endl;
+            LOG_ERROR("Failed to alloc WebP picture");
             return false;
         }
         
@@ -534,7 +526,7 @@ bool Image::save_to_file(const std::string& path) const {
         picture.custom_ptr = &writer;
         
         if (!WebPEncode(&config, &picture)) {
-            std::cerr << "[Image] Failed to encode WebP" << std::endl;
+            LOG_ERROR("Failed to encode WebP");
             WebPMemoryWriterClear(&writer);
             WebPPictureFree(&picture);
             return false;
@@ -555,7 +547,7 @@ bool Image::save_to_file(const std::string& path) const {
         struct jpeg_error_mgr jerr;
         FILE* outfile = fopen(path.c_str(), "wb");
         if (!outfile) {
-            std::cerr << "[Image] Failed to open file for writing: " << path << std::endl;
+            LOG_ERROR("Failed to open file for writing: %s", path.c_str());
             return false;
         }
         
@@ -569,7 +561,7 @@ bool Image::save_to_file(const std::string& path) const {
         cinfo.in_color_space = (channels == 3) ? JCS_RGB : JCS_GRAYSCALE;
         
         jpeg_set_defaults(&cinfo);
-        jpeg_set_quality(&cinfo, g_jpeg_quality, TRUE);
+        jpeg_set_quality(&cinfo, jpeg_quality, TRUE);
         jpeg_start_compress(&cinfo, TRUE);
         
         int row_stride = width * channels;
@@ -590,7 +582,7 @@ bool Image::save_to_file(const std::string& path) const {
         std::cout << "[Image] Saved to " << path << " (" << width << "x" << height << ")" << std::endl;
         return true;
     } else {
-        std::cerr << "[Image] Failed to save to " << path << std::endl;
+        LOG_ERROR("Failed to save to %s", path.c_str());
         return false;
     }
 }
@@ -600,32 +592,29 @@ bool Image::save_to_file(const std::string& path) const {
 // ============================================================
 Image SDCPPAdapter::upscale_with_esrgan(const Image& image, const std::string& model_path, int repeats, int tile_size) {
     if (image.empty()) {
-        std::cerr << "[SDCPPAdapter] Cannot upscale empty image" << std::endl;
+        LOG_ERROR("Cannot upscale empty image");
         return Image();
     }
     
     upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(model_path.c_str(), false, false, -1, tile_size);
     if (!upscaler_ctx) {
-        std::cerr << "[SDCPPAdapter] Failed to load upscaler model: " << model_path << std::endl;
+        LOG_ERROR("Failed to load upscaler model: %s", model_path.c_str());
         return Image();
     }
     
-    sd_image_t sd_img = image_to_sd_image(image);
+    SDImageGuard sd_img_guard(image_to_sd_image(image));
     Image result = image;
     
     for (int i = 0; i < repeats; ++i) {
-        sd_image_t upscaled = upscale(upscaler_ctx, sd_img, 4);  // ESRGAN 默认 4x
+        sd_image_t upscaled = upscale(upscaler_ctx, *sd_img_guard.get(), 4);  // ESRGAN 默认 4x
         if (upscaled.data == nullptr) {
-            std::cerr << "[SDCPPAdapter] Upscale failed at iteration " << (i + 1) << std::endl;
-            free(sd_img.data);
+            LOG_ERROR("Upscale failed at iteration %d", i + 1);
             break;
         }
-        free(sd_img.data);
-        sd_img = upscaled;
-        result = sd_image_to_image(sd_img);
+        sd_img_guard = SDImageGuard(upscaled);
+        result = sd_image_to_image(*sd_img_guard.get());
     }
     
-    free(sd_img.data);
     free_upscaler_ctx(upscaler_ctx);
     
     return result;
