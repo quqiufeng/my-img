@@ -87,7 +87,7 @@ std::map<std::string, std::string> read_png_metadata(const std::string& path) {
     
     std::ifstream file(path, std::ios::binary);
     if (!file) {
-        std::cerr << "[PNG Metadata] Failed to open file: " << path << std::endl;
+        LOG_ERROR("[PNG Metadata] Failed to open file: %s", path.c_str());
         return metadata;
     }
     
@@ -95,7 +95,7 @@ std::map<std::string, std::string> read_png_metadata(const std::string& path) {
     uint8_t sig[8];
     file.read(reinterpret_cast<char*>(sig), 8);
     if (std::memcmp(sig, PNG_SIGNATURE, 8) != 0) {
-        std::cerr << "[PNG Metadata] Not a PNG file: " << path << std::endl;
+        LOG_ERROR("[PNG Metadata] Not a PNG file: %s", path.c_str());
         return metadata;
     }
     
@@ -199,7 +199,7 @@ bool write_png_metadata(const std::string& path, const std::map<std::string, std
     // Read entire file
     std::ifstream infile(path, std::ios::binary | std::ios::ate);
     if (!infile) {
-        std::cerr << "[PNG Metadata] Failed to open file for writing: " << path << std::endl;
+        LOG_ERROR("[PNG Metadata] Failed to open file for writing: %s", path.c_str());
         return false;
     }
     
@@ -207,14 +207,14 @@ bool write_png_metadata(const std::string& path, const std::map<std::string, std
     infile.seekg(0, std::ios::beg);
     std::vector<uint8_t> file_data(size);
     if (!infile.read(reinterpret_cast<char*>(file_data.data()), size)) {
-        std::cerr << "[PNG Metadata] Failed to read file: " << path << std::endl;
+        LOG_ERROR("[PNG Metadata] Failed to read file: %s", path.c_str());
         return false;
     }
     infile.close();
     
     // Check PNG signature
     if (size < 8 || std::memcmp(file_data.data(), PNG_SIGNATURE, 8) != 0) {
-        std::cerr << "[PNG Metadata] Not a PNG file: " << path << std::endl;
+        LOG_ERROR("[PNG Metadata] Not a PNG file: %s", path.c_str());
         return false;
     }
     
@@ -232,7 +232,7 @@ bool write_png_metadata(const std::string& path, const std::map<std::string, std
     }
     
     if (iend_pos == 0) {
-        std::cerr << "[PNG Metadata] IEND chunk not found: " << path << std::endl;
+        LOG_ERROR("[PNG Metadata] IEND chunk not found: %s", path.c_str());
         return false;
     }
     
@@ -258,7 +258,7 @@ bool write_png_metadata(const std::string& path, const std::map<std::string, std
     // Write back
     std::ofstream outfile(path, std::ios::binary | std::ios::trunc);
     if (!outfile) {
-        std::cerr << "[PNG Metadata] Failed to open file for writing: " << path << std::endl;
+        LOG_ERROR("[PNG Metadata] Failed to open file for writing: %s", path.c_str());
         return false;
     }
     outfile.write(reinterpret_cast<const char*>(new_file.data()), new_file.size());

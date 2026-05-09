@@ -1,4 +1,5 @@
 #include "utils/image_utils.h"
+#include "utils/log.h"
 #include <stb_image.h>
 #include <iostream>
 
@@ -8,7 +9,7 @@ torch::Tensor load_image(const std::string& path) {
     int width, height, channels;
     unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 3);
     if (!data) {
-        std::cerr << "Failed to load image: " << path << std::endl;
+        LOG_ERROR("Failed to load image: %s", path.c_str());
         return torch::zeros({1, 3, 1, 1});
     }
     
@@ -24,7 +25,7 @@ ImageData load_image_from_file(const std::string& path) {
     int width, height, channels;
     unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 3);
     if (!data) {
-        std::cerr << "[Image] Failed to load image: " << path << std::endl;
+        LOG_ERROR("[Image] Failed to load image: %s", path.c_str());
         return img;
     }
     

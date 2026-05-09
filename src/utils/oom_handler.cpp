@@ -1,4 +1,5 @@
 #include "oom_handler.h"
+#include "utils/log.h"
 
 #include <sstream>
 #include <cmath>
@@ -64,7 +65,7 @@ bool OOMHandler::apply_fallback(int& width, int& height, int& steps,
                                  const OOMFallbackConfig& config,
                                  int retry_count) {
     if (retry_count >= config.max_retries) {
-        std::cerr << "[OOM] Max retries exceeded. Giving up." << std::endl;
+        LOG_ERROR("[OOM] Max retries exceeded. Giving up.");
         return false;
     }
 
@@ -125,7 +126,7 @@ bool OOMHandler::apply_fallback(int& width, int& height, int& steps,
     }
 
     if (!modified) {
-        std::cerr << "[OOM] No more fallback options available." << std::endl;
+        LOG_ERROR("[OOM] No more fallback options available.");
         return false;
     }
 

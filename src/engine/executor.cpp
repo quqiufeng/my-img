@@ -7,7 +7,7 @@ namespace myimg {
 void Executor::execute(const Workflow& workflow) {
     std::string error_msg;
     if (!workflow.validate(error_msg)) {
-        std::cerr << "[Executor] Workflow validation failed: " << error_msg << std::endl;
+        LOG_ERROR("[Executor] Workflow validation failed: %s", error_msg.c_str());
         return;
     }
     

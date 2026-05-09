@@ -1,4 +1,5 @@
 #include "controlnet_preprocessors.h"
+#include "utils/log.h"
 
 #ifdef HAVE_ONNXRUNTIME
 #include <onnxruntime_cxx_api.h>
@@ -37,7 +38,7 @@ static Ort::Session* get_openpose_onnx_session(const std::string& model_path) {
             loaded = true;
             std::cout << "[INFO] OpenPose ONNX model loaded successfully\n";
         } catch (const std::exception& e) {
-            std::cerr << "Error loading OpenPose ONNX model: " << e.what() << "\n";
+            LOG_ERROR("Error loading OpenPose ONNX model: %s", e.what());
             return nullptr;
         }
     }
@@ -46,7 +47,7 @@ static Ort::Session* get_openpose_onnx_session(const std::string& model_path) {
 
 // ONNX-based depth estimation using MiDaS/DPT model
 ImageData depth_map_onnx(const ImageData& /*img*/, const std::string& /*model_path*/) {
-    std::cerr << "ONNX MiDaS model not available. Using TorchScript version instead.\n";
+    LOG_WARN("ONNX MiDaS model not available. Using TorchScript version instead.");
     return ImageData();
 }
 
@@ -143,7 +144,7 @@ ImageData openpose_onnx(const ImageData& img, const std::string& model_path) {
         return result;
         
     } catch (const std::exception& e) {
-        std::cerr << "Error in openpose_onnx: " << e.what() << "\n";
+        LOG_ERROR("Error in openpose_onnx: %s", e.what());
         return ImageData();
     }
 }
@@ -151,12 +152,12 @@ ImageData openpose_onnx(const ImageData& img, const std::string& model_path) {
 #else
 
 ImageData depth_map_onnx(const ImageData& img, const std::string& model_path) {
-    std::cerr << "ONNX Runtime not available. Depth estimation disabled.\n";
+    LOG_WARN("ONNX Runtime not available. Depth estimation disabled.");
     return ImageData();
 }
 
 ImageData openpose_onnx(const ImageData& img, const std::string& model_path) {
-    std::cerr << "ONNX Runtime not available. OpenPose disabled.\n";
+    LOG_WARN("ONNX Runtime not available. OpenPose disabled.");
     return ImageData();
 }
 

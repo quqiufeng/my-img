@@ -187,7 +187,7 @@ ImageData depth_map(const ImageData& img, const std::string& model_path) {
     
     auto* model = get_midas_model(path);
     if (!model) {
-        std::cerr << "Failed to load MiDaS model. Use --depth-model PATH.\n";
+        LOG_ERROR("Failed to load MiDaS model. Use --depth-model PATH.");
         return ImageData();
     }
 
@@ -272,7 +272,7 @@ ImageData openpose(const ImageData& img, const std::string& model_path) {
     
     auto* model = get_openpose_model(path);
     if (!model) {
-        std::cerr << "Failed to load OpenPose model. Use --openpose-model PATH.\n";
+        LOG_ERROR("Failed to load OpenPose model. Use --openpose-model PATH.");
         return ImageData();
     }
 

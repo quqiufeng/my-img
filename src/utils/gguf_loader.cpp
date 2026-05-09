@@ -22,7 +22,7 @@ std::map<std::string, torch::Tensor> GGUFLoder::load(const std::string& path) {
     
     struct gguf_context* ctx = gguf_init_from_file(path.c_str(), params);
     if (!ctx) {
-        std::cerr << "[GGUF] Failed to load file: " << path << std::endl;
+        LOG_ERROR("[GGUF] Failed to load file: %s", path.c_str());
         return tensors;
     }
     
@@ -47,7 +47,7 @@ std::map<std::string, torch::Tensor> GGUFLoder::load(const std::string& path) {
     // Open file for reading tensor data
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "[GGUF] Failed to open file for reading tensor data" << std::endl;
+        LOG_ERROR("[GGUF] Failed to open file for reading tensor data");
         gguf_free(ctx);
         return tensors;
     }
@@ -87,7 +87,7 @@ std::map<std::string, torch::Tensor> GGUFLoder::load(const std::string& path) {
             // Quantized types: Dequantize
             const struct ggml_type_traits* traits = ggml_get_type_traits(type);
             if (!traits || !traits->to_float) {
-                std::cerr << "[GGUF] No dequantization function for type " << type << " in tensor " << name << std::endl;
+                LOG_ERROR("[GGUF] No dequantization function for type %d in tensor %s", type, name);
                 continue;
             }
             

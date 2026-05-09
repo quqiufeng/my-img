@@ -1,4 +1,5 @@
 #include "backend/model.h"
+#include "utils/log.h"
 #include <gguf_loader.h>
 #include <safetensors.h>
 #include <iostream>
@@ -30,7 +31,7 @@ bool VAEModel::load(const std::string& path) {
         return true;
     }
     
-    std::cerr << "[VAE] Unsupported model format: " << path << std::endl;
+    LOG_ERROR("[VAE] Unsupported model format: %s", path.c_str());
     return false;
 }
 

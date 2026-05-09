@@ -10,7 +10,7 @@ namespace myimg {
 bool LUT3D::load_from_file(const std::string& path) {
     std::ifstream file(path);
     if (!file) {
-        std::cerr << "[LUT] Failed to open file: " << path << std::endl;
+        LOG_ERROR("[LUT] Failed to open file: %s", path.c_str());
         return false;
     }
     
@@ -38,7 +38,7 @@ bool LUT3D::load_from_file(const std::string& path) {
         else if (keyword == "LUT_3D_SIZE") {
             ss >> size;
             if (size <= 0) {
-                std::cerr << "[LUT] Invalid LUT size: " << size << std::endl;
+                LOG_ERROR("[LUT] Invalid LUT size: %d", size);
                 return false;
             }
             expected_entries = size * size * size;
@@ -52,7 +52,7 @@ bool LUT3D::load_from_file(const std::string& path) {
         else {
             // Parse RGB values
             if (!has_size) {
-                std::cerr << "[LUT] LUT_3D_SIZE not specified before data" << std::endl;
+                LOG_ERROR("[LUT] LUT_3D_SIZE not specified before data");
                 return false;
             }
             
@@ -61,7 +61,7 @@ bool LUT3D::load_from_file(const std::string& path) {
             val_ss >> r >> g >> b;
             
             if (val_ss.fail()) {
-                std::cerr << "[LUT] Failed to parse RGB values: " << line << std::endl;
+                LOG_ERROR("[LUT] Failed to parse RGB values: %s", line.c_str());
                 continue;
             }
             
@@ -73,16 +73,16 @@ bool LUT3D::load_from_file(const std::string& path) {
     }
     
     if (!has_size) {
-        std::cerr << "[LUT] No LUT_3D_SIZE found" << std::endl;
+        LOG_ERROR("[LUT] No LUT_3D_SIZE found");
         return false;
     }
     
     if (entries_read != expected_entries) {
-        std::cerr << "[LUT] Expected " << expected_entries << " entries, got " << entries_read << std::endl;
+        LOG_ERROR("[LUT] Expected %d entries, got %d", expected_entries, entries_read);
         return false;
     }
     
-    std::cout << "[LUT] Loaded " << title << " (" << size << "x" << size << "x" << size << ")" << std::endl;
+    LOG_INFO("[LUT] Loaded %s (%dx%dx%d)", title.c_str(), size, size, size);
     return true;
 }
 

@@ -1,4 +1,5 @@
 #include "backend/z_image_model.h"
+#include "utils/log.h"
 #include "utils/gguf_loader.h"
 #include <gguf.h>
 #include <cmath>
@@ -503,9 +504,10 @@ bool ZImageDiTImpl::load_weights(const std::map<std::string, torch::Tensor>& wei
                     param.copy_(tensor);
                     loaded++;
                 } else {
-                    std::cerr << "[ZImage] Shape mismatch for " << torch_name 
-                              << ": expected " << param.sizes() 
-                              << ", got " << tensor.sizes() << std::endl;
+                    std::stringstream size_msg;
+                    size_msg << "expected " << param.sizes() << ", got " << tensor.sizes();
+                    LOG_ERROR("[ZImage] Shape mismatch for %s: %s",
+                              torch_name.c_str(), size_msg.str().c_str());
                 }
             } else if (model_buffers.contains(torch_name)) {
                 auto buffer = model_buffers[torch_name];
@@ -513,7 +515,7 @@ bool ZImageDiTImpl::load_weights(const std::map<std::string, torch::Tensor>& wei
                     buffer.copy_(tensor);
                     loaded++;
                 } else {
-                    std::cerr << "[ZImage] Shape mismatch for buffer " << torch_name << std::endl;
+                    LOG_ERROR("[ZImage] Shape mismatch for buffer %s", torch_name.c_str());
                 }
             } else {
                 // 尝试其他名称变体
@@ -532,7 +534,7 @@ bool ZImageDiTImpl::load_weights(const std::map<std::string, torch::Tensor>& wei
                     }
                 }
                 if (!found) {
-                    std::cerr << "[ZImage] Weight not found: " << name << " (converted: " << torch_name << ")" << std::endl;
+                    LOG_WARN("[ZImage] Weight not found: %s (converted: %s)", name.c_str(), torch_name.c_str());
                 }
             }
         }
@@ -540,7 +542,7 @@ bool ZImageDiTImpl::load_weights(const std::map<std::string, torch::Tensor>& wei
         std::cout << "[ZImage] Loaded " << loaded << "/" << total << " weights" << std::endl;
         return loaded > 0;
     } catch (const std::exception& e) {
-        std::cerr << "[ZImage] Failed to load weights: " << e.what() << std::endl;
+        LOG_ERROR("[ZImage] Failed to load weights: %s", e.what());
         return false;
     }
 }
@@ -558,7 +560,7 @@ bool ZImageModel::load(const std::string& path) {
     if (path.find(".gguf") != std::string::npos) {
         auto tensors = GGUFLoder::load(path);
         if (tensors.empty()) {
-            std::cerr << "[ZImageModel] Failed to load GGUF" << std::endl;
+            LOG_ERROR("[ZImageModel] Failed to load GGUF");
             return false;
         }
         
@@ -569,7 +571,7 @@ bool ZImageModel::load(const std::string& path) {
         return loaded_;
     }
     
-    std::cerr << "[ZImageModel] Unsupported format: " << path << std::endl;
+    LOG_ERROR("[ZImageModel] Unsupported format: %s", path.c_str());
     return false;
 }
 
@@ -579,7 +581,7 @@ torch::Tensor ZImageModel::forward(
     torch::Tensor encoder_hidden_states,
     std::optional<torch::Tensor> cross_attention_kwargs) {
     if (!loaded_) {
-        std::cerr << "[ZImageModel] Model not loaded!" << std::endl;
+        LOG_ERROR("[ZImageModel] Model not loaded!");
         return sample;
     }
     

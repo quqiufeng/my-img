@@ -1,4 +1,5 @@
 #include "watermark.h"
+#include "utils/log.h"
 
 #include <freetype2/ft2build.h>
 #include FT_FREETYPE_H
@@ -38,7 +39,7 @@ ImageData Watermark::apply(const ImageData& image, const WatermarkConfig& config
     } else {
         ImageData wm = load_image_from_file(config.content);
         if (wm.empty()) {
-            std::cerr << "Warning: Failed to load watermark image: " << config.content << std::endl;
+            LOG_WARN("Failed to load watermark image: %s", config.content.c_str());
             return image;
         }
         return apply_image(image, wm, config.position, config.opacity, config.margin);
@@ -55,7 +56,7 @@ ImageData Watermark::apply_text(const ImageData& image, const std::string& text,
     FT_Library ft_library;
     FT_Error error = FT_Init_FreeType(&ft_library);
     if (error) {
-        std::cerr << "Warning: Failed to initialize FreeType" << std::endl;
+        LOG_WARN("Failed to initialize FreeType");
         return image;
     }
 
@@ -81,7 +82,7 @@ ImageData Watermark::apply_text(const ImageData& image, const std::string& text,
     }
 
     if (!font_loaded) {
-        std::cerr << "Warning: No font found, skipping text watermark" << std::endl;
+        LOG_WARN("No font found, skipping text watermark");
         FT_Done_FreeType(ft_library);
         return image;
     }
@@ -269,7 +270,7 @@ bool Watermark::batch_apply(const std::vector<std::string>& input_files,
                             const std::vector<std::string>& output_files,
                             const WatermarkConfig& config) {
     if (input_files.size() != output_files.size()) {
-        std::cerr << "Error: input_files and output_files must have the same size" << std::endl;
+        LOG_ERROR("input_files and output_files must have the same size");
         return false;
     }
 
@@ -279,7 +280,7 @@ bool Watermark::batch_apply(const std::vector<std::string>& input_files,
 
         ImageData img = load_image_from_file(input_files[i]);
         if (img.empty()) {
-            std::cerr << "  Failed to load: " << input_files[i] << std::endl;
+            LOG_ERROR("  Failed to load: %s", input_files[i].c_str());
             all_success = false;
             continue;
         }
@@ -288,7 +289,7 @@ bool Watermark::batch_apply(const std::vector<std::string>& input_files,
 
         // 保存
         if (!save_png_simple(result, output_files[i])) {
-            std::cerr << "  Failed to save: " << output_files[i] << std::endl;
+            LOG_ERROR("  Failed to save: %s", output_files[i].c_str());
             all_success = false;
         }
     }

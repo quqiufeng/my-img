@@ -320,6 +320,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gguf_loader.cpp")
     add_executable(test_gguf_loader
         tests/test_gguf_loader.cpp
         src/utils/gguf_loader.cpp
+        src/utils/log.cpp
     )
     target_include_directories(test_gguf_loader PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -346,6 +347,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vae.cpp")
         src/utils/stb_impl.c
         src/utils/gguf_loader.cpp
         src/utils/safetensors.cpp
+        src/utils/log.cpp
     )
     target_include_directories(test_vae PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -374,6 +376,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix.cpp")
         src/utils/stb_impl.c
         src/utils/gguf_loader.cpp
         src/utils/safetensors.cpp
+        src/utils/log.cpp
     )
     target_include_directories(test_hires_fix PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -401,6 +404,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_model.cpp")
         src/backend/model.cpp
         src/utils/gguf_loader.cpp
         src/utils/safetensors.cpp
+        src/utils/log.cpp
     )
     target_include_directories(test_z_image_model PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -427,6 +431,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_quick.cpp")
         src/backend/model.cpp
         src/utils/gguf_loader.cpp
         src/utils/safetensors.cpp
+        src/utils/log.cpp
     )
     target_include_directories(test_z_image_quick PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -553,6 +558,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_utils.cpp")
         tests/test_image_utils.cpp
         src/utils/image_utils.cpp
         src/utils/stb_impl.c
+        src/utils/log.cpp
     )
     target_include_directories(test_image_utils PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -599,6 +605,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_watermark.cpp")
         src/utils/watermark.cpp
         src/utils/image_utils.cpp
         src/utils/stb_impl.c
+        src/utils/log.cpp
     )
     target_include_directories(test_watermark PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -666,6 +673,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oom_handler.cpp")
     add_executable(test_oom_handler
         tests/test_oom_handler.cpp
         src/utils/oom_handler.cpp
+        src/utils/log.cpp
     )
     target_include_directories(test_oom_handler PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
