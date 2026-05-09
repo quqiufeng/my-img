@@ -331,7 +331,7 @@ $SD_CLI \
 
 #### 3.2 CLI 入口：`src/main.cpp`
 
-**参数解析**（`main.cpp:55-65`）：
+**参数定义**（`src/cli/cli_options.h:36-44`）：
 ```cpp
 struct CliOptions {
     bool hires = false;
@@ -344,7 +344,7 @@ struct CliOptions {
 };
 ```
 
-**参数构建**（`main.cpp:1172-1200`）：
+**参数构建**（`src/main.cpp:255-262`）：
 ```cpp
 params.enable_hires = opts.hires;
 if (opts.hires) {
@@ -358,7 +358,7 @@ if (opts.hires) {
 
 #### 3.3 适配器层：`src/adapters/sdcpp_adapter.cpp`
 
-**枚举转换**（`sdcpp_adapter.cpp:104-117`）：
+**枚举转换**（`src/adapters/sdcpp_adapter.cpp:92-103`）：
 ```cpp
 static sd_hires_upscaler_t convert_hires_upscaler(HiresUpscaler upscaler) {
     switch (upscaler) {
@@ -370,7 +370,7 @@ static sd_hires_upscaler_t convert_hires_upscaler(HiresUpscaler upscaler) {
 }
 ```
 
-**参数映射**（`sdcpp_adapter.cpp:316-329`）：
+**参数映射**（`src/adapters/sdcpp_adapter.cpp:312-323`）：
 ```cpp
 gen_params.hires.enabled = params.enable_hires;
 if (params.enable_hires) {
@@ -382,10 +382,10 @@ if (params.enable_hires) {
 }
 ```
 
-**实际生成**（`sdcpp_adapter.cpp:358-363`）：
+**实际生成**（`src/adapters/sdcpp_adapter.cpp:372-375`）：
 ```cpp
-sd_image_t* sd_images = generate_image(ctx_, &gen_params);
-// ↑ sd.cpp 内部完成两阶段生成
+SDImageArrayGuard sd_images(generate_image(ctx_, &gen_params));
+// ↑ sd.cpp 内部完成两阶段生成，RAII 自动管理内存
 ```
 
 ### 4. 参数调优原理
