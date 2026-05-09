@@ -16,7 +16,7 @@ torch::Tensor make_gaussian_kernel_3x3(const torch::Device& device) {
                                    {0.125f, 0.25f, 0.125f},
                                    {0.0625f, 0.125f, 0.0625f}}},
                                   torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    return kernel.unsqueeze(0).unsqueeze(0).contiguous();
+    return kernel.unsqueeze(0).contiguous();
 }
 
 // 应用 3x3 高斯模糊
@@ -182,8 +182,8 @@ torch::Tensor enhance_clarity(const torch::Tensor& image, float strength) {
                                   torch::TensorOptions().dtype(torch::kFloat32)).to(device);
     auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
                                   torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0);
-    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    sobel_x = sobel_x.unsqueeze(0).contiguous();
+    sobel_y = sobel_y.unsqueeze(0).contiguous();
     
     auto gray = img.mean(0, true);
     auto grad_x = torch::conv2d(gray.unsqueeze(0), sobel_x, {}, 1, 1);
@@ -533,8 +533,8 @@ torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
     auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0).contiguous(); // [1, 1, 3, 3]
-    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0).contiguous();
+    sobel_x = sobel_x.unsqueeze(0).contiguous(); // [1, 1, 3, 3]
+    sobel_y = sobel_y.unsqueeze(0).contiguous();
     
     // 转为灰度计算边缘
     auto gray = img.mean(0, true); // [1, H, W]
@@ -567,8 +567,8 @@ torch::Tensor edge_mask_sharpen(const torch::Tensor& image, float amount, int ra
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
     auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0);
-    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0);
+    sobel_x = sobel_x.unsqueeze(0).contiguous();
+    sobel_y = sobel_y.unsqueeze(0).contiguous();
     
     // Use the same conv2d pattern as smart_denoise
     auto gray = img.mean(0, true);
@@ -999,8 +999,8 @@ torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int /*ra
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
     auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    sobel_x = sobel_x.unsqueeze(0).unsqueeze(0).contiguous(); // [1, 1, 3, 3]
-    sobel_y = sobel_y.unsqueeze(0).unsqueeze(0).contiguous();
+    sobel_x = sobel_x.unsqueeze(0).contiguous(); // [1, 1, 3, 3]
+    sobel_y = sobel_y.unsqueeze(0).contiguous();
     
     // Convert to grayscale for edge detection
     auto gray = img.mean(0, true); // [1, H, W]
@@ -1015,7 +1015,7 @@ torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int /*ra
     // Create sharpening kernel (Laplacian-like)
     auto kernel = torch::tensor({{{0.0f, -1.0f, 0.0f}, {-1.0f, 5.0f, -1.0f}, {0.0f, -1.0f, 0.0f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
-    kernel = kernel.unsqueeze(0).unsqueeze(0).contiguous();
+    kernel = kernel.unsqueeze(0).contiguous();
     
     // Apply sharpening to each channel
     auto sharpened = torch::zeros_like(img);
