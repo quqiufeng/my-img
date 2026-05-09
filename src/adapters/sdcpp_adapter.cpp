@@ -274,21 +274,21 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     // img2img (使用 RAII 管理临时 sd_image_t 内存)
     SDImageGuard init_image_guard;
     if (!params.init_image.empty() && params.strength < 1.0f) {
-        init_image_guard = SDImageGuard(image_to_sd_image(params.init_image));
+        init_image_guard = image_to_sd_image(params.init_image);
         gen_params.init_image = *init_image_guard.get();
     }
     
     // Inpainting
     SDImageGuard mask_image_guard;
     if (!params.mask_image.empty()) {
-        mask_image_guard = SDImageGuard(image_to_sd_image(params.mask_image));
+        mask_image_guard = image_to_sd_image(params.mask_image);
         gen_params.mask_image = *mask_image_guard.get();
     }
     
     // ControlNet
     SDImageGuard control_image_guard;
     if (!params.control_image.empty()) {
-        control_image_guard = SDImageGuard(image_to_sd_image(params.control_image));
+        control_image_guard = image_to_sd_image(params.control_image);
         gen_params.control_image = *control_image_guard.get();
         gen_params.control_strength = params.control_strength;
     }
@@ -431,7 +431,7 @@ Image SDCPPAdapter::sd_image_to_image(const sd_image_t& sd_img) {
     return img;
 }
 
-sd_image_t SDCPPAdapter::image_to_sd_image(const Image& img) {
+SDImageGuard SDCPPAdapter::image_to_sd_image(const Image& img) {
     sd_image_t sd_img;
     sd_img.width = img.width;
     sd_img.height = img.height;
@@ -441,7 +441,7 @@ sd_image_t SDCPPAdapter::image_to_sd_image(const Image& img) {
     sd_img.data = (uint8_t*)malloc(data_size);
     std::memcpy(sd_img.data, img.data.data(), data_size);
     
-    return sd_img;
+    return SDImageGuard(sd_img);
 }
 
 std::vector<std::string> SDCPPAdapter::get_available_sample_methods() {
@@ -469,6 +469,107 @@ std::string SDCPPAdapter::get_commit() {
 }
 
 // ============================================================
+// Image 保存辅助函数
+// ============================================================
+namespace {
+
+bool save_webp_internal(const std::string& path, int width, int height, int channels,
+                        const std::vector<uint8_t>& data, int quality) {
+    WebPConfig config;
+    WebPPicture picture;
+    if (!WebPConfigInit(&config) || !WebPPictureInit(&picture)) {
+        LOG_ERROR("Failed to init WebP");
+        return false;
+    }
+    config.quality = quality;
+    picture.width = width;
+    picture.height = height;
+    picture.use_argb = 1;
+    if (!WebPPictureAlloc(&picture)) {
+        LOG_ERROR("Failed to alloc WebP picture");
+        return false;
+    }
+
+    // Import RGB/RGBA data
+    if (channels == 3) {
+        WebPPictureImportRGB(&picture, data.data(), width * channels);
+    } else if (channels == 4) {
+        WebPPictureImportRGBA(&picture, data.data(), width * channels);
+    } else {
+        // Convert grayscale to RGB
+        std::vector<uint8_t> rgb_data(width * height * 3);
+        for (int i = 0; i < width * height; ++i) {
+            rgb_data[i * 3] = data[i];
+            rgb_data[i * 3 + 1] = data[i];
+            rgb_data[i * 3 + 2] = data[i];
+        }
+        WebPPictureImportRGB(&picture, rgb_data.data(), width * 3);
+    }
+
+    WebPMemoryWriter writer;
+    WebPMemoryWriterInit(&writer);
+    picture.writer = WebPMemoryWrite;
+    picture.custom_ptr = &writer;
+
+    if (!WebPEncode(&config, &picture)) {
+        LOG_ERROR("Failed to encode WebP");
+        WebPMemoryWriterClear(&writer);
+        WebPPictureFree(&picture);
+        return false;
+    }
+
+    FILE* fp = fopen(path.c_str(), "wb");
+    bool success = false;
+    if (fp) {
+        fwrite(writer.mem, 1, writer.size, fp);
+        fclose(fp);
+        success = true;
+    }
+
+    WebPMemoryWriterClear(&writer);
+    WebPPictureFree(&picture);
+    return success;
+}
+
+bool save_jpeg_internal(const std::string& path, int width, int height, int channels,
+                        const std::vector<uint8_t>& data, int quality) {
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    FILE* outfile = fopen(path.c_str(), "wb");
+    if (!outfile) {
+        LOG_ERROR("Failed to open file for writing: %s", path.c_str());
+        return false;
+    }
+
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+    jpeg_stdio_dest(&cinfo, outfile);
+
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    cinfo.input_components = channels;
+    cinfo.in_color_space = (channels == 3) ? JCS_RGB : JCS_GRAYSCALE;
+
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, quality, TRUE);
+    jpeg_start_compress(&cinfo, TRUE);
+
+    int row_stride = width * channels;
+    const uint8_t* image_data = data.data();
+    while (cinfo.next_scanline < cinfo.image_height) {
+        JSAMPROW row_pointer = (JSAMPROW)&image_data[cinfo.next_scanline * row_stride];
+        jpeg_write_scanlines(&cinfo, &row_pointer, 1);
+    }
+
+    jpeg_finish_compress(&cinfo);
+    fclose(outfile);
+    jpeg_destroy_compress(&cinfo);
+    return true;
+}
+
+} // anonymous namespace
+
+// ============================================================
 // Image 保存
 // ============================================================
 bool Image::save_to_file(const std::string& path) const {
@@ -488,93 +589,9 @@ bool Image::save_to_file(const std::string& path) const {
     } else if (ext == "tga") {
         success = stbi_write_tga(path.c_str(), width, height, channels, data.data());
     } else if (ext == "webp") {
-        // Use libwebp for WebP output
-        WebPConfig config;
-        WebPPicture picture;
-        if (!WebPConfigInit(&config) || !WebPPictureInit(&picture)) {
-            LOG_ERROR("Failed to init WebP");
-            return false;
-        }
-        config.quality = jpeg_quality; // Reuse quality setting (0-100)
-        picture.width = width;
-        picture.height = height;
-        picture.use_argb = 1;
-        if (!WebPPictureAlloc(&picture)) {
-            LOG_ERROR("Failed to alloc WebP picture");
-            return false;
-        }
-        
-        // Import RGB/RGBA data
-        if (channels == 3) {
-            WebPPictureImportRGB(&picture, data.data(), width * channels);
-        } else if (channels == 4) {
-            WebPPictureImportRGBA(&picture, data.data(), width * channels);
-        } else {
-            // Convert grayscale to RGB
-            std::vector<uint8_t> rgb_data(width * height * 3);
-            for (int i = 0; i < width * height; ++i) {
-                rgb_data[i * 3] = data[i];
-                rgb_data[i * 3 + 1] = data[i];
-                rgb_data[i * 3 + 2] = data[i];
-            }
-            WebPPictureImportRGB(&picture, rgb_data.data(), width * 3);
-        }
-        
-        WebPMemoryWriter writer;
-        WebPMemoryWriterInit(&writer);
-        picture.writer = WebPMemoryWrite;
-        picture.custom_ptr = &writer;
-        
-        if (!WebPEncode(&config, &picture)) {
-            LOG_ERROR("Failed to encode WebP");
-            WebPMemoryWriterClear(&writer);
-            WebPPictureFree(&picture);
-            return false;
-        }
-        
-        FILE* fp = fopen(path.c_str(), "wb");
-        if (fp) {
-            fwrite(writer.mem, 1, writer.size, fp);
-            fclose(fp);
-            success = 1;
-        }
-        
-        WebPMemoryWriterClear(&writer);
-        WebPPictureFree(&picture);
+        success = save_webp_internal(path, width, height, channels, data, jpeg_quality);
     } else if (ext == "jpg" || ext == "jpeg") {
-        // Use libjpeg for JPEG output
-        struct jpeg_compress_struct cinfo;
-        struct jpeg_error_mgr jerr;
-        FILE* outfile = fopen(path.c_str(), "wb");
-        if (!outfile) {
-            LOG_ERROR("Failed to open file for writing: %s", path.c_str());
-            return false;
-        }
-        
-        cinfo.err = jpeg_std_error(&jerr);
-        jpeg_create_compress(&cinfo);
-        jpeg_stdio_dest(&cinfo, outfile);
-        
-        cinfo.image_width = width;
-        cinfo.image_height = height;
-        cinfo.input_components = channels;
-        cinfo.in_color_space = (channels == 3) ? JCS_RGB : JCS_GRAYSCALE;
-        
-        jpeg_set_defaults(&cinfo);
-        jpeg_set_quality(&cinfo, jpeg_quality, TRUE);
-        jpeg_start_compress(&cinfo, TRUE);
-        
-        int row_stride = width * channels;
-        const uint8_t* image_data = data.data();
-        while (cinfo.next_scanline < cinfo.image_height) {
-            JSAMPROW row_pointer = (JSAMPROW)&image_data[cinfo.next_scanline * row_stride];
-            jpeg_write_scanlines(&cinfo, &row_pointer, 1);
-        }
-        
-        jpeg_finish_compress(&cinfo);
-        fclose(outfile);
-        jpeg_destroy_compress(&cinfo);
-        success = 1;
+        success = save_jpeg_internal(path, width, height, channels, data, jpeg_quality);
     } else {
         success = stbi_write_png(path.c_str(), width, height, channels, data.data(), width * channels);
     }
@@ -602,7 +619,7 @@ Image SDCPPAdapter::upscale_with_esrgan(const Image& image, const std::string& m
         return Image();
     }
     
-    SDImageGuard sd_img_guard(image_to_sd_image(image));
+    SDImageGuard sd_img_guard = image_to_sd_image(image);
     Image result = image;
     
     for (int i = 0; i < repeats; ++i) {

@@ -320,7 +320,7 @@ public:
     
     // 图像转换工具
     static Image sd_image_to_image(const sd_image_t& sd_img);
-    static sd_image_t image_to_sd_image(const Image& img);
+    static SDImageGuard image_to_sd_image(const Image& img);
     
     // ESRGAN 放大
     static Image upscale_with_esrgan(const Image& image, const std::string& model_path, int repeats = 1, int tile_size = 128);

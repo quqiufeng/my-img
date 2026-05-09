@@ -13,27 +13,26 @@ namespace myimg {
 
 #ifdef HAVE_ONNXRUNTIME
 
-// Global ONNX Runtime sessions (lazy loaded)
-static std::unique_ptr<Ort::Session> g_openpose_onnx_session;
-static bool g_openpose_onnx_loaded = false;
-
-static bool load_openpose_onnx(const std::string& model_path) {
-    if (g_openpose_onnx_loaded) return true;
-    try {
-        std::cout << "[INFO] Loading OpenPose ONNX model: " << model_path << "\n";
-        Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "openpose");
-        Ort::SessionOptions session_options;
-        session_options.SetIntraOpNumThreads(4);
-        session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-        
-        g_openpose_onnx_session = std::make_unique<Ort::Session>(env, model_path.c_str(), session_options);
-        g_openpose_onnx_loaded = true;
-        std::cout << "[INFO] OpenPose ONNX model loaded successfully\n";
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Error loading OpenPose ONNX model: " << e.what() << "\n";
-        return false;
+static Ort::Session* get_openpose_onnx_session(const std::string& model_path) {
+    static std::unique_ptr<Ort::Session> session;
+    static bool loaded = false;
+    if (!loaded) {
+        try {
+            std::cout << "[INFO] Loading OpenPose ONNX model: " << model_path << "\n";
+            Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "openpose");
+            Ort::SessionOptions session_options;
+            session_options.SetIntraOpNumThreads(4);
+            session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+            
+            session = std::make_unique<Ort::Session>(env, model_path.c_str(), session_options);
+            loaded = true;
+            std::cout << "[INFO] OpenPose ONNX model loaded successfully\n";
+        } catch (const std::exception& e) {
+            std::cerr << "Error loading OpenPose ONNX model: " << e.what() << "\n";
+            return nullptr;
+        }
     }
+    return session.get();
 }
 
 // ONNX-based depth estimation using MiDaS/DPT model
@@ -51,7 +50,8 @@ ImageData openpose_onnx(const ImageData& img, const std::string& model_path) {
         path = "/opt/image/model/openpose_body.onnx";
     }
     
-    if (!load_openpose_onnx(path)) {
+    auto* session = get_openpose_onnx_session(path);
+    if (!session) {
         return ImageData();
     }
     
@@ -90,7 +90,7 @@ ImageData openpose_onnx(const ImageData& img, const std::string& model_path) {
         const char* input_names[] = {"input"};
         const char* output_names[] = {"paf", "heatmap"};
         
-        auto output_tensors = g_openpose_onnx_session->Run(
+        auto output_tensors = session->Run(
             Ort::RunOptions{nullptr},
             input_names, &input_tensor, 1,
             output_names, 2

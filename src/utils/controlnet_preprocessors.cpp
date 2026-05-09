@@ -5,40 +5,40 @@
 
 namespace myimg {
 
-// Global TorchScript models (lazy loaded)
-static torch::jit::script::Module g_midas_model;
-static torch::jit::script::Module g_openpose_model;
-static bool g_midas_loaded = false;
-static bool g_openpose_loaded = false;
-
-static bool load_midas_model(const std::string& model_path) {
-    if (g_midas_loaded) return true;
-    try {
-        std::cout << "[INFO] Loading MiDaS model: " << model_path << "\n";
-        g_midas_model = torch::jit::load(model_path);
-        g_midas_model.eval();
-        g_midas_loaded = true;
-        std::cout << "[INFO] MiDaS model loaded successfully\n";
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Error loading MiDaS model: " << e.what() << "\n";
-        return false;
+static torch::jit::script::Module* get_midas_model(const std::string& model_path) {
+    static torch::jit::script::Module model;
+    static bool loaded = false;
+    if (!loaded) {
+        try {
+            std::cout << "[INFO] Loading MiDaS model: " << model_path << "\n";
+            model = torch::jit::load(model_path);
+            model.eval();
+            loaded = true;
+            std::cout << "[INFO] MiDaS model loaded successfully\n";
+        } catch (const std::exception& e) {
+            std::cerr << "Error loading MiDaS model: " << e.what() << "\n";
+            return nullptr;
+        }
     }
+    return &model;
 }
 
-static bool load_openpose_model(const std::string& model_path) {
-    if (g_openpose_loaded) return true;
-    try {
-        std::cout << "[INFO] Loading OpenPose model: " << model_path << "\n";
-        g_openpose_model = torch::jit::load(model_path);
-        g_openpose_model.eval();
-        g_openpose_loaded = true;
-        std::cout << "[INFO] OpenPose model loaded successfully\n";
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Error loading OpenPose model: " << e.what() << "\n";
-        return false;
+static torch::jit::script::Module* get_openpose_model(const std::string& model_path) {
+    static torch::jit::script::Module model;
+    static bool loaded = false;
+    if (!loaded) {
+        try {
+            std::cout << "[INFO] Loading OpenPose model: " << model_path << "\n";
+            model = torch::jit::load(model_path);
+            model.eval();
+            loaded = true;
+            std::cout << "[INFO] OpenPose model loaded successfully\n";
+        } catch (const std::exception& e) {
+            std::cerr << "Error loading OpenPose model: " << e.what() << "\n";
+            return nullptr;
+        }
     }
+    return &model;
 }
 
 ImageData canny_edges(const ImageData& img, int low_threshold, int high_threshold) {
@@ -175,11 +175,12 @@ ImageData depth_map(const ImageData& img, const std::string& model_path) {
         path = "/opt/image/model/midas_dpt_hybrid.pt";
     }
     
-    if (!load_midas_model(path)) {
+    auto* model = get_midas_model(path);
+    if (!model) {
         std::cerr << "Failed to load MiDaS model. Use --depth-model PATH.\n";
         return ImageData();
     }
-    
+
     try {
         // Convert ImageData to OpenCV Mat (RGB)
         cv::Mat input(img.height, img.width, CV_8UC3, const_cast<uint8_t*>(img.data.data()));
@@ -213,7 +214,7 @@ ImageData depth_map(const ImageData& img, const std::string& model_path) {
         at::Tensor output;
         {
             torch::NoGradGuard no_grad;
-            output = g_midas_model.forward(inputs).toTensor();
+            output = model->forward(inputs).toTensor();
         }
         
         // output is [1, H, W] - inverse depth
@@ -259,11 +260,12 @@ ImageData openpose(const ImageData& img, const std::string& model_path) {
         path = "/opt/image/model/openpose_body.pt";
     }
     
-    if (!load_openpose_model(path)) {
+    auto* model = get_openpose_model(path);
+    if (!model) {
         std::cerr << "Failed to load OpenPose model. Use --openpose-model PATH.\n";
         return ImageData();
     }
-    
+
     try {
         // Convert ImageData to OpenCV Mat (RGB)
         cv::Mat input(img.height, img.width, CV_8UC3, const_cast<uint8_t*>(img.data.data()));
@@ -293,7 +295,7 @@ ImageData openpose(const ImageData& img, const std::string& model_path) {
         at::Tensor paf, heatmap;
         {
             torch::NoGradGuard no_grad;
-            auto output = g_openpose_model.forward(inputs).toTuple();
+            auto output = model->forward(inputs).toTuple();
             paf = output->elements()[0].toTensor();
             heatmap = output->elements()[1].toTensor();
         }
