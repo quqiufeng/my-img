@@ -92,8 +92,8 @@ SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
 STEPS="${STEPS:-25}"
-HIRES_STEPS="${HIRES_STEPS:-45}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
+HIRES_STEPS="${HIRES_STEPS:-60}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.25}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
     echo -e "${BLUE}[INFO] Ultra HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
@@ -215,19 +215,16 @@ SD_CMD=("$SD_CLI"
   --diffusion-fa
   --vae-tiling
   --vae-tile-size 256x256
-  --vae-tile-overlap 0.5
+  --vae-tile-overlap 0.75
   --freeu
+  --freeu-b1 1.4
+  --freeu-b2 1.5
   --sag
-  --sag-scale 1.0
+  --sag-scale 0.5
   --auto-enhance
-  --clarity 0.6
-  --sharpen 1.5
+  --clarity 0.4
+  --sharpen 1.2
   --sharpen-radius 2
-  --smart-sharpen 1.2
-  --smart-sharpen-radius 2
-  --edge-sharpen 1.0
-  --edge-sharpen-radius 2
-  --edge-sharpen-threshold 0.3
   --embd-dir "$MODEL_DIR/embeddings"
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
