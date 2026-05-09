@@ -175,6 +175,8 @@ endif()
 # ============================================================
 set(MYIMG_SOURCES
     src/main.cpp
+    src/cli/cli_parser.cpp
+    src/pipeline/photo_adjustment.cpp
     src/adapters/sdcpp_adapter.cpp
     src/utils/image_utils.cpp
     src/utils/image_adjust.cpp
