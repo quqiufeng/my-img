@@ -183,6 +183,19 @@ protected:
 
 public:
     int model_channels  = 320;
+    bool freeu_enabled = false;
+    float freeu_b1 = 1.3f;
+    float freeu_b2 = 1.4f;
+    float freeu_s1 = 0.9f;
+    float freeu_s2 = 0.2f;
+
+    void set_freeu(bool enabled, float b1, float b2, float s1, float s2) {
+        freeu_enabled = enabled;
+        freeu_b1 = b1;
+        freeu_b2 = b2;
+        freeu_s1 = s1;
+        freeu_s2 = s2;
+    }
     int adm_in_channels = 2816;  // only for VERSION_SDXL/SVD
 
     UnetModelBlock(SDVersion version = VERSION_SD1, const String2TensorStorage& tensor_storage_map = {})
@@ -482,12 +495,14 @@ public:
 
             emb = ggml_add(ctx->ggml_ctx, emb, label_emb);  // [N, time_embed_dim]
         }
+        // sd::ggml_graph_cut::mark_graph_cut(emb, "unet.prelude", "emb");
 
         // input_blocks
         std::vector<ggml_tensor*> hs;
 
         // input block 0
         auto h = input_blocks_0_0->forward(ctx, x);
+        sd::ggml_graph_cut::mark_graph_cut(h, "unet.input_blocks.0", "h");
 
         ggml_set_name(h, "bench-start");
         hs.push_back(h);
@@ -505,6 +520,7 @@ public:
                     std::string name = "input_blocks." + std::to_string(input_block_idx) + ".1";
                     h                = attention_layer_forward(name, ctx, h, context, num_video_frames);  // [N, mult*model_channels, h, w]
                 }
+                sd::ggml_graph_cut::mark_graph_cut(h, "unet.input_blocks." + std::to_string(input_block_idx), "h");
                 hs.push_back(h);
             }
             if (tiny_unet) {
@@ -518,6 +534,7 @@ public:
                 auto block       = std::dynamic_pointer_cast<DownSampleBlock>(blocks[name]);
 
                 h = block->forward(ctx, h);  // [N, mult*model_channels, h/(2^(i+1)), w/(2^(i+1))]
+                // sd::ggml_graph_cut::mark_graph_cut(h, "unet.input_blocks." + std::to_string(input_block_idx), "h");
                 hs.push_back(h);
             }
         }
@@ -531,6 +548,7 @@ public:
                 h = resblock_forward("middle_block.2", ctx, h, emb, num_video_frames);             // [N, 4*model_channels, h/8, w/8]
             }
         }
+        sd::ggml_graph_cut::mark_graph_cut(h, "unet.middle_block", "h");
         if (controls.size() > 0) {
             auto cs = ggml_ext_scale(ctx->ggml_ctx, controls[controls.size() - 1], control_strength, true);
             h       = ggml_add(ctx->ggml_ctx, h, cs);  // middle control
@@ -550,6 +568,13 @@ public:
                     control_offset--;
                 }
 
+                if (freeu_enabled) {
+                    // FreeU: boost backbone, reduce skip connection
+                    float b = (output_block_idx < 3) ? freeu_b1 : freeu_b2;
+                    float s = (output_block_idx < 3) ? freeu_s1 : freeu_s2;
+                    h = ggml_scale(ctx->ggml_ctx, h, b);
+                    h_skip = ggml_scale(ctx->ggml_ctx, h_skip, s);
+                }
                 h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
 
                 std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
@@ -581,6 +606,7 @@ public:
                 }
 
                 output_block_idx += 1;
+                sd::ggml_graph_cut::mark_graph_cut(h, "unet.output_blocks." + std::to_string(output_block_idx - 1), "h");
             }
         }
 
@@ -611,6 +637,9 @@ struct UNetModelRunner : public GGMLRunner {
 
     void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string prefix) {
         unet.get_param_tensors(tensors, prefix);
+    }
+    void set_freeu(bool enabled, float b1, float b2, float s1, float s2) {
+        unet.set_freeu(enabled, b1, b2, s1, s2);
     }
 
     ggml_cgraph* build_graph(const sd::Tensor<float>& x_tensor,

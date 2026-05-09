@@ -204,7 +204,7 @@ ImageData ShadowEffect::add_contact_shadow(const ImageData& image, float opacity
 }
 
 ImageData ShadowEffect::add_product_shadow(const ImageData& image,
-                                            const DropShadowConfig& drop_config,
+                                            const DropShadowConfig& /*drop_config*/,
                                             const ReflectionConfig& reflection_config) {
     // 先添加倒影
     auto with_reflection = add_reflection(image, reflection_config);

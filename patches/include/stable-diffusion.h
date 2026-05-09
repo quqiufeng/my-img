@@ -203,6 +203,7 @@ typedef struct {
     bool chroma_use_t5_mask;
     int chroma_t5_mask_pad;
     bool qwen_image_zero_cond_t;
+    float max_vram;
 } sd_ctx_params_t;
 
 typedef struct {
@@ -316,6 +317,26 @@ typedef struct {
 } sd_hires_params_t;
 
 typedef struct {
+    bool enabled;
+    float b1;
+    float b2;
+    float s1;
+    float s2;
+} sd_freeu_params_t;
+
+typedef struct {
+    bool enabled;
+    float scale;
+} sd_sag_params_t;
+
+typedef struct {
+    bool enabled;
+    float percentile;
+    float mimic_scale;
+    float threshold_percentile;
+} sd_dynamic_cfg_params_t;
+
+typedef struct {
     const sd_lora_t* loras;
     uint32_t lora_count;
     const char* prompt;
@@ -339,6 +360,9 @@ typedef struct {
     sd_tiling_params_t vae_tiling_params;
     sd_cache_params_t cache;
     sd_hires_params_t hires;
+    sd_freeu_params_t freeu;
+    sd_sag_params_t sag;
+    sd_dynamic_cfg_params_t dynamic_cfg;
 } sd_img_gen_params_t;
 
 typedef struct {

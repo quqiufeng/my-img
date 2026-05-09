@@ -37,7 +37,7 @@ static bool load_openpose_onnx(const std::string& model_path) {
 }
 
 // ONNX-based depth estimation using MiDaS/DPT model
-ImageData depth_map_onnx(const ImageData& img, const std::string& model_path) {
+ImageData depth_map_onnx(const ImageData& /*img*/, const std::string& /*model_path*/) {
     std::cerr << "ONNX MiDaS model not available. Using TorchScript version instead.\n";
     return ImageData();
 }
@@ -101,7 +101,7 @@ ImageData openpose_onnx(const ImageData& img, const std::string& model_path) {
         auto heatmap_shape = output_tensors[1].GetTensorTypeAndShapeInfo().GetShape();
         int heatmap_h = heatmap_shape[2];
         int heatmap_w = heatmap_shape[3];
-        int num_keypoints = heatmap_shape[1];
+        (void)heatmap_shape[1];  // num_keypoints
         
         // Create visualization from first heatmap channel
         cv::Mat heatmap_img(heatmap_h, heatmap_w, CV_32FC1);

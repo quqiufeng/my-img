@@ -175,6 +175,9 @@ struct GenerationParams {
 
     // 类型设置
     std::string wtype = "default";  // 权重类型: "f32", "f16", "q4_0", "q5_k", etc.
+    
+    // 显存限制（GB, 0 = 不限制）
+    float max_vram = 0.0f;
 };
 
 // 进度回调

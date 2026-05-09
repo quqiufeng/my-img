@@ -90,8 +90,8 @@ torch::Tensor LUT3D::apply(const torch::Tensor& image) const {
     
     auto img = image.clone();
     auto device = img.device();
-    int h = img.size(1);
-    int w = img.size(2);
+    (void)img.size(1);  // h
+    (void)img.size(2);  // w
     
     // Create LUT tensor [size, size, size, 3]
     auto lut_tensor = torch::from_blob(

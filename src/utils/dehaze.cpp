@@ -8,8 +8,8 @@ torch::Tensor dehaze(const torch::Tensor& image, float strength) {
     if (strength <= 0.0f) return image.clone();
     
     auto img = image.clone();
-    int h = img.size(1);
-    int w = img.size(2);
+    (void)img.size(1);  // h
+    (void)img.size(2);  // w
     
     // Step 1: Compute dark channel
     // Dark channel = min over color channels

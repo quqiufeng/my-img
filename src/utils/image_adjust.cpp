@@ -525,7 +525,7 @@ torch::Tensor smart_denoise(const torch::Tensor& image, float strength) {
     auto edge_mask = (edge < edge.mean().item<float>() * 2.0f).to(torch::kFloat32); // 非边缘区域
     
     // 轻量高斯模糊
-    int radius = 1;
+    (void)1;  // radius = 1
     auto kernel = torch::tensor({{{0.0625f, 0.125f, 0.0625f}, {0.125f, 0.25f, 0.125f}, {0.0625f, 0.125f, 0.0625f}}},
                                  torch::TensorOptions().dtype(torch::kFloat32)).to(device);
     kernel = kernel.unsqueeze(0).unsqueeze(0).contiguous();
@@ -988,7 +988,7 @@ torch::Tensor graduated_filter(const torch::Tensor& image, float angle, float po
 // Smart sharpen: edge-aware sharpening
 // strength: 0.0-3.0 (sharpening strength)
 // radius: 1-5 (blur radius for edge detection)
-torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radius) {
+torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int /*radius*/) {
     if (strength <= 0.0f) return image.clone();
     
     auto img = image.clone();

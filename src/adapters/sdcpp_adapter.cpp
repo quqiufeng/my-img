@@ -188,6 +188,7 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.enable_mmap = params.enable_mmap;
     sd_params.flash_attn = params.flash_attn;
     sd_params.diffusion_flash_attn = params.flash_attn;
+    sd_params.max_vram = params.max_vram;
     
     // 权重类型
     if (!params.wtype.empty() && params.wtype != "default") {
@@ -401,7 +402,7 @@ Image SDCPPAdapter::generate_single(const GenerationParams& params) {
     return Image();
 }
 
-std::vector<float> SDCPPAdapter::encode_prompt(const std::string& prompt, int clip_skip) {
+std::vector<float> SDCPPAdapter::encode_prompt(const std::string& /*prompt*/, int /*clip_skip*/) {
     // TODO: 实现文本编码，返回 conditioning
     // 这需要更底层的 API，可能需要修改 sd.cpp 暴露更多接口
     std::cerr << "[SDCPPAdapter] encode_prompt not yet implemented" << std::endl;

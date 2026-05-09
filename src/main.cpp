@@ -202,6 +202,7 @@ struct CliOptions {
     // 系统
     int threads = -1;
     bool verbose = false;
+    float max_vram = 0.0f;  // 最大显存限制 (GB, 0 = 不限制)
 };
 
 static void print_usage(const char* argv0) {
@@ -360,6 +361,7 @@ static void print_usage(const char* argv0) {
     std::cout << "  --load-preset PATH        Load settings from preset file\n";
     std::cout << "\nSystem Options:\n";
     std::cout << "  --threads INT             Number of CPU threads (default: auto)\n";
+    std::cout << "  --max-vram FLOAT          Max VRAM limit in GB (default: 0 = unlimited)\n";
     std::cout << "  -v, --verbose             Verbose logging\n";
     std::cout << "  --help                    Show this help\n";
 }
@@ -608,7 +610,7 @@ static bool load_preset(CliOptions& opts, const std::string& preset_path) {
     return true;
 }
 
-static bool load_config(const std::string& config_path, CliOptions& opts) {
+[[maybe_unused]] static bool load_config(const std::string& config_path, CliOptions& opts) {
     std::ifstream file(config_path);
     if (!file) {
         std::cerr << "Error: Cannot open config file: " << config_path << "\n";
@@ -1018,6 +1020,9 @@ static bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--threads") {
             if (++i >= argc) { std::cerr << "Missing value for --threads\n"; return false; }
             if (!safe_convert(argv[i], opts.threads, "--threads")) return false;
+        } else if (arg == "--max-vram") {
+            if (++i >= argc) { std::cerr << "Missing value for --max-vram\n"; return false; }
+            if (!safe_convert(argv[i], opts.max_vram, "--max-vram")) return false;
         } else if (arg == "--temperature") {
             if (++i >= argc) { std::cerr << "Missing value for --temperature\n"; return false; }
             if (!safe_convert(argv[i], opts.temperature, "--temperature")) return false;
@@ -1451,6 +1456,7 @@ int main(int argc, char** argv) {
     params.seed = opts.seed;
     params.batch_count = opts.batch_count;
     params.n_threads = opts.threads;
+    params.max_vram = opts.max_vram;
     params.flash_attn = opts.diffusion_fa;
     params.vae_tiling = opts.vae_tiling;
     params.vae_tile_size_x = opts.vae_tile_size_w;
