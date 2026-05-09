@@ -1,3 +1,4 @@
+#include "utils/log.h"
 #include "utils/png_metadata.h"
 #include <fstream>
 #include <iostream>

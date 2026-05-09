@@ -7,11 +7,20 @@
 #include <vector>
 #include <cmath>
 #include <memory>
+#include <cstdlib>
 #endif
 
 namespace myimg {
 
 #ifdef HAVE_ONNXRUNTIME
+
+namespace {
+    std::string get_default_model_dir() {
+        const char* env = std::getenv("MYIMG_MODEL_DIR");
+        if (env) return env;
+        return "/opt/image/model";
+    }
+}
 
 static Ort::Session* get_openpose_onnx_session(const std::string& model_path) {
     static std::unique_ptr<Ort::Session> session;
@@ -47,7 +56,7 @@ ImageData openpose_onnx(const ImageData& img, const std::string& model_path) {
     
     std::string path = model_path;
     if (path.empty()) {
-        path = "/opt/image/model/openpose_body.onnx";
+        path = get_default_model_dir() + "/openpose_body.onnx";
     }
     
     auto* session = get_openpose_onnx_session(path);

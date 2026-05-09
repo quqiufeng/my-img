@@ -247,7 +247,7 @@ std::string expand_output_template(const std::string& template_str,
                 result.replace(pos, end - pos + 1, idx_str);
                 pos += idx_str.size();
             } catch (const std::exception&) {
-                std::cerr << "Warning: Invalid index padding in template, skipping\n";
+                LOG_WARN("Invalid index padding in template, skipping");
                 break;
             }
         } else {
@@ -330,7 +330,7 @@ bool save_preset(const CliOptions& opts, const std::string& preset_name) {
     
     std::ofstream file(preset_path);
     if (!file) {
-        std::cerr << "Error: Failed to save preset to " << preset_path << "\n";
+        LOG_ERROR("Failed to save preset to %s", preset_path.c_str());
         return false;
     }
     file << j.dump(2);
@@ -343,7 +343,7 @@ bool save_preset(const CliOptions& opts, const std::string& preset_name) {
 bool load_preset(CliOptions& opts, const std::string& preset_path) {
     std::ifstream file(preset_path);
     if (!file) {
-        std::cerr << "Error: Failed to load preset from " << preset_path << "\n";
+        LOG_ERROR("Failed to load preset from %s", preset_path.c_str());
         return false;
     }
     
@@ -351,7 +351,7 @@ bool load_preset(CliOptions& opts, const std::string& preset_path) {
     try {
         file >> j;
     } catch (const std::exception& e) {
-        std::cerr << "Error: Invalid preset JSON: " << e.what() << "\n";
+        LOG_ERROR("Invalid preset JSON: %s", e.what());
         return false;
     }
     
@@ -427,7 +427,7 @@ bool load_preset(CliOptions& opts, const std::string& preset_path) {
 [[maybe_unused]] static bool load_config(const std::string& config_path, CliOptions& opts) {
     std::ifstream file(config_path);
     if (!file) {
-        std::cerr << "Error: Cannot open config file: " << config_path << "\n";
+        LOG_ERROR("Cannot open config file: %s", config_path.c_str());
         return false;
     }
 
@@ -435,7 +435,7 @@ bool load_preset(CliOptions& opts, const std::string& preset_path) {
     try {
         file >> j;
     } catch (const std::exception& e) {
-        std::cerr << "Error: Failed to parse config file: " << e.what() << "\n";
+        LOG_ERROR("Failed to parse config file: %s", e.what());
         return false;
     }
 
@@ -541,80 +541,80 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
             std::cout << "sd.cpp version: " << myimg::SDCPPAdapter::get_version() << "\n";
             exit(0);
         } else if (arg == "-m" || arg == "--model") {
-            if (++i >= argc) { std::cerr << "Missing value for -m/--model\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -m/--model"); return false; }
             opts.model = argv[i];
         } else if (arg == "--diffusion-model") {
-            if (++i >= argc) { std::cerr << "Missing value for --diffusion-model\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --diffusion-model"); return false; }
             opts.diffusion_model = argv[i];
         } else if (arg == "--vae") {
-            if (++i >= argc) { std::cerr << "Missing value for --vae\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --vae"); return false; }
             opts.vae = argv[i];
         } else if (arg == "--llm") {
-            if (++i >= argc) { std::cerr << "Missing value for --llm\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --llm"); return false; }
             opts.llm = argv[i];
         } else if (arg == "--upscale-model") {
-            if (++i >= argc) { std::cerr << "Missing value for --upscale-model\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --upscale-model"); return false; }
             opts.upscale_model = argv[i];
         } else if (arg == "--embd-dir") {
-            if (++i >= argc) { std::cerr << "Missing value for --embd-dir\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --embd-dir"); return false; }
             opts.embedding_dir = argv[i];
         } else if (arg == "--config") {
-            if (++i >= argc) { std::cerr << "Missing value for --config\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --config"); return false; }
             opts.config_file = argv[i];
         } else if (arg == "-p" || arg == "--prompt") {
-            if (++i >= argc) { std::cerr << "Missing value for -p/--prompt\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -p/--prompt"); return false; }
             opts.prompt = argv[i];
         } else if (arg == "-n" || arg == "--negative-prompt") {
-            if (++i >= argc) { std::cerr << "Missing value for -n/--negative-prompt\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -n/--negative-prompt"); return false; }
             opts.negative_prompt = argv[i];
         } else if (arg == "-W" || arg == "--width") {
-            if (++i >= argc) { std::cerr << "Missing value for -W/--width\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -W/--width"); return false; }
             if (!safe_convert(argv[i], opts.width, "--width")) return false;
         } else if (arg == "-H" || arg == "--height") {
-            if (++i >= argc) { std::cerr << "Missing value for -H/--height\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -H/--height"); return false; }
             if (!safe_convert(argv[i], opts.height, "--height")) return false;
         } else if (arg == "--steps") {
-            if (++i >= argc) { std::cerr << "Missing value for --steps\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --steps"); return false; }
             if (!safe_convert(argv[i], opts.steps, "--steps")) return false;
         } else if (arg == "--cfg-scale") {
-            if (++i >= argc) { std::cerr << "Missing value for --cfg-scale\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --cfg-scale"); return false; }
             if (!safe_convert(argv[i], opts.cfg_scale, "--cfg-scale")) return false;
         } else if (arg == "--sampling-method") {
-            if (++i >= argc) { std::cerr << "Missing value for --sampling-method\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --sampling-method"); return false; }
             opts.sampling_method = argv[i];
         } else if (arg == "--scheduler") {
-            if (++i >= argc) { std::cerr << "Missing value for --scheduler\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --scheduler"); return false; }
             opts.scheduler = argv[i];
         } else if (arg == "-s" || arg == "--seed") {
-            if (++i >= argc) { std::cerr << "Missing value for -s/--seed\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -s/--seed"); return false; }
             if (!safe_convert(argv[i], opts.seed, "--seed")) return false;
         } else if (arg == "--batch-count") {
-            if (++i >= argc) { std::cerr << "Missing value for --batch-count\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --batch-count"); return false; }
             if (!safe_convert(argv[i], opts.batch_count, "--batch-count")) return false;
         } else if (arg == "-i" || arg == "--init-img") {
-            if (++i >= argc) { std::cerr << "Missing value for -i/--init-img\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -i/--init-img"); return false; }
             opts.init_image = argv[i];
         } else if (arg == "--strength") {
-            if (++i >= argc) { std::cerr << "Missing value for --strength\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --strength"); return false; }
             if (!safe_convert(argv[i], opts.strength, "--strength")) return false;
         } else if (arg == "--mask") {
-            if (++i >= argc) { std::cerr << "Missing value for --mask\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --mask"); return false; }
             opts.mask_image = argv[i];
         } else if (arg == "--control-net") {
-            if (++i >= argc) { std::cerr << "Missing value for --control-net\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --control-net"); return false; }
             opts.control_net = argv[i];
         } else if (arg == "--control-image") {
-            if (++i >= argc) { std::cerr << "Missing value for --control-image\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --control-image"); return false; }
             opts.control_image = argv[i];
         } else if (arg == "--control-strength") {
-            if (++i >= argc) { std::cerr << "Missing value for --control-strength\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --control-strength"); return false; }
             if (!safe_convert(argv[i], opts.control_strength, "--control-strength")) return false;
         } else if (arg == "--diffusion-fa") {
             opts.diffusion_fa = true;
         } else if (arg == "--vae-tiling") {
             opts.vae_tiling = true;
         } else if (arg == "--vae-tile-size") {
-            if (++i >= argc) { std::cerr << "Missing value for --vae-tile-size\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --vae-tile-size"); return false; }
             std::string val = argv[i];
             size_t x = val.find('x');
             if (x != std::string::npos) {
@@ -626,222 +626,222 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
                 opts.vae_tile_size_w = opts.vae_tile_size_h = tile_size;
             }
         } else if (arg == "--vae-tile-overlap") {
-            if (++i >= argc) { std::cerr << "Missing value for --vae-tile-overlap\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --vae-tile-overlap"); return false; }
             if (!safe_convert(argv[i], opts.vae_tile_overlap, "--vae-tile-overlap")) return false;
         } else if (arg == "--hires") {
             opts.hires = true;
         } else if (arg == "--hires-width") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-width\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-width"); return false; }
             if (!safe_convert(argv[i], opts.hires_width, "--hires-width")) return false;
         } else if (arg == "--hires-height") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-height\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-height"); return false; }
             if (!safe_convert(argv[i], opts.hires_height, "--hires-height")) return false;
         } else if (arg == "--hires-strength") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-strength\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-strength"); return false; }
             if (!safe_convert(argv[i], opts.hires_strength, "--hires-strength")) return false;
         } else if (arg == "--hires-steps") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-steps\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-steps"); return false; }
             if (!safe_convert(argv[i], opts.hires_steps, "--hires-steps")) return false;
         } else if (arg == "--hires-upscaler") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-upscaler\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-upscaler"); return false; }
             opts.hires_upscaler = argv[i];
         } else if (arg == "--hires-scale") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-scale\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-scale"); return false; }
             if (!safe_convert(argv[i], opts.hires_scale, "--hires-scale")) return false;
         } else if (arg == "--hires-model") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-model\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-model"); return false; }
             opts.hires_model_path = argv[i];
         } else if (arg == "--hires-tile-size") {
-            if (++i >= argc) { std::cerr << "Missing value for --hires-tile-size\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --hires-tile-size"); return false; }
             if (!safe_convert(argv[i], opts.hires_tile_size, "--hires-tile-size")) return false;
         } else if (arg == "--freeu") {
             opts.freeu = true;
         } else if (arg == "--freeu-b1") {
-            if (++i >= argc) { std::cerr << "Missing value for --freeu-b1\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-b1"); return false; }
             if (!safe_convert(argv[i], opts.freeu_b1, "--freeu-b1")) return false;
         } else if (arg == "--freeu-b2") {
-            if (++i >= argc) { std::cerr << "Missing value for --freeu-b2\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-b2"); return false; }
             if (!safe_convert(argv[i], opts.freeu_b2, "--freeu-b2")) return false;
         } else if (arg == "--freeu-s1") {
-            if (++i >= argc) { std::cerr << "Missing value for --freeu-s1\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-s1"); return false; }
             if (!safe_convert(argv[i], opts.freeu_s1, "--freeu-s1")) return false;
         } else if (arg == "--freeu-s2") {
-            if (++i >= argc) { std::cerr << "Missing value for --freeu-s2\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-s2"); return false; }
             if (!safe_convert(argv[i], opts.freeu_s2, "--freeu-s2")) return false;
         } else if (arg == "--sag") {
             opts.sag = true;
         } else if (arg == "--sag-scale") {
-            if (++i >= argc) { std::cerr << "Missing value for --sag-scale\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --sag-scale"); return false; }
             if (!safe_convert(argv[i], opts.sag_scale, "--sag-scale")) return false;
         } else if (arg == "--upscale-repeats") {
-            if (++i >= argc) { std::cerr << "Missing value for --upscale-repeats\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --upscale-repeats"); return false; }
             if (!safe_convert(argv[i], opts.upscale_repeats, "--upscale-repeats")) return false;
         } else if (arg == "--lora") {
-            if (++i >= argc) { std::cerr << "Missing value for --lora\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --lora"); return false; }
             opts.loras.push_back(argv[i]);
         } else if (arg == "--upscale-tile-size") {
-            if (++i >= argc) { std::cerr << "Missing value for --upscale-tile-size\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --upscale-tile-size"); return false; }
             if (!safe_convert(argv[i], opts.upscale_tile_size, "--upscale-tile-size")) return false;
         } else if (arg == "-o" || arg == "--output") {
-            if (++i >= argc) { std::cerr << "Missing value for -o/--output\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for -o/--output"); return false; }
             opts.output = argv[i];
         } else if (arg == "--embed-metadata") {
             opts.embed_metadata = true;
         } else if (arg == "--quality") {
-            if (++i >= argc) { std::cerr << "Missing value for --quality\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --quality"); return false; }
             if (!safe_convert(argv[i], opts.jpeg_quality, "--jpeg-quality")) return false;
         } else if (arg == "--threads") {
-            if (++i >= argc) { std::cerr << "Missing value for --threads\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --threads"); return false; }
             if (!safe_convert(argv[i], opts.threads, "--threads")) return false;
         } else if (arg == "--max-vram") {
-            if (++i >= argc) { std::cerr << "Missing value for --max-vram\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --max-vram"); return false; }
             if (!safe_convert(argv[i], opts.max_vram, "--max-vram")) return false;
         } else if (arg == "--temperature") {
-            if (++i >= argc) { std::cerr << "Missing value for --temperature\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --temperature"); return false; }
             if (!safe_convert(argv[i], opts.temperature, "--temperature")) return false;
         } else if (arg == "--brightness") {
-            if (++i >= argc) { std::cerr << "Missing value for --brightness\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --brightness"); return false; }
             if (!safe_convert(argv[i], opts.brightness, "--brightness")) return false;
         } else if (arg == "--contrast") {
-            if (++i >= argc) { std::cerr << "Missing value for --contrast\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --contrast"); return false; }
             if (!safe_convert(argv[i], opts.contrast, "--contrast")) return false;
         } else if (arg == "--saturation") {
-            if (++i >= argc) { std::cerr << "Missing value for --saturation\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --saturation"); return false; }
             if (!safe_convert(argv[i], opts.saturation, "--saturation")) return false;
         } else if (arg == "--exposure") {
-            if (++i >= argc) { std::cerr << "Missing value for --exposure\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --exposure"); return false; }
             if (!safe_convert(argv[i], opts.exposure, "--exposure")) return false;
         } else if (arg == "--highlights") {
-            if (++i >= argc) { std::cerr << "Missing value for --highlights\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --highlights"); return false; }
             if (!safe_convert(argv[i], opts.highlights, "--highlights")) return false;
         } else if (arg == "--shadows") {
-            if (++i >= argc) { std::cerr << "Missing value for --shadows\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --shadows"); return false; }
             if (!safe_convert(argv[i], opts.shadows, "--shadows")) return false;
         } else if (arg == "--auto-enhance") {
             opts.auto_enhance = true;
         } else if (arg == "--vibrance") {
-            if (++i >= argc) { std::cerr << "Missing value for --vibrance\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --vibrance"); return false; }
             if (!safe_convert(argv[i], opts.vibrance, "--vibrance")) return false;
         } else if (arg == "--clarity") {
-            if (++i >= argc) { std::cerr << "Missing value for --clarity\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --clarity"); return false; }
             if (!safe_convert(argv[i], opts.clarity, "--clarity")) return false;
         } else if (arg == "--split-tone-highlights") {
-            if (++i >= argc) { std::cerr << "Missing value for --split-tone-highlights\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --split-tone-highlights"); return false; }
             opts.split_tone_highlights = argv[i];
         } else if (arg == "--split-tone-shadows") {
-            if (++i >= argc) { std::cerr << "Missing value for --split-tone-shadows\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --split-tone-shadows"); return false; }
             opts.split_tone_shadows = argv[i];
         } else if (arg == "--split-tone-strength") {
-            if (++i >= argc) { std::cerr << "Missing value for --split-tone-strength\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --split-tone-strength"); return false; }
             if (!safe_convert(argv[i], opts.split_tone_strength, "--split-tone-strength")) return false;
         } else if (arg == "--tint") {
-            if (++i >= argc) { std::cerr << "Missing value for --tint\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --tint"); return false; }
             if (!safe_convert(argv[i], opts.tint, "--tint")) return false;
         } else if (arg == "--auto-white-balance") {
             opts.auto_white_balance = true;
         } else if (arg == "--blacks") {
-            if (++i >= argc) { std::cerr << "Missing value for --blacks\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --blacks"); return false; }
             if (!safe_convert(argv[i], opts.blacks, "--blacks")) return false;
         } else if (arg == "--whites") {
-            if (++i >= argc) { std::cerr << "Missing value for --whites\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --whites"); return false; }
             if (!safe_convert(argv[i], opts.whites, "--whites")) return false;
         } else if (arg == "--curves") {
-            if (++i >= argc) { std::cerr << "Missing value for --curves\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --curves"); return false; }
             opts.curves = argv[i];
         } else if (arg == "--vignette") {
-            if (++i >= argc) { std::cerr << "Missing value for --vignette\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --vignette"); return false; }
             if (!safe_convert(argv[i], opts.vignette_strength, "--vignette-strength")) return false;
         } else if (arg == "--vignette-radius") {
-            if (++i >= argc) { std::cerr << "Missing value for --vignette-radius\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --vignette-radius"); return false; }
             if (!safe_convert(argv[i], opts.vignette_radius, "--vignette-radius")) return false;
         } else if (arg == "--preset") {
-            if (++i >= argc) { std::cerr << "Missing value for --preset\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --preset"); return false; }
             opts.preset = argv[i];
         } else if (arg == "--lut") {
-            if (++i >= argc) { std::cerr << "Missing value for --lut\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --lut"); return false; }
             opts.lut_path = argv[i];
         } else if (arg == "--whiten") {
-            if (++i >= argc) { std::cerr << "Missing value for --whiten\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --whiten"); return false; }
             if (!safe_convert(argv[i], opts.whiten_strength, "--whiten-strength")) return false;
         } else if (arg == "--skin-smooth") {
-            if (++i >= argc) { std::cerr << "Missing value for --skin-smooth\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --skin-smooth"); return false; }
             if (!safe_convert(argv[i], opts.skin_smooth_strength, "--skin-smooth-strength")) return false;
         } else if (arg == "--skin-tone") {
-            if (++i >= argc) { std::cerr << "Missing value for --skin-tone\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --skin-tone"); return false; }
             opts.skin_tone = argv[i];
         } else if (arg == "--skin-tone-strength") {
-            if (++i >= argc) { std::cerr << "Missing value for --skin-tone-strength\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --skin-tone-strength"); return false; }
             if (!safe_convert(argv[i], opts.skin_tone_strength, "--skin-tone-strength")) return false;
         } else if (arg == "--skin-even") {
-            if (++i >= argc) { std::cerr << "Missing value for --skin-even\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --skin-even"); return false; }
             if (!safe_convert(argv[i], opts.skin_even_strength, "--skin-even-strength")) return false;
         } else if (arg == "--dehaze") {
-            if (++i >= argc) { std::cerr << "Missing value for --dehaze\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --dehaze"); return false; }
             if (!safe_convert(argv[i], opts.dehaze_strength, "--dehaze-strength")) return false;
         } else if (arg == "--sharpen") {
-            if (++i >= argc) { std::cerr << "Missing value for --sharpen\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --sharpen"); return false; }
             if (!safe_convert(argv[i], opts.sharpen_amount, "--sharpen-amount")) return false;
         } else if (arg == "--sharpen-radius") {
-            if (++i >= argc) { std::cerr << "Missing value for --sharpen-radius\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --sharpen-radius"); return false; }
             if (!safe_convert(argv[i], opts.sharpen_radius, "--sharpen-radius")) return false;
         } else if (arg == "--sharpen-threshold") {
-            if (++i >= argc) { std::cerr << "Missing value for --sharpen-threshold\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --sharpen-threshold"); return false; }
             if (!safe_convert(argv[i], opts.sharpen_threshold, "--sharpen-threshold")) return false;
         } else if (arg == "--smart-sharpen") {
-            if (++i >= argc) { std::cerr << "Missing value for --smart-sharpen\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --smart-sharpen"); return false; }
             if (!safe_convert(argv[i], opts.smart_sharpen_strength, "--smart-sharpen-strength")) return false;
         } else if (arg == "--smart-sharpen-radius") {
-            if (++i >= argc) { std::cerr << "Missing value for --smart-sharpen-radius\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --smart-sharpen-radius"); return false; }
             if (!safe_convert(argv[i], opts.smart_sharpen_radius, "--smart-sharpen-radius")) return false;
         } else if (arg == "--edge-sharpen") {
-            if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --edge-sharpen"); return false; }
             if (!safe_convert(argv[i], opts.edge_sharpen_amount, "--edge-sharpen-amount")) return false;
         } else if (arg == "--edge-sharpen-radius") {
-            if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen-radius\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --edge-sharpen-radius"); return false; }
             if (!safe_convert(argv[i], opts.edge_sharpen_radius, "--edge-sharpen-radius")) return false;
         } else if (arg == "--edge-sharpen-threshold") {
-            if (++i >= argc) { std::cerr << "Missing value for --edge-sharpen-threshold\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --edge-sharpen-threshold"); return false; }
             if (!safe_convert(argv[i], opts.edge_sharpen_threshold, "--edge-sharpen-threshold")) return false;
         } else if (arg == "--denoise") {
-            if (++i >= argc) { std::cerr << "Missing value for --denoise\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --denoise"); return false; }
             if (!safe_convert(argv[i], opts.denoise_strength, "--denoise-strength")) return false;
         } else if (arg == "--luminance-denoise") {
-            if (++i >= argc) { std::cerr << "Missing value for --luminance-denoise\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --luminance-denoise"); return false; }
             if (!safe_convert(argv[i], opts.luminance_denoise_strength, "--luminance-denoise-strength")) return false;
         } else if (arg == "--color-denoise") {
-            if (++i >= argc) { std::cerr << "Missing value for --color-denoise\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --color-denoise"); return false; }
             if (!safe_convert(argv[i], opts.color_denoise_strength, "--color-denoise-strength")) return false;
         } else if (arg == "--brightness-curves") {
-            if (++i >= argc) { std::cerr << "Missing value for --brightness-curves\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --brightness-curves"); return false; }
             opts.brightness_curves = argv[i];
         } else if (arg == "--r-curves") {
-            if (++i >= argc) { std::cerr << "Missing value for --r-curves\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --r-curves"); return false; }
             opts.r_curves = argv[i];
         } else if (arg == "--g-curves") {
-            if (++i >= argc) { std::cerr << "Missing value for --g-curves\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --g-curves"); return false; }
             opts.g_curves = argv[i];
         } else if (arg == "--b-curves") {
-            if (++i >= argc) { std::cerr << "Missing value for --b-curves\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --b-curves"); return false; }
             opts.b_curves = argv[i];
         } else if (arg == "--outpaint-top") {
-            if (++i >= argc) { std::cerr << "Missing value for --outpaint-top\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --outpaint-top"); return false; }
             if (!safe_convert(argv[i], opts.outpaint_top, "--outpaint-top")) return false;
         } else if (arg == "--outpaint-bottom") {
-            if (++i >= argc) { std::cerr << "Missing value for --outpaint-bottom\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --outpaint-bottom"); return false; }
             if (!safe_convert(argv[i], opts.outpaint_bottom, "--outpaint-bottom")) return false;
         } else if (arg == "--outpaint-left") {
-            if (++i >= argc) { std::cerr << "Missing value for --outpaint-left\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --outpaint-left"); return false; }
             if (!safe_convert(argv[i], opts.outpaint_left, "--outpaint-left")) return false;
         } else if (arg == "--outpaint-right") {
-            if (++i >= argc) { std::cerr << "Missing value for --outpaint-right\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --outpaint-right"); return false; }
             if (!safe_convert(argv[i], opts.outpaint_right, "--outpaint-right")) return false;
         } else if (arg == "--outpaint") {
-            if (++i >= argc) { std::cerr << "Missing value for --outpaint\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --outpaint"); return false; }
             int val;
             if (!safe_convert(argv[i], val, "--outpaint")) return false;
             opts.outpaint_top = opts.outpaint_bottom = opts.outpaint_left = opts.outpaint_right = val;
         } else if (arg == "--resize") {
-            if (++i >= argc) { std::cerr << "Missing value for --resize\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --resize"); return false; }
             std::string val = argv[i];
             size_t x = val.find('x');
             if (x != std::string::npos) {
@@ -849,61 +849,61 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
                 if (!safe_convert(val.substr(x + 1).c_str(), opts.resize_height, "--resize")) return false;
             }
         } else if (arg == "--resize-mode") {
-            if (++i >= argc) { std::cerr << "Missing value for --resize-mode\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --resize-mode"); return false; }
             opts.resize_mode = argv[i];
         } else if (arg == "--flip-h") {
             opts.flip_h = true;
         } else if (arg == "--flip-v") {
             opts.flip_v = true;
         } else if (arg == "--rotate") {
-            if (++i >= argc) { std::cerr << "Missing value for --rotate\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --rotate"); return false; }
             if (!safe_convert(argv[i], opts.rotate, "--rotate")) return false;
         } else if (arg == "--crop") {
-            if (++i >= argc) { std::cerr << "Missing value for --crop\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --crop"); return false; }
             opts.crop = argv[i];
         } else if (arg == "--crop-center") {
-            if (++i >= argc) { std::cerr << "Missing value for --crop-center\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --crop-center"); return false; }
             opts.crop_center = argv[i];
         } else if (arg == "--crop-ratio") {
-            if (++i >= argc) { std::cerr << "Missing value for --crop-ratio\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --crop-ratio"); return false; }
             opts.crop_ratio = argv[i];
         } else if (arg == "--control-preprocessor") {
-            if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --control-preprocessor"); return false; }
             opts.control_preprocessor = argv[i];
         } else if (arg == "--control-preprocessor-param1") {
-            if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor-param1\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --control-preprocessor-param1"); return false; }
             if (!safe_convert(argv[i], opts.control_preprocessor_param1, "--control-preprocessor-param1")) return false;
         } else if (arg == "--control-preprocessor-param2") {
-            if (++i >= argc) { std::cerr << "Missing value for --control-preprocessor-param2\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --control-preprocessor-param2"); return false; }
             if (!safe_convert(argv[i], opts.control_preprocessor_param2, "--control-preprocessor-param2")) return false;
         } else if (arg == "--depth-model") {
-            if (++i >= argc) { std::cerr << "Missing value for --depth-model\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --depth-model"); return false; }
             opts.depth_model = argv[i];
         } else if (arg == "--openpose-model") {
-            if (++i >= argc) { std::cerr << "Missing value for --openpose-model\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --openpose-model"); return false; }
             opts.openpose_model = argv[i];
         } else if (arg == "--save-preset") {
-            if (++i >= argc) { std::cerr << "Missing value for --save-preset\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --save-preset"); return false; }
             opts.save_preset_name = argv[i];
         } else if (arg == "--load-preset") {
-            if (++i >= argc) { std::cerr << "Missing value for --load-preset\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --load-preset"); return false; }
             opts.load_preset_path = argv[i];
         } else if (arg == "--interrogate") {
-            if (++i >= argc) { std::cerr << "Missing value for --interrogate\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --interrogate"); return false; }
             opts.interrogate_image = argv[i];
         } else if (arg == "--read-metadata") {
-            if (++i >= argc) { std::cerr << "Missing value for --read-metadata\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --read-metadata"); return false; }
             opts.read_metadata_image = argv[i];
         } else if (arg == "--radial-filter") {
-            if (++i >= argc) { std::cerr << "Missing value for --radial-filter\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --radial-filter"); return false; }
             opts.radial_filter = argv[i];
         } else if (arg == "--graduated-filter") {
-            if (++i >= argc) { std::cerr << "Missing value for --graduated-filter\n"; return false; }
+            if (++i >= argc) { LOG_ERROR("Missing value for --graduated-filter"); return false; }
             opts.graduated_filter = argv[i];
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {
-            std::cerr << "Unknown argument: " << arg << "\n";
+            LOG_ERROR("Unknown argument: %s", arg.c_str());
             return false;
         }
     }

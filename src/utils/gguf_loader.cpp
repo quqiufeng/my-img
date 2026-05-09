@@ -1,3 +1,4 @@
+#include "utils/log.h"
 #include "utils/gguf_loader.h"
 #include <gguf.h>
 #include <ggml.h>

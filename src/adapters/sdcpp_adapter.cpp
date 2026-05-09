@@ -26,7 +26,7 @@ static void sd_log_callback(enum sd_log_level_t level, const char* text, void* d
         case SD_LOG_WARN:  level_str = "WARN";  break;
         case SD_LOG_ERROR: level_str = "ERROR"; break;
     }
-    std::cerr << "[SD " << level_str << "] " << text;
+    std::cerr << "[SD " << level_str << "] " << text; // sd.cpp callback uses cerr
 }
 
 namespace myimg {

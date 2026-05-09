@@ -1,9 +1,19 @@
 #include "controlnet_preprocessors.h"
+#include "utils/log.h"
 #include <opencv2/opencv.hpp>
 #include <torch/script.h>
 #include <iostream>
+#include <cstdlib>
 
 namespace myimg {
+
+namespace {
+    std::string get_default_model_dir() {
+        const char* env = std::getenv("MYIMG_MODEL_DIR");
+        if (env) return env;
+        return "/opt/image/model";
+    }
+}
 
 static torch::jit::script::Module* get_midas_model(const std::string& model_path) {
     static torch::jit::script::Module model;
@@ -16,7 +26,7 @@ static torch::jit::script::Module* get_midas_model(const std::string& model_path
             loaded = true;
             std::cout << "[INFO] MiDaS model loaded successfully\n";
         } catch (const std::exception& e) {
-            std::cerr << "Error loading MiDaS model: " << e.what() << "\n";
+            LOG_ERROR("Error loading MiDaS model: %s", e.what());
             return nullptr;
         }
     }
@@ -34,7 +44,7 @@ static torch::jit::script::Module* get_openpose_model(const std::string& model_p
             loaded = true;
             std::cout << "[INFO] OpenPose model loaded successfully\n";
         } catch (const std::exception& e) {
-            std::cerr << "Error loading OpenPose model: " << e.what() << "\n";
+            LOG_ERROR("Error loading OpenPose model: %s", e.what());
             return nullptr;
         }
     }
@@ -61,7 +71,7 @@ ImageData canny_edges(const ImageData& img, int low_threshold, int high_threshol
         
         return result;
     } catch (const cv::Exception& e) {
-        std::cerr << "Error in canny_edges: " << e.what() << "\n";
+        LOG_ERROR("Error in canny_edges: %s", e.what());
         return ImageData();
     }
 }
@@ -89,7 +99,7 @@ ImageData lineart(const ImageData& img, int threshold) {
         
         return result;
     } catch (const cv::Exception& e) {
-        std::cerr << "Error in lineart: " << e.what() << "\n";
+        LOG_ERROR("Error in lineart: %s", e.what());
         return ImageData();
     }
 }
@@ -136,7 +146,7 @@ ImageData normal_map(const ImageData& img) {
         
         return result;
     } catch (const cv::Exception& e) {
-        std::cerr << "Error in normal_map: " << e.what() << "\n";
+        LOG_ERROR("Error in normal_map: %s", e.what());
         return ImageData();
     }
 }
@@ -162,7 +172,7 @@ ImageData scribble(const ImageData& img, int threshold) {
         
         return result;
     } catch (const cv::Exception& e) {
-        std::cerr << "Error in scribble: " << e.what() << "\n";
+        LOG_ERROR("Error in scribble: %s", e.what());
         return ImageData();
     }
 }
@@ -172,7 +182,7 @@ ImageData depth_map(const ImageData& img, const std::string& model_path) {
     
     std::string path = model_path;
     if (path.empty()) {
-        path = "/opt/image/model/midas_dpt_hybrid.pt";
+        path = get_default_model_dir() + "/midas_dpt_hybrid.pt";
     }
     
     auto* model = get_midas_model(path);
@@ -247,7 +257,7 @@ ImageData depth_map(const ImageData& img, const std::string& model_path) {
         return result;
         
     } catch (const std::exception& e) {
-        std::cerr << "Error in depth_map: " << e.what() << "\n";
+        LOG_ERROR("Error in depth_map: %s", e.what());
         return ImageData();
     }
 }
@@ -257,7 +267,7 @@ ImageData openpose(const ImageData& img, const std::string& model_path) {
     
     std::string path = model_path;
     if (path.empty()) {
-        path = "/opt/image/model/openpose_body.pt";
+        path = get_default_model_dir() + "/openpose_body.pt";
     }
     
     auto* model = get_openpose_model(path);
@@ -334,7 +344,7 @@ ImageData openpose(const ImageData& img, const std::string& model_path) {
         return result;
         
     } catch (const std::exception& e) {
-        std::cerr << "Error in openpose: " << e.what() << "\n";
+        LOG_ERROR("Error in openpose: %s", e.what());
         return ImageData();
     }
 }
@@ -354,7 +364,7 @@ ImageData apply_preprocessor(const ImageData& img, const std::string& name, int 
         return openpose(img, model_path);
     }
     
-    std::cerr << "Unknown preprocessor: " << name << "\n";
+    LOG_ERROR("Unknown preprocessor: %s", name);
     return ImageData();
 }
 

@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
         std::cout << "[INFO] Loading control image: " << opts.control_image << "\n";
         auto ctrl_data = myimg::load_image_from_file(opts.control_image);
         if (ctrl_data.empty()) {
-            std::cerr << "Error: Failed to load control image: " << opts.control_image << "\n";
+            LOG_ERROR("Failed to load control image: %s", opts.control_image.c_str());
             return 1;
         }
         params.control_image.width = ctrl_data.width;
@@ -276,7 +276,7 @@ int main(int argc, char** argv) {
         else if (upscaler_lower == "nearest") params.hires_upscaler = myimg::HiresUpscaler::Nearest;
         else if (upscaler_lower == "model") params.hires_upscaler = myimg::HiresUpscaler::Model;
         else {
-            std::cerr << "Warning: Unknown hires upscaler '" << opts.hires_upscaler << "', using 'latent'\n";
+            LOG_WARN("Unknown hires upscaler '%s', using 'latent'", opts.hires_upscaler.c_str());
             params.hires_upscaler = myimg::HiresUpscaler::Latent;
         }
     }
@@ -296,7 +296,7 @@ int main(int argc, char** argv) {
         
         auto orig = myimg::load_image_from_file(opts.init_image);
         if (orig.empty()) {
-            std::cerr << "Error: Failed to load image for outpainting: " << opts.init_image << "\n";
+            LOG_ERROR("Failed to load image for outpainting: %s", opts.init_image.c_str());
             return 1;
         }
         
@@ -328,7 +328,7 @@ int main(int argc, char** argv) {
         std::cout << "[INFO] Loading init image: " << opts.init_image << "\n";
         auto img_data = myimg::load_image_from_file(opts.init_image);
         if (img_data.empty()) {
-            std::cerr << "Error: Failed to load init image: " << opts.init_image << "\n";
+            LOG_ERROR("Failed to load init image: %s", opts.init_image.c_str());
             return 1;
         }
         params.init_image.width = img_data.width;
@@ -344,7 +344,7 @@ int main(int argc, char** argv) {
         std::cout << "[INFO] Loading mask: " << opts.mask_image << "\n";
         auto mask_data = myimg::load_image_from_file(opts.mask_image);
         if (mask_data.empty()) {
-            std::cerr << "Error: Failed to load mask: " << opts.mask_image << "\n";
+            LOG_ERROR("Failed to load mask: %s", opts.mask_image.c_str());
             return 1;
         }
         params.mask_image.width = mask_data.width;
@@ -365,7 +365,7 @@ int main(int argc, char** argv) {
                 try {
                     lora.multiplier = std::stof(lora_str.substr(colon + 1));
                 } catch (const std::exception&) {
-                    std::cerr << "Error: Invalid LoRA weight: " << lora_str.substr(colon + 1) << "\n";
+                    LOG_ERROR("Invalid LoRA weight: %s", lora_str.substr(colon + 1).c_str());
                     return 1;
                 }
             } else {
@@ -511,7 +511,7 @@ int main(int argc, char** argv) {
                         }
                         img_data = myimg::crop_image(img_data, x, y, w, h);
                     } catch (const std::exception&) {
-                        std::cerr << "Error: Invalid crop ratio: " << opts.crop_ratio << "\n";
+                        LOG_ERROR("Invalid crop ratio: %s", opts.crop_ratio.c_str());
                     }
                 }
             }
@@ -625,7 +625,7 @@ int main(int argc, char** argv) {
         myimg::Image image = adapter.generate_single(params);
         image.jpeg_quality = opts.jpeg_quality;
         if (image.empty()) {
-            std::cerr << "Generation failed for image " << (i + 1) << "\n";
+            LOG_ERROR("Generation failed for image %d", i + 1);
             continue;
         }
         
@@ -634,7 +634,7 @@ int main(int argc, char** argv) {
             LOG_INFO("Applying ESRGAN upscaling...");
             image = myimg::SDCPPAdapter::upscale_with_esrgan(image, opts.upscale_model, opts.upscale_repeats, opts.upscale_tile_size);
             if (image.empty()) {
-                std::cerr << "Upscale failed for image " << (i + 1) << "\n";
+                LOG_ERROR("Upscale failed for image %d", i + 1);
                 continue;
             }
         }
@@ -715,7 +715,7 @@ int main(int argc, char** argv) {
                         }
                         img_data = myimg::crop_image(img_data, x, y, w, h);
                     } catch (const std::exception&) {
-                        std::cerr << "Error: Invalid crop ratio: " << opts.crop_ratio << "\n";
+                        LOG_ERROR("Invalid crop ratio: %s", opts.crop_ratio.c_str());
                     }
                 }
             }
@@ -738,7 +738,7 @@ int main(int argc, char** argv) {
         
         // 保存图像
         if (!image.save_to_file(output_file)) {
-            std::cerr << "Failed to save image " << (i + 1) << "\n";
+            LOG_ERROR("Failed to save image %d", i + 1);
             continue;
         }
         
