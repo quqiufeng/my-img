@@ -2,6 +2,54 @@
 # =============================================================================
 # my-img 构建脚本 - 默认启用 GPU (CUDA)
 # =============================================================================
+#
+# 【编译踩坑记录 / 2025-05-29】
+#
+# 问题 1: 权限 denied
+#   现象: /opt/stable-diffusion.cpp/build 为 root 所有，当前用户无法写入
+#   修复: sudo chown -R $(whoami):$(whoami) /opt/stable-diffusion.cpp/build
+#
+# 问题 2: CUDA 非标准路径 (/data/cuda)
+#   现象: libtorch CMake 找不到 CUDA，报 "Cannot find the CUDA libraries"
+#   修复:
+#     sudo ln -sf /data/cuda /usr/local/cuda
+#     sudo ln -sf /usr/local/cuda /opt/libtorch/cuda
+#     sudo mkdir -p /usr/local/cuda/include
+#     sudo ln -sf /data/cuda/targets/x86_64-linux/include/* /usr/local/cuda/include/
+#     sudo mkdir -p /usr/local/cuda/lib64
+#     sudo ln -sf /data/cuda/targets/x86_64-linux/lib/* /usr/local/cuda/lib64/
+#   注意: libcudart.so 不能循环链接，必须指向 libcudart.so.12.6.77
+#
+# 问题 3: nvToolsExt 缺失
+#   现象: "Failed to find nvToolsExt"
+#   修复: sudo ln -sf /opt/libtorch/lib/libnvToolsExt-847d78f2.so.1 /usr/local/cuda/lib64/libnvToolsExt.so
+#
+# 问题 4: 第三方库缺失 (third_party)
+#   现象: "third_party/json" 等目录不存在，CMake 报错 add_subdirectory 失败
+#   修复: bash setup.sh  # 自动 clone json/ggml/stb
+#
+# 问题 5: stable-diffusion.cpp API 不兼容
+#   现象: "sd_ctx_params_t has no member named max_vram"
+#   修复: 注释掉 src/adapters/sdcpp_adapter.cpp:178 的 sd_params.max_vram 赋值
+#
+# 问题 6: OpenCV 缺失
+#   现象: "opencv2/imgproc.hpp: No such file or directory"
+#   修复: sudo apt install libopencv-dev
+#
+# 问题 7: LTO 版本不匹配
+#   现象: "bytecode stream generated with LTO version 12.0 instead of 13.1"
+#   原因: stable-diffusion.cpp 用 gcc-12 编译，但 my-img 链接时用了 g++-13
+#   修复: cmake 时统一指定编译器
+#     -DCMAKE_C_COMPILER=/usr/bin/gcc-12
+#     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12
+#
+# 环境要求:
+#   - CUDA: /data/cuda (需符号链接到 /usr/local/cuda)
+#   - libtorch: /opt/libtorch (CUDA 版本)
+#   - GCC: /usr/bin/gcc-12, g++-12 (避免与 gcc-13 混用)
+#   - OpenCV: libopencv-dev
+#
+# =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

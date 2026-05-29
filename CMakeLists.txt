@@ -52,6 +52,15 @@ endif()
 
 message(STATUS "[my-img] LIBTORCH_ROOT: ${LIBTORCH_ROOT}")
 
+# 强制设置 CUDA 路径（非标准安装路径）
+set(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
+set(CUDA_HOME /usr/local/cuda)
+set(CUDA_INCLUDE_DIRS /usr/local/cuda/include)
+set(CUDA_CUDART_LIBRARY /usr/local/cuda/lib64/libcudart.so)
+set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
+set(ENV{CUDA_HOME} /usr/local/cuda)
+set(ENV{CUDA_PATH} /usr/local/cuda)
+
 list(APPEND CMAKE_PREFIX_PATH ${LIBTORCH_ROOT})
 find_package(Torch REQUIRED)
 message(STATUS "[my-img] Torch version: ${Torch_VERSION}")

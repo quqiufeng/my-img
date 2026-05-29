@@ -175,7 +175,7 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.enable_mmap = params.enable_mmap;
     sd_params.flash_attn = params.flash_attn;
     sd_params.diffusion_flash_attn = params.flash_attn;
-    sd_params.max_vram = params.max_vram;
+    // sd_params.max_vram = params.max_vram;  // stable-diffusion.cpp 当前版本不支持
     
     // 权重类型
     if (!params.wtype.empty() && params.wtype != "default") {
