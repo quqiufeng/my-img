@@ -175,16 +175,34 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.enable_mmap = params.enable_mmap;
     sd_params.flash_attn = params.flash_attn;
     sd_params.diffusion_flash_attn = params.flash_attn;
-    // sd_params.max_vram = params.max_vram;  // stable-diffusion.cpp 当前版本不支持
-    
+
+    // 显存管理: 根据分辨率自动启用 CPU offloading
+    // stable-diffusion.cpp 当前版本不支持 max_vram，改用 keep_*_on_cpu 替代
+    int64_t pixel_count = static_cast<int64_t>(params.width) * params.height;
+    bool auto_vae_cpu = false;
+    bool auto_clip_cpu = false;
+    if (pixel_count > 1024 * 1024) {
+        auto_vae_cpu = true;
+    }
+    if (pixel_count > 1280 * 1280) {
+        auto_clip_cpu = true;
+    }
+    if (params.max_vram > 0 && params.max_vram < 10.0f) {
+        auto_vae_cpu = true;
+        auto_clip_cpu = true;
+        sd_params.offload_params_to_cpu = true;
+        LOG_INFO("User VRAM limit %.1fGB, enabling aggressive CPU offloading", params.max_vram);
+    }
+
     // 权重类型
     if (!params.wtype.empty() && params.wtype != "default") {
         sd_params.wtype = convert_wtype(params.wtype);
     }
-    
+
     // VAE 设置
     sd_params.vae_decode_only = false;
-    sd_params.keep_vae_on_cpu = false;
+    sd_params.keep_vae_on_cpu = auto_vae_cpu;
+    sd_params.keep_clip_on_cpu = auto_clip_cpu;
     
     // Embeddings (Textual Inversion)
     std::vector<sd_embedding_t> embeddings;
