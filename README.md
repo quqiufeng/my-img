@@ -9,6 +9,7 @@
 > | **📋 [task.md](task.md)** | 开发任务表、功能完整度对照、进度追踪 |
 > | **📜 [AGENTS.md](AGENTS.md)** | 项目开发规范、C++ 代码规范、Git 工作流 |
 > | **🤖 [claude.md](claude.md)** | Claude AI 使用说明（项目内部） |
+> | **🎨 [img_create.md](img_create.md)** | img2.sh 出图逻辑与代码调用路径详解 |
 
 ---
 
