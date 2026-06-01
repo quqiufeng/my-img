@@ -688,6 +688,7 @@ Image SDCPPAdapter::generate_with_regional_prompts(const GenerationParams& param
     
     GenerationParams base_params = params;
     base_params.prompt = combined_prompt;
+    base_params.regional_prompts.clear(); // 防止递归！
     base_params.batch_count = 1;
     LOG_INFO("Generating base image with combined prompt...");
     auto base_images = generate(base_params);
