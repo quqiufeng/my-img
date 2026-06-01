@@ -572,12 +572,13 @@
 
 ### Phase 13: 工作流与自动化
 
-#### Task 13.1: Workflow JSON 支持
-- [ ] 解析 ComfyUI workflow JSON
-- [ ] 自动映射到 CLI 参数
-- [ ] CLI 参数：`--workflow workflow.json`
+#### Task 13.1: Workflow JSON 支持 ✅
+- [x] 解析 ComfyUI workflow JSON
+- [x] 自动映射到 CLI 参数
+- [x] CLI 参数：`--workflow workflow.json`
 - **优先级**: P2
 - **难度**: 高
+- **状态**: ✅ 已完成（2026-06-01）
 
 #### Task 13.2: Batch 生成优化 ✅
 - [x] 多图连续生成
