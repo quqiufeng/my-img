@@ -103,6 +103,36 @@ void print_usage(const char* argv0) {
     std::cout << "  --batch-output-dir PATH   Output directory for batch processing\n";
     std::cout << "  --output-template TPL     Output filename template (default: {name}{ext})\n";
     std::cout << "                            Placeholders: {name}, {ext}, {index}, {index:N}\n";
+    std::cout << "\nAdvanced Generation Options:\n";
+    std::cout << "  --prompt-schedule STR     Prompt schedule: \"0-10:prompt1|11-20:prompt2\"\n";
+    std::cout << "  --regional-prompts STR    Regional prompts: \"top:0.3,prompt1|bottom:0.3,prompt2\"\n";
+    std::cout << "\nFace Restoration:\n";
+    std::cout << "  --face-restore            Enable face restoration\n";
+    std::cout << "  --face-restore-model PATH GFPGAN/CodeFormer model path\n";
+    std::cout << "  --face-restore-fidelity F Fidelity 0.0-1.0 (default: 0.5)\n";
+    std::cout << "\nIPAdapter (Image Prompt):\n";
+    std::cout << "  --ipadapter               Enable IPAdapter\n";
+    std::cout << "  --ipadapter-model PATH    IPAdapter model path\n";
+    std::cout << "  --ipadapter-clip-vision PATH  CLIP Vision model path\n";
+    std::cout << "  --ipadapter-image PATH    Reference image path\n";
+    std::cout << "  --ipadapter-weight FLOAT  Weight 0.0-1.0 (default: 1.0)\n";
+    std::cout << "  --ipadapter-start FLOAT   Start step ratio 0.0-1.0 (default: 0.0)\n";
+    std::cout << "  --ipadapter-end FLOAT     End step ratio 0.0-1.0 (default: 1.0)\n";
+    std::cout << "\nT2I-Adapter:\n";
+    std::cout << "  --t2i-adapter             Enable T2I-Adapter\n";
+    std::cout << "  --t2i-adapter-model PATH  T2I-Adapter model path\n";
+    std::cout << "  --t2i-adapter-image PATH  Condition image path\n";
+    std::cout << "  --t2i-adapter-strength F  Strength 0.0-1.0 (default: 1.0)\n";
+    std::cout << "\nFace Swap:\n";
+    std::cout << "  --face-swap               Enable face swap\n";
+    std::cout << "  --face-swap-source PATH   Source face image\n";
+    std::cout << "  --face-swap-detection-model PATH  Face detection model\n";
+    std::cout << "  --face-swap-model PATH    Face swap model\n";
+    std::cout << "\nPhotoMaker:\n";
+    std::cout << "  --photomaker              Enable PhotoMaker\n";
+    std::cout << "  --photomaker-model PATH   PhotoMaker model path\n";
+    std::cout << "  --photomaker-id-images LIST  Comma-separated ID images\n";
+    std::cout << "  --photomaker-id-weight F  ID weight 0.0-1.0 (default: 1.0)\n";
     std::cout << "\nPhoto Adjustment Options:\n";
     std::cout << "  --temperature FLOAT       Color temperature -1.0(cold) to 1.0(warm)\n";
     std::cout << "  --brightness FLOAT        Brightness -1.0 to 1.0\n";
@@ -905,6 +935,77 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--graduated-filter") {
             if (++i >= argc) { LOG_ERROR("Missing value for --graduated-filter"); return false; }
             opts.graduated_filter = argv[i];
+        } else if (arg == "--prompt-schedule") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --prompt-schedule"); return false; }
+            opts.prompt_schedule = argv[i];
+        } else if (arg == "--regional-prompts") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --regional-prompts"); return false; }
+            opts.regional_prompts = argv[i];
+        } else if (arg == "--face-restore") {
+            opts.face_restoration = true;
+        } else if (arg == "--face-restore-model") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --face-restore-model"); return false; }
+            opts.face_restore_model = argv[i];
+        } else if (arg == "--face-restore-fidelity") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --face-restore-fidelity"); return false; }
+            if (!safe_convert(argv[i], opts.face_restore_fidelity, "--face-restore-fidelity")) return false;
+        } else if (arg == "--ipadapter") {
+            opts.ipadapter = true;
+        } else if (arg == "--ipadapter-model") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-model"); return false; }
+            opts.ipadapter_model = argv[i];
+        } else if (arg == "--ipadapter-clip-vision") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-clip-vision"); return false; }
+            opts.ipadapter_clip_vision = argv[i];
+        } else if (arg == "--ipadapter-image") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-image"); return false; }
+            opts.ipadapter_image = argv[i];
+        } else if (arg == "--ipadapter-weight") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-weight"); return false; }
+            if (!safe_convert(argv[i], opts.ipadapter_weight, "--ipadapter-weight")) return false;
+        } else if (arg == "--ipadapter-start") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-start"); return false; }
+            if (!safe_convert(argv[i], opts.ipadapter_start_at, "--ipadapter-start")) return false;
+        } else if (arg == "--ipadapter-end") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-end"); return false; }
+            if (!safe_convert(argv[i], opts.ipadapter_end_at, "--ipadapter-end")) return false;
+        } else if (arg == "--t2i-adapter") {
+            opts.t2i_adapter = true;
+        } else if (arg == "--t2i-adapter-model") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --t2i-adapter-model"); return false; }
+            opts.t2i_adapter_model = argv[i];
+        } else if (arg == "--t2i-adapter-image") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --t2i-adapter-image"); return false; }
+            opts.t2i_adapter_image = argv[i];
+        } else if (arg == "--t2i-adapter-strength") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --t2i-adapter-strength"); return false; }
+            if (!safe_convert(argv[i], opts.t2i_adapter_strength, "--t2i-adapter-strength")) return false;
+        } else if (arg == "--face-swap") {
+            opts.face_swap = true;
+        } else if (arg == "--face-swap-source") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --face-swap-source"); return false; }
+            opts.face_swap_source = argv[i];
+        } else if (arg == "--face-swap-detection-model") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --face-swap-detection-model"); return false; }
+            opts.face_swap_detection_model = argv[i];
+        } else if (arg == "--face-swap-model") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --face-swap-model"); return false; }
+            opts.face_swap_model = argv[i];
+        } else if (arg == "--photomaker") {
+            opts.photo_maker = true;
+        } else if (arg == "--photomaker-model") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --photomaker-model"); return false; }
+            opts.photo_maker_model = argv[i];
+        } else if (arg == "--photomaker-id-images") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --photomaker-id-images"); return false; }
+            std::stringstream ss(argv[i]);
+            std::string img;
+            while (std::getline(ss, img, ',')) {
+                if (!img.empty()) opts.photo_maker_id_images.push_back(img);
+            }
+        } else if (arg == "--photomaker-id-weight") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --photomaker-id-weight"); return false; }
+            if (!safe_convert(argv[i], opts.photo_maker_id_weight, "--photomaker-id-weight")) return false;
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {

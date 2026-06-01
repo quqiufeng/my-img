@@ -179,6 +179,44 @@ struct CliOptions {
     std::string radial_filter;      // cx,cy,radius,exp,cont,sat
     std::string graduated_filter;   // angle,pos,width,exp,cont,sat
     
+    // Prompt Schedule
+    std::string prompt_schedule;  // 格式: "0-10:prompt1|11-20:prompt2"
+    
+    // Regional Prompting
+    std::string regional_prompts; // 格式: "top:0.3,prompt1|bottom:0.3,prompt2"
+    
+    // Face Restoration
+    bool face_restoration = false;
+    std::string face_restore_model;
+    float face_restore_fidelity = 0.5f;
+    
+    // IPAdapter
+    bool ipadapter = false;
+    std::string ipadapter_model;
+    std::string ipadapter_clip_vision;
+    std::string ipadapter_image;
+    float ipadapter_weight = 1.0f;
+    float ipadapter_start_at = 0.0f;
+    float ipadapter_end_at = 1.0f;
+    
+    // T2I-Adapter
+    bool t2i_adapter = false;
+    std::string t2i_adapter_model;
+    std::string t2i_adapter_image;
+    float t2i_adapter_strength = 1.0f;
+    
+    // Face Swap
+    bool face_swap = false;
+    std::string face_swap_source;
+    std::string face_swap_detection_model;
+    std::string face_swap_model;
+    
+    // PhotoMaker
+    bool photo_maker = false;
+    std::string photo_maker_model;
+    std::vector<std::string> photo_maker_id_images;
+    float photo_maker_id_weight = 1.0f;
+    
     // 系统
     int threads = -1;
     bool verbose = false;

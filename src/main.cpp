@@ -377,6 +377,42 @@ int main(int argc, char** argv) {
         }
     }
     
+    // Advanced Features
+    params.prompt_schedule = opts.prompt_schedule;
+    params.regional_prompts = opts.regional_prompts;
+    
+    // Face Restoration
+    params.face_restoration = opts.face_restoration;
+    params.face_restore_model = opts.face_restore_model;
+    params.face_restore_fidelity = opts.face_restore_fidelity;
+    
+    // IPAdapter
+    params.ipadapter = opts.ipadapter;
+    params.ipadapter_model = opts.ipadapter_model;
+    params.ipadapter_clip_vision = opts.ipadapter_clip_vision;
+    params.ipadapter_image = opts.ipadapter_image;
+    params.ipadapter_weight = opts.ipadapter_weight;
+    params.ipadapter_start_at = opts.ipadapter_start_at;
+    params.ipadapter_end_at = opts.ipadapter_end_at;
+    
+    // T2I-Adapter
+    params.t2i_adapter = opts.t2i_adapter;
+    params.t2i_adapter_model = opts.t2i_adapter_model;
+    params.t2i_adapter_image = opts.t2i_adapter_image;
+    params.t2i_adapter_strength = opts.t2i_adapter_strength;
+    
+    // Face Swap
+    params.face_swap = opts.face_swap;
+    params.face_swap_source = opts.face_swap_source;
+    params.face_swap_detection_model = opts.face_swap_detection_model;
+    params.face_swap_model = opts.face_swap_model;
+    
+    // PhotoMaker
+    params.photo_maker = opts.photo_maker;
+    params.photo_maker_model = opts.photo_maker_model;
+    params.photo_maker_id_images = opts.photo_maker_id_images;
+    params.photo_maker_id_weight = opts.photo_maker_id_weight;
+    
     // Load preset if specified
     if (!opts.load_preset_path.empty()) {
         if (!load_preset(opts, opts.load_preset_path)) {

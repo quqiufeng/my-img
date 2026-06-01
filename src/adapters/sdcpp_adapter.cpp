@@ -400,6 +400,29 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
             std::cout << "  VAE Temporal Tiling: enabled" << std::endl;
         }
     }
+
+    // Advanced Features Logging
+    if (!params.prompt_schedule.empty()) {
+        std::cout << "  Prompt Schedule: " << params.prompt_schedule << std::endl;
+    }
+    if (!params.regional_prompts.empty()) {
+        std::cout << "  Regional Prompts: " << params.regional_prompts << std::endl;
+    }
+    if (params.face_restoration) {
+        std::cout << "  Face Restoration: enabled (model: " << params.face_restore_model << ")" << std::endl;
+    }
+    if (params.ipadapter) {
+        std::cout << "  IPAdapter: enabled (weight: " << params.ipadapter_weight << ")" << std::endl;
+    }
+    if (params.t2i_adapter) {
+        std::cout << "  T2I-Adapter: enabled (strength: " << params.t2i_adapter_strength << ")" << std::endl;
+    }
+    if (params.face_swap) {
+        std::cout << "  Face Swap: enabled" << std::endl;
+    }
+    if (params.photo_maker) {
+        std::cout << "  PhotoMaker: enabled (id images: " << params.photo_maker_id_images.size() << ")" << std::endl;
+    }
     
     std::cout << "[SDCPPAdapter] Generating image..." << std::endl;
     std::cout << "  Prompt: " << params.prompt << std::endl;
@@ -427,7 +450,23 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     
     if (!sd_images.empty()) {
         for (int i = 0; i < params.batch_count; i++) {
-            images.push_back(sd_image_to_image(sd_images[i]));
+            Image img = sd_image_to_image(sd_images[i]);
+            
+            // Face Restoration (post-processing)
+            if (params.face_restoration && !params.face_restore_model.empty()) {
+                // TODO: 集成 FaceRestoration 类
+                LOG_INFO("Face restoration would be applied here (model: %s)", 
+                         params.face_restore_model.c_str());
+            }
+            
+            // Face Swap (post-processing)
+            if (params.face_swap && !params.face_swap_source.empty()) {
+                // TODO: 集成 FaceSwap 类
+                LOG_INFO("Face swap would be applied here (source: %s)", 
+                         params.face_swap_source.c_str());
+            }
+            
+            images.push_back(img);
         }
     }
     

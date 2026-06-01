@@ -198,6 +198,14 @@ set(MYIMG_SOURCES
     src/utils/shadow_effect.cpp
     src/utils/oom_handler.cpp
     src/utils/stb_impl.c
+    src/utils/latent_ops.cpp
+    src/utils/prompt_schedule.cpp
+    src/utils/regional_prompting.cpp
+    src/utils/face_restoration.cpp
+    src/utils/ipadapter.cpp
+    src/utils/t2i_adapter.cpp
+    src/utils/face_swap.cpp
+    src/utils/photo_maker.cpp
 )
 
 if(OpenCV_FOUND)
