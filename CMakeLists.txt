@@ -472,6 +472,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
     add_executable(test_sdcpp_adapter
         tests/test_sdcpp_adapter.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/prompt_schedule.cpp
+        src/utils/regional_prompting.cpp
+        src/utils/face_restoration.cpp
+        src/utils/face_swap.cpp
+        src/utils/latent_ops.cpp
+        src/utils/image_utils.cpp
+        src/utils/image_adjust.cpp
+        src/utils/png_metadata.cpp
+        src/utils/lut_loader.cpp
+        src/utils/dehaze.cpp
         src/utils/log.cpp
         src/utils/stb_impl.c
     )
@@ -506,6 +516,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
     add_executable(test_txt2img
         tests/test_txt2img.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/prompt_schedule.cpp
+        src/utils/regional_prompting.cpp
+        src/utils/face_restoration.cpp
+        src/utils/face_swap.cpp
+        src/utils/latent_ops.cpp
+        src/utils/image_utils.cpp
+        src/utils/image_adjust.cpp
+        src/utils/png_metadata.cpp
+        src/utils/lut_loader.cpp
+        src/utils/dehaze.cpp
         src/utils/log.cpp
         src/utils/stb_impl.c
     )
@@ -540,6 +560,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
     add_executable(test_hires_fix_real
         tests/test_hires_fix_real.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/prompt_schedule.cpp
+        src/utils/regional_prompting.cpp
+        src/utils/face_restoration.cpp
+        src/utils/face_swap.cpp
+        src/utils/latent_ops.cpp
+        src/utils/image_utils.cpp
+        src/utils/image_adjust.cpp
+        src/utils/png_metadata.cpp
+        src/utils/lut_loader.cpp
+        src/utils/dehaze.cpp
         src/utils/log.cpp
         src/utils/stb_impl.c
     )
