@@ -373,6 +373,14 @@ public:
     // 生成单张图像
     Image generate_single(const GenerationParams& params);
     
+    // 使用 Prompt Schedule 多阶段生成
+    // 按 schedule 定义的阶段逐步生成，每阶段使用不同 prompt
+    Image generate_with_schedule(const GenerationParams& params);
+    
+    // 使用 Regional Prompting 分区生成
+    // 先生成基础图，然后按区域分别生成并合成
+    Image generate_with_regional_prompts(const GenerationParams& params);
+    
     // 设置回调
     void set_progress_callback(ProgressCallback callback);
     

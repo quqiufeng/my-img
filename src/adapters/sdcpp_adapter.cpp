@@ -293,6 +293,25 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
         return images;
     }
     
+    // 分发到高级生成模式
+    if (!params.prompt_schedule.empty() && params.batch_count == 1) {
+        LOG_INFO("Using Prompt Schedule generation mode");
+        Image img = generate_with_schedule(params);
+        if (!img.empty()) {
+            images.push_back(img);
+        }
+        return images;
+    }
+    
+    if (!params.regional_prompts.empty() && params.batch_count == 1) {
+        LOG_INFO("Using Regional Prompting generation mode");
+        Image img = generate_with_regional_prompts(params);
+        if (!img.empty()) {
+            images.push_back(img);
+        }
+        return images;
+    }
+    
     // 准备生成参数
     sd_img_gen_params_t gen_params;
     sd_img_gen_params_init(&gen_params);
@@ -558,6 +577,189 @@ Image SDCPPAdapter::generate_single(const GenerationParams& params) {
         return images[0];
     }
     return Image();
+}
+
+// ============================================================
+// Prompt Schedule 多阶段生成
+// ============================================================
+Image SDCPPAdapter::generate_with_schedule(const GenerationParams& params) {
+    if (!ctx_) {
+        LOG_ERROR("Model not initialized!");
+        return Image();
+    }
+    
+    PromptSchedule schedule;
+    if (!schedule.parse(params.prompt_schedule)) {
+        LOG_WARN("Failed to parse prompt schedule, falling back to normal generation");
+        return generate_single(params);
+    }
+    
+    const auto& entries = schedule.entries();
+    if (entries.empty()) {
+        return generate_single(params);
+    }
+    
+    LOG_INFO("========================================");
+    LOG_INFO("  Prompt Schedule Generation");
+    LOG_INFO("  Total stages: %zu", entries.size());
+    LOG_INFO("========================================");
+    
+    Image current_image;
+    
+    for (size_t stage = 0; stage < entries.size(); stage++) {
+        const auto& entry = entries[stage];
+        LOG_INFO("Stage %zu/%zu: steps %d-%d, prompt: %s",
+                 stage + 1, entries.size(), entry.start_step, entry.end_step,
+                 entry.prompt.c_str());
+        
+        GenerationParams stage_params = params;
+        stage_params.prompt = entry.prompt;
+        if (!entry.negative_prompt.empty()) {
+            stage_params.negative_prompt = entry.negative_prompt;
+        }
+        if (entry.cfg_scale > 0) {
+            stage_params.cfg_scale = entry.cfg_scale;
+        }
+        
+        // 计算阶段步数
+        int stage_steps = entry.end_step - entry.start_step;
+        if (stage_steps <= 0) {
+            stage_steps = params.sample_steps / entries.size();
+        }
+        stage_params.sample_steps = std::min(stage_steps, params.sample_steps);
+        
+        // 如果不是第一阶段，使用上一阶段的输出作为 init_image
+        if (stage > 0 && !current_image.empty()) {
+            stage_params.init_image = current_image;
+            // 渐进式降低 strength：早期阶段变化大，后期阶段变化小
+            float progress = static_cast<float>(stage) / entries.size();
+            stage_params.strength = 0.3f + 0.4f * (1.0f - progress);
+            stage_params.sample_steps = std::max(stage_params.sample_steps, 15);
+            LOG_INFO("  Using previous output as init (strength: %.2f)", stage_params.strength);
+        }
+        
+        stage_params.batch_count = 1;
+        auto images = generate(stage_params);
+        if (!images.empty()) {
+            current_image = images[0];
+        } else {
+            LOG_ERROR("Stage %zu failed, aborting schedule generation", stage + 1);
+            break;
+        }
+    }
+    
+    LOG_INFO("Prompt schedule generation completed");
+    return current_image;
+}
+
+// ============================================================
+// Regional Prompting 分区生成
+// ============================================================
+Image SDCPPAdapter::generate_with_regional_prompts(const GenerationParams& params) {
+    if (!ctx_) {
+        LOG_ERROR("Model not initialized!");
+        return Image();
+    }
+    
+    RegionalPromptManager regional_mgr;
+    if (!regional_mgr.parse(params.regional_prompts)) {
+        LOG_WARN("Failed to parse regional prompts, falling back to normal generation");
+        return generate_single(params);
+    }
+    
+    const auto& regions = regional_mgr.regions();
+    if (regions.empty()) {
+        return generate_single(params);
+    }
+    
+    LOG_INFO("========================================");
+    LOG_INFO("  Regional Prompting Generation");
+    LOG_INFO("  Total regions: %zu", regions.size());
+    LOG_INFO("========================================");
+    
+    // 阶段 1: 生成基础图（使用所有区域 prompt 的组合）
+    std::string combined_prompt = params.prompt;
+    for (const auto& region : regions) {
+        if (!region.prompt.empty()) {
+            combined_prompt += ", " + region.prompt;
+        }
+    }
+    
+    GenerationParams base_params = params;
+    base_params.prompt = combined_prompt;
+    base_params.batch_count = 1;
+    LOG_INFO("Generating base image with combined prompt...");
+    auto base_images = generate(base_params);
+    if (base_images.empty()) {
+        LOG_ERROR("Base image generation failed");
+        return Image();
+    }
+    Image result = base_images[0];
+    
+    // 阶段 2: 对每个区域生成变体
+    for (size_t i = 0; i < regions.size(); i++) {
+        const auto& region = regions[i];
+        if (region.prompt.empty()) continue;
+        
+        LOG_INFO("Generating region %zu/%zu: %s (%.0f%% of image)",
+                 i + 1, regions.size(), region.prompt.c_str(), region.weight * 100);
+        
+        GenerationParams region_params = params;
+        region_params.prompt = region.prompt;
+        if (!region.negative_prompt.empty()) {
+            region_params.negative_prompt = region.negative_prompt;
+        }
+        
+        // 使用基础图作为 init_image
+        region_params.init_image = result;
+        region_params.strength = region.weight;
+        region_params.batch_count = 1;
+        region_params.sample_steps = std::max(params.sample_steps / 2, 15);
+        
+        auto region_images = generate(region_params);
+        if (region_images.empty()) {
+            LOG_WARN("Region %zu generation failed, skipping", i + 1);
+            continue;
+        }
+        
+        // 使用 Latent Composite 合成
+        try {
+            auto base_tensor = image_data_to_tensor({result.width, result.height, result.channels, result.data});
+            auto region_tensor = image_data_to_tensor({region_images[0].width, region_images[0].height, region_images[0].channels, region_images[0].data});
+            
+            // 生成区域 mask
+            int latent_w = result.width / 8;
+            int latent_h = result.height / 8;
+            auto masks = regional_mgr.generate_masks(latent_w, latent_h);
+            
+            if (i < masks.size()) {
+                // 将 mask 上采样到图像尺寸
+                auto mask = masks[i];
+                mask = torch::nn::functional::interpolate(
+                    mask.unsqueeze(0),
+                    torch::nn::functional::InterpolateFuncOptions()
+                        .size(std::vector<int64_t>{result.height, result.width})
+                        .mode(torch::kBilinear)
+                        .align_corners(false)
+                ).squeeze(0);
+                
+                // 扩展到 3 通道
+                mask = mask.expand({3, result.height, result.width});
+                
+                // 混合: result = base * (1 - mask) + region * mask
+                auto blended = base_tensor * (1.0f - mask) + region_tensor * mask;
+                
+                auto blended_data = tensor_to_image_data(blended);
+                result.data = blended_data.data;
+                LOG_INFO("Region %zu composited successfully", i + 1);
+            }
+        } catch (const std::exception& e) {
+            LOG_WARN("Region %zu compositing failed: %s", i + 1, e.what());
+        }
+    }
+    
+    LOG_INFO("Regional prompting generation completed");
+    return result;
 }
 
 std::vector<float> SDCPPAdapter::encode_prompt(const std::string& /*prompt*/, int /*clip_skip*/) {
