@@ -347,6 +347,9 @@ private:
 // 进度回调
 using ProgressCallback = std::function<void(int step, int steps, float time)>;
 
+// 预览回调
+using PreviewCallback = std::function<void(int step, const Image& image, bool is_noisy)>;
+
 // SDCPP 适配器类
 class SDCPPAdapter {
 public:
@@ -383,6 +386,7 @@ public:
     
     // 设置回调
     void set_progress_callback(ProgressCallback callback);
+    void set_preview_callback(PreviewCallback callback, int interval = 1, const std::string& mode = "vae");
     
     // 工具函数
     static std::vector<std::string> get_available_sample_methods();
@@ -400,10 +404,14 @@ public:
 private:
     sd_ctx_t* ctx_ = nullptr;
     ProgressCallback progress_callback_;
+    PreviewCallback preview_callback_;
+    int preview_interval_ = 1;
+    std::string preview_mode_ = "vae";
     
     // 内部辅助函数
     bool load_model(const GenerationParams& params);
     static void progress_callback_wrapper(int step, int steps, float time, void* data);
+    static void preview_callback_wrapper(int step, int frame_count, sd_image_t* frames, bool is_noisy, void* data);
 };
 
 } // namespace myimg

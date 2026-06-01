@@ -79,6 +79,11 @@ void print_usage(const char* argv0) {
     std::cout << "  --embd-dir PATH           Embeddings directory (Textual Inversion)\n";
     std::cout << "\nConfig Options:\n";
     std::cout << "  --config PATH             Load generation parameters from JSON config file\n";
+    std::cout << "\nPreview Options:\n";
+    std::cout << "  --preview                 Enable preview during generation\n";
+    std::cout << "  --preview-interval INT    Preview save interval in steps (default: 1)\n";
+    std::cout << "  --preview-mode MODE       Preview mode: vae, tae, proj (default: vae)\n";
+    std::cout << "  --preview-dir PATH        Preview output directory (default: /tmp/myimg-preview)\n";
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
     std::cout << "  --embed-metadata          Embed generation parameters in PNG metadata\n";
@@ -595,6 +600,17 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--workflow") {
             if (++i >= argc) { LOG_ERROR("Missing value for --workflow"); return false; }
             opts.workflow_file = argv[i];
+        } else if (arg == "--preview") {
+            opts.preview = true;
+        } else if (arg == "--preview-interval") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --preview-interval"); return false; }
+            if (!safe_convert(argv[i], opts.preview_interval, "--preview-interval")) return false;
+        } else if (arg == "--preview-mode") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --preview-mode"); return false; }
+            opts.preview_mode = argv[i];
+        } else if (arg == "--preview-dir") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --preview-dir"); return false; }
+            opts.preview_dir = argv[i];
         } else if (arg == "-p" || arg == "--prompt") {
             if (++i >= argc) { LOG_ERROR("Missing value for -p/--prompt"); return false; }
             opts.prompt = argv[i];

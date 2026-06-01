@@ -653,6 +653,24 @@ int main(int argc, char** argv) {
         return 1;
     }
     
+    // 设置进度回调
+    adapter.set_progress_callback([](int step, int steps, float time) {
+        float progress = (float)step / steps * 100.0f;
+        std::cout << "\r  Progress: " << step << "/" << steps << " (" << (int)progress << "%) - " << time << "s/step" << std::flush;
+    });
+    
+    // 设置预览回调
+    if (opts.preview) {
+        fs::create_directories(opts.preview_dir);
+        adapter.set_preview_callback([&opts](int step, const myimg::Image& image, bool is_noisy) {
+            (void)is_noisy; // 未使用但保留用于未来扩展
+            if (image.empty()) return;
+            std::string preview_path = opts.preview_dir + "/preview_step_" + std::to_string(step) + ".png";
+            image.save_to_file(preview_path);
+            LOG_INFO("Preview saved: %s", preview_path.c_str());
+        }, opts.preview_interval, opts.preview_mode);
+    }
+    
     // 批量生成
     fs::path out_path = opts.output;
     std::string output_dir = out_path.parent_path().string();

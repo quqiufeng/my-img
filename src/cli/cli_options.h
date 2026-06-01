@@ -80,6 +80,12 @@ struct CliOptions {
     
     // Workflow
     std::string workflow_file;
+    
+    // 预览
+    bool preview = false;
+    int preview_interval = 1;
+    std::string preview_mode = "vae";  // vae, tae, proj
+    std::string preview_dir = "/tmp/myimg-preview";
 
     // Embeddings
     std::string embedding_dir;

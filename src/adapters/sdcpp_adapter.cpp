@@ -282,6 +282,16 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
         sd_set_progress_callback(progress_callback_wrapper, this);
     }
     
+    // 设置预览回调
+    if (preview_callback_) {
+        preview_t preview_mode = PREVIEW_NONE;
+        if (preview_mode_ == "proj") preview_mode = PREVIEW_PROJ;
+        else if (preview_mode_ == "tae") preview_mode = PREVIEW_TAE;
+        else if (preview_mode_ == "vae") preview_mode = PREVIEW_VAE;
+        
+        sd_set_preview_callback(preview_callback_wrapper, preview_mode, preview_interval_, true, false, this);
+    }
+    
     return true;
 }
 
@@ -782,6 +792,29 @@ void SDCPPAdapter::progress_callback_wrapper(int step, int steps, float time, vo
     auto* adapter = static_cast<SDCPPAdapter*>(data);
     if (adapter && adapter->progress_callback_) {
         adapter->progress_callback_(step, steps, time);
+    }
+}
+
+void SDCPPAdapter::set_preview_callback(PreviewCallback callback, int interval, const std::string& mode) {
+    preview_callback_ = callback;
+    preview_interval_ = interval;
+    preview_mode_ = mode;
+    
+    if (ctx_) {
+        preview_t preview_mode = PREVIEW_NONE;
+        if (mode == "proj") preview_mode = PREVIEW_PROJ;
+        else if (mode == "tae") preview_mode = PREVIEW_TAE;
+        else if (mode == "vae") preview_mode = PREVIEW_VAE;
+        
+        sd_set_preview_callback(preview_callback_wrapper, preview_mode, interval, true, false, this);
+    }
+}
+
+void SDCPPAdapter::preview_callback_wrapper(int step, int frame_count, sd_image_t* frames, bool is_noisy, void* data) {
+    auto* adapter = static_cast<SDCPPAdapter*>(data);
+    if (adapter && adapter->preview_callback_ && frames && frame_count > 0) {
+        Image img = sd_image_to_image(frames[0]);
+        adapter->preview_callback_(step, img, is_noisy);
     }
 }
 
