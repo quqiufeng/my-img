@@ -305,7 +305,7 @@ params.hires_upscaler = myimg::HiresUpscaler::Latent;
 params.hires_scale = 2.0f;
 
 // 5. Embeddings 目录
-params.embedding_dir = "/opt/image/model/embeddings";
+params.embedding_dir = "/data/models/image/embeddings";
 ```
 
 ### 5.2 适配器初始化 (src/adapters/sdcpp_adapter.cpp)

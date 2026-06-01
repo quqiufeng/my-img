@@ -153,8 +153,8 @@ struct CliOptions {
     std::string control_preprocessor;  // canny, lineart, normal, scribble, depth, openpose
     int control_preprocessor_param1 = 0;  // threshold1 for canny, threshold for lineart/scribble
     int control_preprocessor_param2 = 0;  // threshold2 for canny
-    std::string depth_model;   // Path to MiDaS model (default: /opt/image/model/midas_dpt_hybrid.pt)
-    std::string openpose_model; // Path to OpenPose model (default: /opt/image/model/openpose_body.pt)
+    std::string depth_model;   // Path to MiDaS model (default: /data/models/image/midas_dpt_hybrid.pt)
+    std::string openpose_model; // Path to OpenPose model (default: /data/models/image/openpose_body.pt)
     
     // Output quality
     int jpeg_quality = 95;  // JPEG quality (1-100)
