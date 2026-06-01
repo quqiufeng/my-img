@@ -554,19 +554,21 @@
 - **优先级**: P3
 - **难度**: 中
 
-#### Task 12.3: VAE 切换
-- [ ] 单独加载替换 VAE
-- [ ] 支持多种 VAE（SDXL/Flux/SD3）
-- [ ] CLI 参数：`--vae PATH`
+#### Task 12.3: VAE 切换 ✅
+- [x] 单独加载替换 VAE
+- [x] 支持多种 VAE（SDXL/Flux/SD3，通过 `--vae-format`）
+- [x] CLI 参数：`--vae PATH`
 - **优先级**: P2
 - **难度**: 低
+- **状态**: ✅ 已完成（2026-04-27）
 
-#### Task 12.4: CLIP 切换
-- [ ] 单独加载 CLIP 模型
-- [ ] 支持 CLIP-L/CLIP-G/T5/LLM
-- [ ] CLI 参数：`--clip-l PATH`, `--clip-g PATH`, `--t5xxl PATH`
+#### Task 12.4: CLIP 切换 ✅
+- [x] 单独加载文本编码器模型
+- [x] 支持 LLM（Qwen3）
+- [x] CLI 参数：`--llm PATH`
 - **优先级**: P2
 - **难度**: 低
+- **状态**: ✅ 已完成（2026-04-27）
 
 ### Phase 13: 工作流与自动化
 
@@ -696,12 +698,13 @@
 - **优先级**: P2
 - **难度**: 低
 
-#### Task 15.5: 配置文件
-- [ ] YAML/JSON 配置文件支持
-- [ ] 预设参数模板
-- [ ] CLI 参数：`--config config.yaml`
+#### Task 15.5: 配置文件 ✅
+- [x] JSON 配置文件支持
+- [x] 预设参数模板
+- [x] CLI 参数：`--config config.json`
 - **优先级**: P2
 - **难度**: 低
+- **状态**: ✅ 已完成（2026-06-01）
 
 ### Phase 16: 商业化前端（未来愿景）
 

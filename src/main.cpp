@@ -46,6 +46,18 @@ int main(int argc, char** argv) {
         }
     }
     
+    // 解析 ComfyUI Workflow JSON
+    if (!opts.workflow_file.empty()) {
+        LOG_INFO("Loading workflow from: %s", opts.workflow_file.c_str());
+        WorkflowParser parser;
+        if (!parser.parse(opts.workflow_file)) {
+            return 1;
+        }
+        if (!parser.to_cli_options(opts)) {
+            return 1;
+        }
+    }
+    
     // Read PNG metadata (no model required)
     if (!opts.read_metadata_image.empty()) {
         LOG_INFO("========================================");

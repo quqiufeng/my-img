@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cli/cli_options.h"
+#include "cli/workflow_parser.h"
 #include "adapters/sdcpp_adapter.h"
 #include <string>
 #include <vector>

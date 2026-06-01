@@ -592,6 +592,9 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--config") {
             if (++i >= argc) { LOG_ERROR("Missing value for --config"); return false; }
             opts.config_file = argv[i];
+        } else if (arg == "--workflow") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --workflow"); return false; }
+            opts.workflow_file = argv[i];
         } else if (arg == "-p" || arg == "--prompt") {
             if (++i >= argc) { LOG_ERROR("Missing value for -p/--prompt"); return false; }
             opts.prompt = argv[i];

@@ -77,6 +77,9 @@ struct CliOptions {
 
     // 配置文件
     std::string config_file;
+    
+    // Workflow
+    std::string workflow_file;
 
     // Embeddings
     std::string embedding_dir;
