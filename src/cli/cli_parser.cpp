@@ -142,6 +142,14 @@ void print_usage(const char* argv0) {
     std::cout << "  --photomaker-model PATH   PhotoMaker model path\n";
     std::cout << "  --photomaker-id-images LIST  Comma-separated ID images\n";
     std::cout << "  --photomaker-id-weight F  ID weight 0.0-1.0 (default: 1.0)\n";
+    std::cout << "\nStyle Transfer Options:\n";
+    std::cout << "  --style-transfer          Enable style transfer\n";
+    std::cout << "  --style-transfer-model PATH  Style transfer ONNX model path\n";
+    std::cout << "  --style-transfer-image PATH  Style reference image path\n";
+    std::cout << "  --style-transfer-strength F  Style strength 0.0-2.0 (default: 1.0)\n";
+    std::cout << "  --style-transfer-block INT   Injection block: 0=early, 1=mid, 2=late (default: 1)\n";
+    std::cout << "  --style-transfer-preserve    Preserve content structure (default)\n";
+    std::cout << "  --style-transfer-no-preserve Don't preserve content structure\n";
     std::cout << "\nPhoto Adjustment Options:\n";
     std::cout << "  --temperature FLOAT       Color temperature -1.0(cold) to 1.0(warm)\n";
     std::cout << "  --brightness FLOAT        Brightness -1.0 to 1.0\n";
@@ -1037,6 +1045,24 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--photomaker-id-weight") {
             if (++i >= argc) { LOG_ERROR("Missing value for --photomaker-id-weight"); return false; }
             if (!safe_convert(argv[i], opts.photo_maker_id_weight, "--photomaker-id-weight")) return false;
+        } else if (arg == "--style-transfer") {
+            opts.style_transfer = true;
+        } else if (arg == "--style-transfer-model") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --style-transfer-model"); return false; }
+            opts.style_transfer_model = argv[i];
+        } else if (arg == "--style-transfer-image") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --style-transfer-image"); return false; }
+            opts.style_transfer_image = argv[i];
+        } else if (arg == "--style-transfer-strength") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --style-transfer-strength"); return false; }
+            if (!safe_convert(argv[i], opts.style_transfer_strength, "--style-transfer-strength")) return false;
+        } else if (arg == "--style-transfer-block") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --style-transfer-block"); return false; }
+            if (!safe_convert(argv[i], opts.style_transfer_block, "--style-transfer-block")) return false;
+        } else if (arg == "--style-transfer-preserve") {
+            opts.style_transfer_preserve_content = true;
+        } else if (arg == "--style-transfer-no-preserve") {
+            opts.style_transfer_preserve_content = false;
         } else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         } else {

@@ -209,6 +209,7 @@ set(MYIMG_SOURCES
     src/utils/t2i_adapter.cpp
     src/utils/face_swap.cpp
     src/utils/photo_maker.cpp
+    src/utils/style_transfer.cpp
 )
 
 if(OpenCV_FOUND)

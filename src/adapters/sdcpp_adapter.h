@@ -239,6 +239,14 @@ struct GenerationParams {
     std::string photo_maker_model;
     std::vector<std::string> photo_maker_id_images;
     float photo_maker_id_weight = 1.0f;
+    
+    // Style Transfer
+    bool style_transfer = false;
+    std::string style_transfer_model;
+    std::string style_transfer_image;
+    float style_transfer_strength = 1.0f;
+    int style_transfer_block = 1;
+    bool style_transfer_preserve_content = true;
 };
 
 // sd_image_t 的 RAII 封装（避免裸 malloc/free）

@@ -443,6 +443,14 @@ int main(int argc, char** argv) {
     params.photo_maker_id_images = opts.photo_maker_id_images;
     params.photo_maker_id_weight = opts.photo_maker_id_weight;
     
+    // Style Transfer
+    params.style_transfer = opts.style_transfer;
+    params.style_transfer_model = opts.style_transfer_model;
+    params.style_transfer_image = opts.style_transfer_image;
+    params.style_transfer_strength = opts.style_transfer_strength;
+    params.style_transfer_block = opts.style_transfer_block;
+    params.style_transfer_preserve_content = opts.style_transfer_preserve_content;
+    
     // Load preset if specified
     if (!opts.load_preset_path.empty()) {
         if (!load_preset(opts, opts.load_preset_path)) {

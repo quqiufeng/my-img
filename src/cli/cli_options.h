@@ -231,6 +231,14 @@ struct CliOptions {
     std::vector<std::string> photo_maker_id_images;
     float photo_maker_id_weight = 1.0f;
     
+    // Style Transfer
+    bool style_transfer = false;
+    std::string style_transfer_model;
+    std::string style_transfer_image;
+    float style_transfer_strength = 1.0f;
+    int style_transfer_block = 1;  // 0=early, 1=mid, 2=late
+    bool style_transfer_preserve_content = true;
+    
     // 系统
     int threads = -1;
     bool verbose = false;
