@@ -841,7 +841,11 @@ SDImageGuard SDCPPAdapter::image_to_sd_image(const Image& img) {
     sd_img.channel = img.channels;
     
     size_t data_size = img.width * img.height * img.channels;
-    sd_img.data = (uint8_t*)malloc(data_size);
+    sd_img.data = static_cast<uint8_t*>(std::malloc(data_size));
+    if (!sd_img.data) {
+        LOG_FATAL("Failed to allocate %zu bytes for sd_image_t", data_size);
+        return SDImageGuard();  // Return empty guard
+    }
     std::memcpy(sd_img.data, img.data.data(), data_size);
     
     return SDImageGuard(sd_img);

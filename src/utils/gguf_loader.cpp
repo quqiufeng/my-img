@@ -66,7 +66,7 @@ std::map<std::string, torch::Tensor> GGUFLoder::load(const std::string& path) {
         // For now, assume common shapes
         
         // Calculate number of elements
-        int64_t n_elements = size * ggml_blck_size(type) / ggml_type_size(type);
+        int64_t n_elements = size / ggml_type_size(type) * ggml_blck_size(type);
         
         // Read raw data
         std::vector<uint8_t> raw_data(size);

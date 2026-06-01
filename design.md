@@ -87,11 +87,8 @@ my-img/
 │   ├── adapters/              # 第三方库适配层（★关键）
 │   │   ├── sdcpp_adapter.h    # stable-diffusion.cpp 适配器
 │   │   └── sdcpp_adapter.cpp  # 封装 sd.cpp C API
-│   ├── backend/               # 推理后端（备用/扩展）
-│   │   ├── model.h            # 模型基类
-│   │   ├── model.cpp
-│   │   ├── z_image_model.h    # Z-Image DiT (备用实现)
-│   │   └── z_image_model.cpp
+│   ├── backend/               # 推理后端（已废弃，sd.cpp 替代）
+│   │   └── model.h            # 模型基类（保留供参考）
 │   └── utils/                 # 工具
 │       ├── tensor_utils.h     # 张量操作
 │       ├── image_utils.h      # 图像 I/O
@@ -101,7 +98,6 @@ my-img/
 │   ├── test_gguf_loader.cpp   # GGUF 加载测试
 │   ├── test_vae.cpp           # VAE 测试
 │   ├── test_hires_fix.cpp     # HiRes Fix 测试
-│   ├── test_z_image_model.cpp # Z-Image DiT 测试
 │   ├── test_sdcpp_adapter.cpp # sd.cpp 适配器测试
 │   ├── test_txt2img.cpp       # txt2img 完整测试
 │   └── test_hires_fix_real.cpp # HiRes Fix 真实测试

@@ -3,12 +3,15 @@
 
 #include <sstream>
 #include <iomanip>
+#include <atomic>
 
 #ifdef __linux__
 #include <fstream>
 #endif
 
 namespace myimg {
+
+static std::atomic<float> g_peak_vram_mb{0.0f};
 
 float VRAMMonitor::get_used_vram_mb() {
 #ifdef __linux__
@@ -77,18 +80,17 @@ float VRAMMonitor::get_vram_usage_percent() {
     return (used / total) * 100.0f;
 }
 
-static float g_peak_vram_mb = 0.0f;
-
 float VRAMMonitor::get_peak_vram_mb() {
     float current = get_used_vram_mb();
-    if (current > g_peak_vram_mb) {
-        g_peak_vram_mb = current;
+    float expected = g_peak_vram_mb.load();
+    while (current > expected && !g_peak_vram_mb.compare_exchange_weak(expected, current)) {
+        // Retry if another thread updated the value
     }
-    return g_peak_vram_mb;
+    return g_peak_vram_mb.load();
 }
 
 void VRAMMonitor::reset_peak() {
-    g_peak_vram_mb = 0.0f;
+    g_peak_vram_mb.store(0.0f);
 }
 
 std::string VRAMMonitor::format_vram_info() {
