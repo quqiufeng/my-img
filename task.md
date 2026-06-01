@@ -207,12 +207,14 @@
 - **难度**: 中
 - **完成时间**: 2026-04-30
 
-#### Task 9.4: Style Transfer
-- [ ] 加载风格参考图
-- [ ] 风格特征提取与注入
-- [ ] 与 IPAdapter 结合使用
+#### Task 9.4: Style Transfer ✅
+- [x] 加载风格参考图
+- [x] 风格特征提取 (Gram Matrix)
+- [x] AdaIN 风格化注入
+- [x] CLI 参数：`--style-transfer`, `--style-transfer-image`, `--style-transfer-strength`
 - **优先级**: P3
 - **难度**: 高
+- **状态**: ✅ 已完成（2026-06-01）
 
 ### Phase 10: Latent & 图像操作
 
@@ -867,7 +869,7 @@
 | 增强 | Dynamic CFG | ✅ | P2 |
 | 增强 | FreeU | ✅ | P3 |
 | 增强 | Face Restore | ✅ | P2 |
-| 增强 | Style Transfer | ⏳ | P3 |
+| 增强 | Style Transfer | ✅ | P3 |
 | 图像操作 | Latent Composite | ✅ | P2 |
 | 图像操作 | Image Composite | ✅ | P2 |
 | 图像操作 | Scale/Crop | ✅ | P2 |
