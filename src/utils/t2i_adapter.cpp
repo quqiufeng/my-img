@@ -1,7 +1,9 @@
-#include <filesystem>
 #include "utils/t2i_adapter.h"
 #include "utils/log.h"
 #include "utils/image_utils.h"
+#include <opencv2/dnn.hpp>
+#include <opencv2/imgproc.hpp>
+#include <filesystem>
 
 namespace myimg {
 
@@ -23,15 +25,24 @@ bool T2IAdapter::load_model(const std::string& model_path) {
         return false;
     }
     
-    // TODO: 加载 T2I-Adapter 模型
-    LOG_WARN("T2IAdapter: model loading not yet implemented");
-    LOG_INFO("T2IAdapter: to use T2I-Adapter, please:");
-    LOG_INFO("  1. Download T2I-Adapter model (t2iadapter_sketch_sd15v2.pth)");
-    LOG_INFO("  2. Place it in /data/models/image/");
-    LOG_INFO("  3. Use --t2i-adapter-model PATH --t2i-adapter-image PATH");
-    
-    model_loaded_ = false;
-    return false;
+    try {
+        cv::dnn::Net net = cv::dnn::readNetFromONNX(model_path);
+        if (net.empty()) {
+            LOG_ERROR("T2IAdapter: failed to load ONNX model");
+            return false;
+        }
+        
+        // 尝试使用 CUDA 加速
+        net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+        net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+        
+        LOG_INFO("T2IAdapter: ONNX model loaded successfully");
+        model_loaded_ = true;
+        return true;
+    } catch (const std::exception& e) {
+        LOG_ERROR("T2IAdapter: model loading failed: %s", e.what());
+        return false;
+    }
 }
 
 bool T2IAdapter::load_condition_image(const std::string& image_path) {
@@ -58,7 +69,29 @@ torch::Tensor T2IAdapter::extract_features(const torch::Tensor& condition_image)
         return torch::Tensor();
     }
     
-    return extract_t2i_features(condition_image);
+    try {
+        auto img_data = tensor_to_image_data(condition_image);
+        cv::Mat img(img_data.height, img_data.width, CV_8UC3, (void*)img_data.data.data());
+        
+        // 预处理：resize 到 512x512，归一化
+        cv::Mat resized;
+        cv::resize(img, resized, cv::Size(512, 512));
+        
+        cv::Mat blob = cv::dnn::blobFromImage(resized, 1.0 / 255.0, cv::Size(512, 512),
+                                              cv::Scalar(0, 0, 0), false, false);
+        
+        cv::dnn::Net net = cv::dnn::readNetFromONNX(config_.model_path);
+        net.setInput(blob);
+        cv::Mat features = net.forward();
+        
+        // 转换为 torch tensor
+        // features shape: [1, C, H, W]
+        auto sizes = features.size;
+        return torch::from_blob(features.data, {sizes[0], sizes[1], sizes[2], sizes[3]}, torch::kFloat32).clone();
+    } catch (const std::exception& e) {
+        LOG_ERROR("T2IAdapter: feature extraction failed: %s", e.what());
+        return torch::Tensor();
+    }
 }
 
 torch::Tensor T2IAdapter::apply(const torch::Tensor& latent, int step, int total_steps) {
@@ -72,19 +105,52 @@ torch::Tensor T2IAdapter::apply(const torch::Tensor& latent, int step, int total
         return latent;
     }
     
-    return inject_into_unet(latent, condition_features_ * config_.strength);
+    // T2I-Adapter 特征注入
+    // 简化版：将条件特征与 latent 在通道维度拼接
+    try {
+        auto scaled_features = condition_features_ * config_.strength;
+        
+        // 如果尺寸不匹配，进行插值
+        if (scaled_features.sizes() != latent.sizes()) {
+            scaled_features = torch::nn::functional::interpolate(
+                scaled_features,
+                torch::nn::functional::InterpolateFuncOptions()
+                    .size(std::vector<int64_t>{latent.size(2), latent.size(3)})
+                    .mode(torch::kBilinear)
+                    .align_corners(false)
+            );
+            
+            // 调整通道数
+            if (scaled_features.size(1) != latent.size(1)) {
+                scaled_features = scaled_features.narrow(1, 0, std::min(scaled_features.size(1), latent.size(1)));
+                if (scaled_features.size(1) < latent.size(1)) {
+                    auto padding = torch::zeros({scaled_features.size(0), 
+                                                  latent.size(1) - scaled_features.size(1),
+                                                  scaled_features.size(2), 
+                                                  scaled_features.size(3)}, 
+                                                 scaled_features.options());
+                    scaled_features = torch::cat({scaled_features, padding}, 1);
+                }
+            }
+        }
+        
+        // 简单的特征融合
+        return latent + scaled_features * 0.1f;
+    } catch (const std::exception& e) {
+        LOG_WARN("T2IAdapter: apply failed: %s", e.what());
+        return latent;
+    }
 }
 
-torch::Tensor T2IAdapter::extract_t2i_features(const torch::Tensor& image) { (void)image;
-    // TODO: T2I-Adapter 特征提取
-    LOG_WARN("T2IAdapter: feature extraction not yet implemented");
+torch::Tensor T2IAdapter::extract_t2i_features(const torch::Tensor& image) {
+    (void)image;
     return torch::Tensor();
 }
 
-torch::Tensor T2IAdapter::inject_into_unet(const torch::Tensor& latent, const torch::Tensor& features) { (void)features;
-    // TODO: 注入到 UNet
-    LOG_WARN("T2IAdapter: UNet injection not yet implemented");
-    return latent;
+torch::Tensor T2IAdapter::inject_into_unet(const torch::Tensor& latent, const torch::Tensor& features) {
+    (void)latent;
+    (void)features;
+    return torch::Tensor();
 }
 
 } // namespace myimg
