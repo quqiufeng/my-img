@@ -115,6 +115,10 @@ std::vector<FaceBox> FaceSwap::detect_faces(const ImageData& image) {
             
             LOG_INFO("FaceSwap: YuNet candidates: %d", num_detections);
             
+            std::vector<cv::Rect> raw_boxes;
+            std::vector<float> raw_scores;
+            std::vector<FaceBox> raw_faces;
+            
             for (int i = 0; i < num_detections; i++) {
                 float confidence = data[i * 15 + 14];
                 if (confidence < 0.3f) continue;
@@ -127,14 +131,26 @@ std::vector<FaceBox> FaceSwap::detect_faces(const ImageData& image) {
                 box.confidence = confidence;
                 
                 if (box.w <= 0 || box.h <= 0 || box.x < 0 || box.y < 0) continue;
+                if (box.x + box.w > image.width || box.y + box.h > image.height) continue;
                 
-                faces.push_back(box);
+                raw_faces.push_back(box);
+                raw_boxes.push_back(cv::Rect(box.x, box.y, box.w, box.h));
+                raw_scores.push_back(confidence);
+            }
+            
+            // NMS 过滤
+            std::vector<int> indices;
+            cv::dnn::NMSBoxes(raw_boxes, raw_scores, 0.3f, 0.4f, indices);
+            
+            for (int idx : indices) {
+                faces.push_back(raw_faces[idx]);
                 LOG_INFO("FaceSwap: YuNet face %d at (%d,%d,%d,%d) conf=%.3f",
-                         i, box.x, box.y, box.w, box.h, confidence);
+                         idx, raw_faces[idx].x, raw_faces[idx].y, 
+                         raw_faces[idx].w, raw_faces[idx].h, raw_faces[idx].confidence);
             }
         }
         
-        LOG_INFO("FaceSwap: total %zu faces detected", faces.size());
+        LOG_INFO("FaceSwap: total %zu faces after NMS", faces.size());
         return faces;
     } catch (const std::exception& e) {
         LOG_ERROR("FaceSwap: face detection failed: %s", e.what());

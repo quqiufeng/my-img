@@ -502,6 +502,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
         ${JPEG_LIBRARY}
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
+        ${ZLIB_LIBRARY}
     )
     target_compile_definitions(test_sdcpp_adapter PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_sdcpp_adapter PROPERTIES
@@ -546,6 +547,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
         ${JPEG_LIBRARY}
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
+        ${ZLIB_LIBRARY}
     )
     target_compile_definitions(test_txt2img PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_txt2img PROPERTIES
@@ -590,6 +592,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         ${JPEG_LIBRARY}
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
+        ${ZLIB_LIBRARY}
     )
     target_compile_definitions(test_hires_fix_real PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_hires_fix_real PROPERTIES
