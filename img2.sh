@@ -94,14 +94,18 @@
 #
 # 1. 20GB 显卡（默认安全模式）：
 #    ./img2.sh "prompt" ~/output.png 2560 1440
-#    # 自动使用 128x128 tiling，峰值 ~15.6GB
+#    # 自动使用 128x128 tiling + 0.5 overlap，峰值 ~15.6GB
 #
-# 2. 24GB 显卡（高性能模式）：
+# 2. 使用 LoRA（风格增强）：
+#    ./img2.sh "prompt" ~/output.png 2560 1440 --lora /path/to/style.safetensors:0.8
+#    # 支持多个 LoRA，权重用冒号分隔（默认权重 1.0）
+#
+# 3. 24GB 显卡（高性能模式）：
 #    VAE_TILE_SIZE=256x256 VAE_TILE_OVERLAP=0.8 \
 #      ./img2.sh "prompt" ~/output.png 2560 1440
 #    # 使用 256x256 tiling，VAE 解码更快，峰值 ~20.7GB
 #
-# 3. 自定义 tiling（高级用户）：
+# 4. 自定义 tiling（高级用户）：
 #    VAE_TILE_SIZE=64x64 VAE_TILE_OVERLAP=0.5 \
 #      ./img2.sh "prompt" ~/output.png 2560 1440
 #    # 64x64 峰值 ~11GB，适合 12GB 显卡（如 RTX 3060 12G）
@@ -144,6 +148,7 @@
 #   $3 - 宽度 (Width)
 #   $4 - 高度 (Height)
 #   --upscale - 可选：使用 2x ESRGAN 进一步放大（通常不需要）
+#   --lora PATH:weight - 可选：LoRA 风格模型（可指定多个）
 # =============================================================================
 set -euo pipefail
 
@@ -164,14 +169,21 @@ UPSCALE_MODEL="${UPSCALE_MODEL:-$MODEL_DIR/2x_ESRGAN.gguf}"
 
 # VAE Tiling 配置（20G显存优化：默认128x128，可配置）
 # 128x128: 峰值~15.6GB (20G安全) | 256x256: 峰值~20.7GB (24G专用)
+# overlap 提高可减少 tile 接缝（不显存增加，只增加计算量）
 VAE_TILE_SIZE="${VAE_TILE_SIZE:-128x128}"
-VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.3}"
+VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
 UPSCALE_FLAG=0
+LORA_CONFIG=""
 ARGS=()
 for arg in "$@"; do
     if [ "$arg" = "--upscale" ]; then
         UPSCALE_FLAG=1
+    elif [ "$arg" = "--lora" ]; then
+        LORA_FLAG=1
+    elif [ "$LORA_FLAG" -eq 1 ] 2>/dev/null; then
+        LORA_CONFIG="$arg"
+        LORA_FLAG=0
     else
         ARGS+=("$arg")
     fi
@@ -355,15 +367,18 @@ SD_CMD=("$SD_CLI"
   --vae-tile-size "$VAE_TILE_SIZE"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
   --freeu
+  --freeu-b1 1.4
+  --freeu-b2 1.5
   --sag
   --sag-scale 1.0
   --auto-enhance
+  --vibrance 0.3
   --clarity 0.6
-  --sharpen 1.5
+  --sharpen 0.8
   --sharpen-radius 2
-  --smart-sharpen 1.2
+  --smart-sharpen 0.5
   --smart-sharpen-radius 2
-  --edge-sharpen 1.0
+  --edge-sharpen 1.5
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
   --embd-dir "$MODEL_DIR/embeddings"
@@ -378,6 +393,10 @@ SD_CMD=("$SD_CLI"
   -o "$OUTPUT_PATH"
 )
 
+if [ -n "$LORA_CONFIG" ]; then
+    SD_CMD+=(--lora "$LORA_CONFIG")
+fi
+
 if [ "$UPSCALE_FLAG" -eq 1 ]; then
     SD_CMD+=(--upscale-model "$UPSCALE_MODEL")
     SD_CMD+=(--upscale-repeats 1)
@@ -388,6 +407,40 @@ fi
 
 if [ -f "$OUTPUT_PATH" ]; then
     FILE_SIZE=$(du -h "$OUTPUT_PATH" | cut -f1)
+    
+    # Save generation parameters to sidecar JSON for A/B comparison
+    SIDECAR_PATH="${OUTPUT_PATH%.png}.json"
+    cat > "$SIDECAR_PATH" <<EOF
+{
+  "prompt": "$PROMPT",
+  "negative_prompt": "$NEGATIVE_PROMPT",
+  "width": $WIDTH,
+  "height": $HEIGHT,
+  "low_res": {"width": $LOW_W, "height": $LOW_H},
+  "seed": $SEED,
+  "cfg_scale": $CFG_SCALE,
+  "steps": $STEPS,
+  "hires_steps": $HIRES_STEPS,
+  "hires_strength": $HIRES_STRENGTH,
+  "sampler": "$SAMPLING_METHOD",
+  "scheduler": "$SCHEDULER",
+  "vae_tile_size": "$VAE_TILE_SIZE",
+  "vae_tile_overlap": $VAE_TILE_OVERLAP,
+  "freeu": true,
+  "freeu_b1": 1.4,
+  "freeu_b2": 1.5,
+  "sag": true,
+  "sag_scale": 1.0,
+  "vibrance": 0.3,
+  "clarity": 0.6,
+  "sharpen": 0.8,
+  "smart_sharpen": 0.5,
+  "edge_sharpen": 1.5,
+  "upscale": $UPSCALE_FLAG,
+  "lora": "$LORA_CONFIG"
+}
+EOF
+    
     echo ""
     echo "========================================"
     echo -e "${GREEN}✓ Generation successful!${NC}"
@@ -395,6 +448,7 @@ if [ -f "$OUTPUT_PATH" ]; then
     echo -e "Size: ${BLUE}$FILE_SIZE${NC}"
     echo -e "Seed: ${YELLOW}$SEED${NC}"
     echo -e "CFG: ${CYAN}$CFG_SCALE${NC}"
+    echo -e "Sidecar: ${CYAN}$SIDECAR_PATH${NC}"
     echo "========================================"
 else
     echo ""
