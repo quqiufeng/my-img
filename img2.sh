@@ -175,18 +175,75 @@ VAE_TILE_OVERLAP="${VAE_TILE_OVERLAP:-0.5}"
 
 UPSCALE_FLAG=0
 LORA_CONFIG=""
+PROMPT_SCHEDULE=""
+REGIONAL_PROMPTS=""
+FACE_RESTORE_FLAG=0
+FACE_RESTORE_MODEL=""
+FACE_SWAP_FLAG=0
+FACE_SWAP_SOURCE=""
+IPADAPTER_FLAG=0
+IPADAPTER_MODEL=""
+IPADAPTER_IMAGE=""
+T2I_ADAPTER_FLAG=0
+T2I_ADAPTER_MODEL=""
+T2I_ADAPTER_IMAGE=""
+PHOTOMAKER_FLAG=0
+PHOTOMAKER_MODEL=""
+PHOTOMAKER_ID_IMAGES=""
+
 ARGS=()
-for arg in "$@"; do
+i=0
+while [ $i -lt $# ]; do
+    arg="${@:$((i+1)):1}"
     if [ "$arg" = "--upscale" ]; then
         UPSCALE_FLAG=1
     elif [ "$arg" = "--lora" ]; then
-        LORA_FLAG=1
-    elif [ "$LORA_FLAG" -eq 1 ] 2>/dev/null; then
-        LORA_CONFIG="$arg"
-        LORA_FLAG=0
+        i=$((i+1))
+        LORA_CONFIG="${@:$((i+1)):1}"
+    elif [ "$arg" = "--prompt-schedule" ]; then
+        i=$((i+1))
+        PROMPT_SCHEDULE="${@:$((i+1)):1}"
+    elif [ "$arg" = "--regional-prompts" ]; then
+        i=$((i+1))
+        REGIONAL_PROMPTS="${@:$((i+1)):1}"
+    elif [ "$arg" = "--face-restore" ]; then
+        FACE_RESTORE_FLAG=1
+    elif [ "$arg" = "--face-restore-model" ]; then
+        i=$((i+1))
+        FACE_RESTORE_MODEL="${@:$((i+1)):1}"
+    elif [ "$arg" = "--face-swap" ]; then
+        FACE_SWAP_FLAG=1
+    elif [ "$arg" = "--face-swap-source" ]; then
+        i=$((i+1))
+        FACE_SWAP_SOURCE="${@:$((i+1)):1}"
+    elif [ "$arg" = "--ipadapter" ]; then
+        IPADAPTER_FLAG=1
+    elif [ "$arg" = "--ipadapter-model" ]; then
+        i=$((i+1))
+        IPADAPTER_MODEL="${@:$((i+1)):1}"
+    elif [ "$arg" = "--ipadapter-image" ]; then
+        i=$((i+1))
+        IPADAPTER_IMAGE="${@:$((i+1)):1}"
+    elif [ "$arg" = "--t2i-adapter" ]; then
+        T2I_ADAPTER_FLAG=1
+    elif [ "$arg" = "--t2i-adapter-model" ]; then
+        i=$((i+1))
+        T2I_ADAPTER_MODEL="${@:$((i+1)):1}"
+    elif [ "$arg" = "--t2i-adapter-image" ]; then
+        i=$((i+1))
+        T2I_ADAPTER_IMAGE="${@:$((i+1)):1}"
+    elif [ "$arg" = "--photomaker" ]; then
+        PHOTOMAKER_FLAG=1
+    elif [ "$arg" = "--photomaker-model" ]; then
+        i=$((i+1))
+        PHOTOMAKER_MODEL="${@:$((i+1)):1}"
+    elif [ "$arg" = "--photomaker-id-images" ]; then
+        i=$((i+1))
+        PHOTOMAKER_ID_IMAGES="${@:$((i+1)):1}"
     else
         ARGS+=("$arg")
     fi
+    i=$((i+1))
 done
 
 PROMPT="${ARGS[0]:-A beautiful landscape}"
@@ -397,6 +454,43 @@ if [ -n "$LORA_CONFIG" ]; then
     SD_CMD+=(--lora "$LORA_CONFIG")
 fi
 
+if [ -n "$PROMPT_SCHEDULE" ]; then
+    SD_CMD+=(--prompt-schedule "$PROMPT_SCHEDULE")
+fi
+
+if [ -n "$REGIONAL_PROMPTS" ]; then
+    SD_CMD+=(--regional-prompts "$REGIONAL_PROMPTS")
+fi
+
+if [ "$FACE_RESTORE_FLAG" -eq 1 ]; then
+    SD_CMD+=(--face-restore)
+    if [ -n "$FACE_RESTORE_MODEL" ]; then
+        SD_CMD+=(--face-restore-model "$FACE_RESTORE_MODEL")
+    fi
+fi
+
+if [ "$FACE_SWAP_FLAG" -eq 1 ] && [ -n "$FACE_SWAP_SOURCE" ]; then
+    SD_CMD+=(--face-swap --face-swap-source "$FACE_SWAP_SOURCE")
+    SD_CMD+=(--face-swap-detection-model "$MODEL_DIR/yunet_320_320.onnx")
+    SD_CMD+=(--face-swap-model "$MODEL_DIR/inswapper_128.onnx")
+fi
+
+if [ "$IPADAPTER_FLAG" -eq 1 ] && [ -n "$IPADAPTER_MODEL" ] && [ -n "$IPADAPTER_IMAGE" ]; then
+    SD_CMD+=(--ipadapter --ipadapter-model "$IPADAPTER_MODEL")
+    SD_CMD+=(--ipadapter-clip-vision "$MODEL_DIR/clip_vision_sd15.safetensors")
+    SD_CMD+=(--ipadapter-image "$IPADAPTER_IMAGE")
+fi
+
+if [ "$T2I_ADAPTER_FLAG" -eq 1 ] && [ -n "$T2I_ADAPTER_MODEL" ] && [ -n "$T2I_ADAPTER_IMAGE" ]; then
+    SD_CMD+=(--t2i-adapter --t2i-adapter-model "$T2I_ADAPTER_MODEL")
+    SD_CMD+=(--t2i-adapter-image "$T2I_ADAPTER_IMAGE")
+fi
+
+if [ "$PHOTOMAKER_FLAG" -eq 1 ] && [ -n "$PHOTOMAKER_MODEL" ] && [ -n "$PHOTOMAKER_ID_IMAGES" ]; then
+    SD_CMD+=(--photomaker --photomaker-model "$PHOTOMAKER_MODEL")
+    SD_CMD+=(--photomaker-id-images "$PHOTOMAKER_ID_IMAGES")
+fi
+
 if [ "$UPSCALE_FLAG" -eq 1 ]; then
     SD_CMD+=(--upscale-model "$UPSCALE_MODEL")
     SD_CMD+=(--upscale-repeats 1)
@@ -437,7 +531,22 @@ if [ -f "$OUTPUT_PATH" ]; then
   "smart_sharpen": 0.5,
   "edge_sharpen": 1.5,
   "upscale": $UPSCALE_FLAG,
-  "lora": "$LORA_CONFIG"
+  "lora": "$LORA_CONFIG",
+  "prompt_schedule": "$PROMPT_SCHEDULE",
+  "regional_prompts": "$REGIONAL_PROMPTS",
+  "face_restore": $FACE_RESTORE_FLAG,
+  "face_restore_model": "$FACE_RESTORE_MODEL",
+  "face_swap": $FACE_SWAP_FLAG,
+  "face_swap_source": "$FACE_SWAP_SOURCE",
+  "ipadapter": $IPADAPTER_FLAG,
+  "ipadapter_model": "$IPADAPTER_MODEL",
+  "ipadapter_image": "$IPADAPTER_IMAGE",
+  "t2i_adapter": $T2I_ADAPTER_FLAG,
+  "t2i_adapter_model": "$T2I_ADAPTER_MODEL",
+  "t2i_adapter_image": "$T2I_ADAPTER_IMAGE",
+  "photomaker": $PHOTOMAKER_FLAG,
+  "photomaker_model": "$PHOTOMAKER_MODEL",
+  "photomaker_id_images": "$PHOTOMAKER_ID_IMAGES"
 }
 EOF
     
