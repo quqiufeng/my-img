@@ -59,6 +59,9 @@ private:
     
     // CodeFormer 推理
     torch::Tensor inference_codeformer(const torch::Tensor& face);
+    
+    // 基础增强（当 AI 模型不可用时使用）
+    torch::Tensor apply_basic_enhancement(const torch::Tensor& face);
 };
 
 } // namespace myimg

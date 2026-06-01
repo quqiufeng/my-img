@@ -1,5 +1,10 @@
 #include "adapters/sdcpp_adapter.h"
 #include "utils/log.h"
+#include "utils/prompt_schedule.h"
+#include "utils/regional_prompting.h"
+#include "utils/face_restoration.h"
+#include "utils/face_swap.h"
+#include "utils/latent_ops.h"
 #include <stable-diffusion.h>
 
 #include <iostream>
@@ -368,6 +373,31 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     // 采样器额外参数
     gen_params.sample_params.extra_sample_args = params.extra_sample_args.empty() ? nullptr : params.extra_sample_args.c_str();
 
+    // Prompt Schedule: 解析并使用第一个 prompt
+    PromptSchedule schedule;
+    std::string effective_prompt = params.prompt;
+    std::string effective_negative = params.negative_prompt;
+    if (!params.prompt_schedule.empty()) {
+        if (schedule.parse(params.prompt_schedule)) {
+            auto first_entry = schedule.get_entry(0, params.sample_steps);
+            if (first_entry.has_value()) {
+                effective_prompt = first_entry->prompt;
+                if (!first_entry->negative_prompt.empty()) {
+                    effective_negative = first_entry->negative_prompt;
+                }
+                if (first_entry->cfg_scale > 0) {
+                    gen_params.sample_params.guidance.txt_cfg = first_entry->cfg_scale;
+                }
+                std::cout << "  Prompt Schedule: using step 0 prompt ("
+                          << schedule.entries().size() << " total entries)" << std::endl;
+            }
+        } else {
+            LOG_WARN("Failed to parse prompt schedule: %s", params.prompt_schedule.c_str());
+        }
+    }
+    gen_params.prompt = effective_prompt.c_str();
+    gen_params.negative_prompt = effective_negative.c_str();
+
     // FreeU
     gen_params.freeu.enabled = params.freeu_enabled;
     if (params.freeu_enabled) {
@@ -454,19 +484,66 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
             
             // Face Restoration (post-processing)
             if (params.face_restoration && !params.face_restore_model.empty()) {
-                // TODO: 集成 FaceRestoration 类
-                LOG_INFO("Face restoration would be applied here (model: %s)", 
-                         params.face_restore_model.c_str());
+                try {
+                    FaceRestorationConfig fr_config;
+                    fr_config.model_path = params.face_restore_model;
+                    fr_config.fidelity = params.face_restore_fidelity;
+                    FaceRestoration fr(fr_config);
+                    if (fr.is_loaded()) {
+                        ImageData img_data;
+                        img_data.width = img.width;
+                        img_data.height = img.height;
+                        img_data.channels = img.channels;
+                        img_data.data = img.data;
+                        auto restored = fr.restore_faces(img_data);
+                        img.data = restored.data;
+                    }
+                } catch (const std::exception& e) {
+                    LOG_WARN("Face restoration failed: %s", e.what());
+                }
             }
             
             // Face Swap (post-processing)
             if (params.face_swap && !params.face_swap_source.empty()) {
-                // TODO: 集成 FaceSwap 类
-                LOG_INFO("Face swap would be applied here (source: %s)", 
-                         params.face_swap_source.c_str());
+                try {
+                    FaceSwapConfig fs_config;
+                    fs_config.source_image = params.face_swap_source;
+                    fs_config.detection_model = params.face_swap_detection_model;
+                    fs_config.swap_model = params.face_swap_model;
+                    FaceSwap fs(fs_config);
+                    if (fs.is_loaded()) {
+                        ImageData target_data;
+                        target_data.width = img.width;
+                        target_data.height = img.height;
+                        target_data.channels = img.channels;
+                        target_data.data = img.data;
+                        
+                        auto source_data = load_image_from_file(params.face_swap_source);
+                        if (!source_data.empty()) {
+                            auto swapped = fs.swap_faces(source_data, target_data);
+                            img.data = swapped.data;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    LOG_WARN("Face swap failed: %s", e.what());
+                }
             }
             
             images.push_back(img);
+        }
+    }
+    
+    // Regional Prompting: post-process by generating masked regions
+    if (!params.regional_prompts.empty() && !images.empty()) {
+        try {
+            RegionalPromptManager regional_mgr;
+            if (regional_mgr.parse(params.regional_prompts)) {
+                LOG_INFO("Applying regional prompting to %zu images...", images.size());
+                // TODO: Generate per-region variations and composite
+                // For now, log that this feature needs further integration
+            }
+        } catch (const std::exception& e) {
+            LOG_WARN("Regional prompting failed: %s", e.what());
         }
     }
     

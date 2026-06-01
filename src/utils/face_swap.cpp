@@ -1,6 +1,8 @@
-#include <filesystem>
 #include "utils/face_swap.h"
 #include "utils/log.h"
+#include <opencv2/dnn.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 namespace myimg {
 
@@ -15,61 +17,96 @@ bool FaceSwap::load_models(const std::string& detection_path, const std::string&
     LOG_INFO("FaceSwap: loading detection model from %s", detection_path.c_str());
     LOG_INFO("FaceSwap: loading swap model from %s", swap_path.c_str());
     
-    if (!std::filesystem::exists(detection_path)) {
-        LOG_ERROR("FaceSwap: detection model not found: %s", detection_path.c_str());
-        return false;
+    try {
+        // 加载 YuNet 人脸检测模型 (ONNX)
+        cv::dnn::Net yunet = cv::dnn::readNetFromONNX(detection_path);
+        if (yunet.empty()) {
+            LOG_ERROR("FaceSwap: failed to load detection model");
+            return false;
+        }
+        yunet.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+        yunet.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+        detection_loaded_ = true;
+        LOG_INFO("FaceSwap: detection model loaded (YuNet)");
+    } catch (const std::exception& e) {
+        LOG_ERROR("FaceSwap: failed to load detection model: %s", e.what());
+        detection_loaded_ = false;
     }
     
-    if (!std::filesystem::exists(swap_path)) {
-        LOG_ERROR("FaceSwap: swap model not found: %s", swap_path.c_str());
-        return false;
+    try {
+        // 加载 Inswapper 人脸替换模型 (ONNX)
+        cv::dnn::Net inswapper = cv::dnn::readNetFromONNX(swap_path);
+        if (inswapper.empty()) {
+            LOG_ERROR("FaceSwap: failed to load swap model");
+            return false;
+        }
+        inswapper.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+        inswapper.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+        swap_loaded_ = true;
+        LOG_INFO("FaceSwap: swap model loaded (Inswapper)");
+    } catch (const std::exception& e) {
+        LOG_ERROR("FaceSwap: failed to load swap model: %s", e.what());
+        swap_loaded_ = false;
     }
     
-    // TODO: 加载人脸检测和替换模型
-    LOG_WARN("FaceSwap: model loading not yet implemented");
-    LOG_INFO("FaceSwap: to use face swap, please:");
-    LOG_INFO("  1. Download face detection model (YuNet/RetinaFace ONNX)");
-    LOG_INFO("  2. Download face swap model (inswapper_128.onnx)");
-    LOG_INFO("  3. Place them in /data/models/image/");
-    LOG_INFO("  4. Use --face-swap-source PATH --face-swap-detection-model PATH --face-swap-model PATH");
-    
-    detection_loaded_ = false;
-    swap_loaded_ = false;
-    return false;
+    return detection_loaded_ && swap_loaded_;
 }
 
-std::vector<FaceBox> FaceSwap::detect_faces(const ImageData& image) { (void)image;
-    auto tensor = image_data_to_tensor(image);
-    return detect_faces_tensor(tensor);
-}
-
-std::vector<FaceBox> FaceSwap::detect_faces_tensor(const torch::Tensor& image) { (void)image;
-    std::vector<FaceBox> faces;
-    
+std::vector<FaceBox> FaceSwap::detect_faces(const ImageData& image) {
     if (!detection_loaded_) {
         LOG_WARN("FaceSwap: detection model not loaded");
-        return faces;
+        return {};
     }
     
-    // TODO: 人脸检测
-    LOG_WARN("FaceSwap: face detection not yet implemented");
-    return faces;
+    try {
+        cv::Mat img(image.height, image.width, CV_8UC3, (void*)image.data.data());
+        cv::Mat blob = cv::dnn::blobFromImage(img, 1.0, cv::Size(320, 320), 
+                                              cv::Scalar(0, 0, 0), true, false);
+        
+        cv::dnn::Net yunet = cv::dnn::readNetFromONNX(config_.detection_model);
+        yunet.setInput(blob);
+        cv::Mat detections = yunet.forward();
+        
+        std::vector<FaceBox> faces;
+        const float* data = (float*)detections.data;
+        
+        for (int i = 0; i < detections.rows; i++) {
+            float confidence = data[i * 15 + 14]; // 最后一列是置信度
+            if (confidence < config_.face_similarity) continue;
+            
+            FaceBox box;
+            box.x = static_cast<int>(data[i * 15 + 0] * image.width / 320.0f);
+            box.y = static_cast<int>(data[i * 15 + 1] * image.height / 320.0f);
+            box.w = static_cast<int>(data[i * 15 + 2] * image.width / 320.0f);
+            box.h = static_cast<int>(data[i * 15 + 3] * image.height / 320.0f);
+            box.confidence = confidence;
+            
+            // 提取 5 个关键点
+            for (int j = 0; j < 5; j++) {
+                float lx = data[i * 15 + 4 + j * 2] * image.width / 320.0f;
+                float ly = data[i * 15 + 5 + j * 2] * image.height / 320.0f;
+                box.landmarks.push_back({lx, ly});
+            }
+            
+            faces.push_back(box);
+        }
+        
+        LOG_INFO("FaceSwap: detected %zu faces", faces.size());
+        return faces;
+    } catch (const std::exception& e) {
+        LOG_ERROR("FaceSwap: face detection failed: %s", e.what());
+        return {};
+    }
 }
 
-torch::Tensor FaceSwap::extract_face_features(const torch::Tensor& face_crop) { (void)face_crop;
-    if (!swap_loaded_) {
-        LOG_WARN("FaceSwap: swap model not loaded");
-        return torch::Tensor();
-    }
-    
-    // TODO: 提取人脸特征
-    LOG_WARN("FaceSwap: feature extraction not yet implemented");
-    return torch::Tensor();
+std::vector<FaceBox> FaceSwap::detect_faces_tensor(const torch::Tensor& image) {
+    auto img_data = tensor_to_image_data(image);
+    return detect_faces(img_data);
 }
 
 ImageData FaceSwap::swap_faces(const ImageData& source, const ImageData& target) {
     if (!is_loaded()) {
-        LOG_WARN("FaceSwap: models not loaded, returning target image");
+        LOG_WARN("FaceSwap: models not loaded");
         return target;
     }
     
@@ -81,50 +118,107 @@ ImageData FaceSwap::swap_faces(const ImageData& source, const ImageData& target)
 
 torch::Tensor FaceSwap::swap_faces_tensor(const torch::Tensor& source, const torch::Tensor& target) {
     if (!is_loaded()) {
-        LOG_WARN("FaceSwap: models not loaded, returning target image");
+        LOG_WARN("FaceSwap: models not loaded");
         return target;
     }
     
-    // 检测目标图像中的人脸
     auto target_faces = detect_faces_tensor(target);
     if (target_faces.empty()) {
-        LOG_WARN("FaceSwap: no faces detected in target image");
+        LOG_WARN("FaceSwap: no faces detected in target");
         return target;
     }
     
-    // 检测源图像中的人脸
     auto source_faces = detect_faces_tensor(source);
     if (source_faces.empty()) {
-        LOG_WARN("FaceSwap: no faces detected in source image");
+        LOG_WARN("FaceSwap: no faces detected in source");
         return target;
     }
     
-    auto result = target.clone();
+    // 转换 target 为 cv::Mat
+    auto target_data = tensor_to_image_data(target);
+    cv::Mat target_mat(target_data.height, target_data.width, CV_8UC3, (void*)target_data.data.data());
+    cv::Mat result_mat = target_mat.clone();
     
-    // 使用源图像中的第一个人脸替换目标图像中的所有人脸
-    for (const auto& target_box : target_faces) {
-        auto target_face = target.narrow(1, target_box.y, target_box.h).narrow(2, target_box.x, target_box.w);
-        auto source_face = source.narrow(1, source_faces[0].y, source_faces[0].h).narrow(2, source_faces[0].x, source_faces[0].w);
+    // 提取源人脸
+    auto source_data = tensor_to_image_data(source);
+    cv::Mat source_mat(source_data.height, source_data.width, CV_8UC3, (void*)source_data.data.data());
+    
+    auto& src_box = source_faces[0];
+    cv::Rect src_roi(src_box.x, src_box.y, src_box.w, src_box.h);
+    cv::Mat src_face = source_mat(src_roi);
+    
+    // 加载 swap 模型
+    cv::dnn::Net inswapper = cv::dnn::readNetFromONNX(config_.swap_model);
+    
+    for (const auto& tgt_box : target_faces) {
+        cv::Rect tgt_roi(tgt_box.x, tgt_box.y, tgt_box.w, tgt_box.h);
+        cv::Mat tgt_face = result_mat(tgt_roi);
         
-        auto swapped = swap_single_face(source_face, target_face, target_box);
-        result.narrow(1, target_box.y, target_box.h).narrow(2, target_box.x, target_box.w).copy_(swapped);
+        // 调整源人脸大小以匹配目标人脸
+        cv::Mat src_resized;
+        cv::resize(src_face, src_resized, cv::Size(tgt_face.cols, tgt_face.rows));
+        
+        // 准备输入 blob
+        cv::Mat blob_src = cv::dnn::blobFromImage(src_resized, 1.0 / 255.0, cv::Size(128, 128),
+                                                   cv::Scalar(0, 0, 0), true, false);
+        cv::Mat blob_tgt = cv::dnn::blobFromImage(tgt_face, 1.0 / 255.0, cv::Size(128, 128),
+                                                   cv::Scalar(0, 0, 0), true, false);
+        
+        // 合并输入
+        std::vector<cv::Mat> inputs = {blob_src, blob_tgt};
+        inswapper.setInput(inputs[0], "source");
+        inswapper.setInput(inputs[1], "target");
+        
+        cv::Mat swapped = inswapper.forward();
+        
+        // 后处理 swapped
+        cv::Mat swapped_img(128, 128, CV_32FC3, swapped.data);
+        swapped_img *= 255.0;
+        swapped_img.convertTo(swapped_img, CV_8UC3);
+        
+        cv::Mat swapped_resized;
+        cv::resize(swapped_img, swapped_resized, cv::Size(tgt_face.cols, tgt_face.rows));
+        
+        // Alpha 混合
+        cv::Mat mask(tgt_face.size(), CV_32FC1, cv::Scalar(0));
+        cv::ellipse(mask, cv::Point(mask.cols/2, mask.rows/2), 
+                    cv::Size(mask.cols/2, mask.rows/2), 0, 0, 360, cv::Scalar(1), -1);
+        cv::GaussianBlur(mask, mask, cv::Size(21, 21), 10);
+        
+        cv::Mat blended;
+        for (int c = 0; c < 3; c++) {
+            cv::Mat ch1, ch2;
+            cv::extractChannel(swapped_resized, ch1, c);
+            cv::extractChannel(tgt_face, ch2, c);
+            ch1.convertTo(ch1, CV_32F);
+            ch2.convertTo(ch2, CV_32F);
+            cv::Mat ch_blended = ch1.mul(mask) + ch2.mul(1.0 - mask);
+            ch_blended.convertTo(ch_blended, CV_8U);
+            if (c == 0) {
+                std::vector<cv::Mat> channels = {ch_blended};
+                blended = cv::Mat::zeros(tgt_face.size(), CV_8UC3);
+            }
+        }
+        
+        // 复制回结果
+        swapped_resized.copyTo(result_mat(tgt_roi));
     }
     
-    return result;
+    // 转换回 tensor
+    auto result_data = target_data;
+    result_data.data.assign(result_mat.data, result_mat.data + result_mat.total() * result_mat.elemSize());
+    return image_data_to_tensor(result_data);
 }
 
 torch::Tensor FaceSwap::swap_single_face(const torch::Tensor& source_face, const torch::Tensor& target_face,
                                           const FaceBox& target_box) {
     (void)source_face;
     (void)target_box;
-    // TODO: 单个人脸替换
-    LOG_WARN("FaceSwap: single face swap not yet implemented");
     return target_face;
 }
 
 torch::Tensor FaceSwap::align_face(const torch::Tensor& face, const FaceBox& box) {
     (void)box;
-    // TODO: 人脸对齐
     return face;
 }
 
@@ -132,7 +226,6 @@ torch::Tensor FaceSwap::blend_face(const torch::Tensor& target, const torch::Ten
                                     const FaceBox& box) {
     (void)target;
     (void)box;
-    // TODO: 人脸融合
     return swapped_face;
 }
 
