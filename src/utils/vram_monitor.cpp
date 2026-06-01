@@ -17,9 +17,13 @@ float VRAMMonitor::get_used_vram_mb() {
     if (pipe) {
         char buffer[128];
         if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            float used_mb = std::stof(buffer);
-            pclose(pipe);
-            return used_mb;
+            try {
+                float used_mb = std::stof(buffer);
+                pclose(pipe);
+                return used_mb;
+            } catch (const std::exception&) {
+                // 解析失败，关闭管道继续尝试其他方法
+            }
         }
         pclose(pipe);
     }
@@ -32,8 +36,12 @@ float VRAMMonitor::get_used_vram_mb() {
             if (line.find("VmallocUsed") != std::string::npos) {
                 size_t pos = line.find(':');
                 if (pos != std::string::npos) {
-                    float kb = std::stof(line.substr(pos + 1));
-                    return kb / 1024.0f;
+                    try {
+                        float kb = std::stof(line.substr(pos + 1));
+                        return kb / 1024.0f;
+                    } catch (const std::exception&) {
+                        return 0.0f;
+                    }
                 }
             }
         }
@@ -48,9 +56,13 @@ float VRAMMonitor::get_total_vram_mb() {
     if (pipe) {
         char buffer[128];
         if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            float total_mb = std::stof(buffer);
-            pclose(pipe);
-            return total_mb;
+            try {
+                float total_mb = std::stof(buffer);
+                pclose(pipe);
+                return total_mb;
+            } catch (const std::exception&) {
+                // 解析失败，关闭管道
+            }
         }
         pclose(pipe);
     }

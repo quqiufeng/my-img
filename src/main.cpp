@@ -32,6 +32,35 @@
 namespace fs = std::filesystem;
 using namespace myimg;
 
+// Helper: apply crop_ratio to ImageData
+static bool apply_crop_ratio(ImageData& img_data, const std::string& crop_ratio) {
+    size_t colon = crop_ratio.find(':');
+    if (colon == std::string::npos) return false;
+    try {
+        float ratio_w = std::stof(crop_ratio.substr(0, colon));
+        float ratio_h = std::stof(crop_ratio.substr(colon + 1));
+        float img_ratio = (float)img_data.width / img_data.height;
+        float target_ratio = ratio_w / ratio_h;
+        int w, h, x, y;
+        if (img_ratio > target_ratio) {
+            h = img_data.height;
+            w = (int)(h * target_ratio);
+            x = (img_data.width - w) / 2;
+            y = 0;
+        } else {
+            w = img_data.width;
+            h = (int)(w / target_ratio);
+            x = 0;
+            y = (img_data.height - h) / 2;
+        }
+        img_data = myimg::crop_image(img_data, x, y, w, h);
+        return true;
+    } catch (const std::exception&) {
+        LOG_ERROR("Invalid crop ratio: %s", crop_ratio.c_str());
+        return false;
+    }
+}
+
 int main(int argc, char** argv) {
     CliOptions opts;
     
@@ -564,30 +593,7 @@ int main(int argc, char** argv) {
                 int y = (img_data.height - h) / 2;
                 img_data = myimg::crop_image(img_data, x, y, w, h);
             } else if (!opts.crop_ratio.empty()) {
-                size_t colon = opts.crop_ratio.find(':');
-                if (colon != std::string::npos) {
-                    try {
-                        float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
-                        float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
-                        float img_ratio = (float)img_data.width / img_data.height;
-                        float target_ratio = ratio_w / ratio_h;
-                        int w, h, x, y;
-                        if (img_ratio > target_ratio) {
-                            h = img_data.height;
-                            w = (int)(h * target_ratio);
-                            x = (img_data.width - w) / 2;
-                            y = 0;
-                        } else {
-                            w = img_data.width;
-                            h = (int)(w / target_ratio);
-                            x = 0;
-                            y = (img_data.height - h) / 2;
-                        }
-                        img_data = myimg::crop_image(img_data, x, y, w, h);
-                    } catch (const std::exception&) {
-                        LOG_ERROR("Invalid crop ratio: %s", opts.crop_ratio.c_str());
-                    }
-                }
+                apply_crop_ratio(img_data, opts.crop_ratio);
             }
 
             img_data = apply_photo_adjustments(img_data, opts);
@@ -802,30 +808,7 @@ int main(int argc, char** argv) {
                 int y = (img_data.height - h) / 2;
                 img_data = myimg::crop_image(img_data, x, y, w, h);
             } else if (!opts.crop_ratio.empty()) {
-                size_t colon = opts.crop_ratio.find(':');
-                if (colon != std::string::npos) {
-                    try {
-                        float ratio_w = std::stof(opts.crop_ratio.substr(0, colon));
-                        float ratio_h = std::stof(opts.crop_ratio.substr(colon + 1));
-                        float img_ratio = (float)img_data.width / img_data.height;
-                        float target_ratio = ratio_w / ratio_h;
-                        int w, h, x, y;
-                        if (img_ratio > target_ratio) {
-                            h = img_data.height;
-                            w = (int)(h * target_ratio);
-                            x = (img_data.width - w) / 2;
-                            y = 0;
-                        } else {
-                            w = img_data.width;
-                            h = (int)(w / target_ratio);
-                            x = 0;
-                            y = (img_data.height - h) / 2;
-                        }
-                        img_data = myimg::crop_image(img_data, x, y, w, h);
-                    } catch (const std::exception&) {
-                        LOG_ERROR("Invalid crop ratio: %s", opts.crop_ratio.c_str());
-                    }
-                }
+                apply_crop_ratio(img_data, opts.crop_ratio);
             }
 
             image.width = img_data.width;

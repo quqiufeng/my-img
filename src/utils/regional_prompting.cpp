@@ -22,37 +22,68 @@ bool RegionalPromptManager::parse(const std::string& regions_str) {
         if (segment.empty()) continue;
         
         RegionalPrompt region;
+        bool parse_ok = false;
         
         // 检查是否是预设格式
         if (segment.find("top:") == 0) {
             size_t comma = segment.find(',');
             if (comma == std::string::npos) continue;
-            float ratio = std::stof(segment.substr(4, comma - 4));
-            region = RegionalPrompt::top(ratio, segment.substr(comma + 1));
+            try {
+                float ratio = std::stof(segment.substr(4, comma - 4));
+                region = RegionalPrompt::top(ratio, segment.substr(comma + 1));
+                parse_ok = true;
+            } catch (...) {
+                LOG_WARN("RegionalPrompt: invalid ratio in '%s'", segment.c_str());
+                continue;
+            }
         } else if (segment.find("bottom:") == 0) {
             size_t comma = segment.find(',');
             if (comma == std::string::npos) continue;
-            float ratio = std::stof(segment.substr(7, comma - 7));
-            region = RegionalPrompt::bottom(ratio, segment.substr(comma + 1));
+            try {
+                float ratio = std::stof(segment.substr(7, comma - 7));
+                region = RegionalPrompt::bottom(ratio, segment.substr(comma + 1));
+                parse_ok = true;
+            } catch (...) {
+                LOG_WARN("RegionalPrompt: invalid ratio in '%s'", segment.c_str());
+                continue;
+            }
         } else if (segment.find("left:") == 0) {
             size_t comma = segment.find(',');
             if (comma == std::string::npos) continue;
-            float ratio = std::stof(segment.substr(5, comma - 5));
-            region = RegionalPrompt::left(ratio, segment.substr(comma + 1));
+            try {
+                float ratio = std::stof(segment.substr(5, comma - 5));
+                region = RegionalPrompt::left(ratio, segment.substr(comma + 1));
+                parse_ok = true;
+            } catch (...) {
+                LOG_WARN("RegionalPrompt: invalid ratio in '%s'", segment.c_str());
+                continue;
+            }
         } else if (segment.find("right:") == 0) {
             size_t comma = segment.find(',');
             if (comma == std::string::npos) continue;
-            float ratio = std::stof(segment.substr(6, comma - 6));
-            region = RegionalPrompt::right(ratio, segment.substr(comma + 1));
+            try {
+                float ratio = std::stof(segment.substr(6, comma - 6));
+                region = RegionalPrompt::right(ratio, segment.substr(comma + 1));
+                parse_ok = true;
+            } catch (...) {
+                LOG_WARN("RegionalPrompt: invalid ratio in '%s'", segment.c_str());
+                continue;
+            }
         } else if (segment.find("center:") == 0) {
             size_t comma1 = segment.find(',');
             if (comma1 == std::string::npos) continue;
             std::string dims = segment.substr(7, comma1 - 7);
             size_t x_pos = dims.find('x');
             if (x_pos == std::string::npos) continue;
-            float w = std::stof(dims.substr(0, x_pos));
-            float h = std::stof(dims.substr(x_pos + 1));
-            region = RegionalPrompt::center(w, h, segment.substr(comma1 + 1));
+            try {
+                float w = std::stof(dims.substr(0, x_pos));
+                float h = std::stof(dims.substr(x_pos + 1));
+                region = RegionalPrompt::center(w, h, segment.substr(comma1 + 1));
+                parse_ok = true;
+            } catch (...) {
+                LOG_WARN("RegionalPrompt: invalid dimensions in '%s'", segment.c_str());
+                continue;
+            }
         } else {
             // 解析 "x,y,w,h,prompt" 格式
             std::stringstream seg_ss(segment);
@@ -74,13 +105,16 @@ bool RegionalPromptManager::parse(const std::string& regions_str) {
                 region.width = std::stof(parts[2]);
                 region.height = std::stof(parts[3]);
                 region.prompt = parts[4];
+                parse_ok = true;
             } catch (...) {
                 LOG_WARN("RegionalPrompt: failed to parse: %s", segment.c_str());
                 continue;
             }
         }
         
-        regions_.push_back(region);
+        if (parse_ok) {
+            regions_.push_back(region);
+        }
     }
     
     return !regions_.empty();
