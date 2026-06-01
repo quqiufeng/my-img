@@ -68,11 +68,30 @@ std::vector<FaceBox> FaceSwap::detect_faces(const ImageData& image) {
         cv::Mat detections = yunet.forward();
         
         std::vector<FaceBox> faces;
-        const float* data = (float*)detections.data;
         
-        for (int i = 0; i < detections.rows; i++) {
+        // YuNet 输出格式: [1, N, 15] 或 [N, 15]
+        // 需要处理 n-dim blob
+        int num_detections = 0;
+        const float* data = nullptr;
+        
+        if (detections.dims == 3) {
+            // [1, N, 15]
+            num_detections = detections.size[1];
+            data = detections.ptr<float>(0);
+        } else if (detections.dims == 2) {
+            // [N, 15]
+            num_detections = detections.rows;
+            data = (float*)detections.data;
+        } else {
+            LOG_WARN("FaceSwap: unexpected detection output dims=%d", detections.dims);
+            return faces;
+        }
+        
+        LOG_INFO("FaceSwap: YuNet raw output: dims=%d, detections=%d", detections.dims, num_detections);
+        
+        for (int i = 0; i < num_detections; i++) {
             float confidence = data[i * 15 + 14]; // 最后一列是置信度
-            if (confidence < config_.face_similarity) continue;
+            if (confidence < 0.3f) continue; // 降低阈值以提高检测率
             
             FaceBox box;
             box.x = static_cast<int>(data[i * 15 + 0] * image.width / 320.0f);
@@ -89,9 +108,11 @@ std::vector<FaceBox> FaceSwap::detect_faces(const ImageData& image) {
             }
             
             faces.push_back(box);
+            LOG_INFO("FaceSwap: detected face %d at (%d,%d,%d,%d) conf=%.3f",
+                     i, box.x, box.y, box.w, box.h, confidence);
         }
         
-        LOG_INFO("FaceSwap: detected %zu faces", faces.size());
+        LOG_INFO("FaceSwap: total %zu faces detected (threshold: 0.3)", faces.size());
         return faces;
     } catch (const std::exception& e) {
         LOG_ERROR("FaceSwap: face detection failed: %s", e.what());
