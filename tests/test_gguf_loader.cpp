@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
     std::cout << "=== GGUF Loader Test ===" << std::endl;
     
     // Test 1: Load Z-Image model
-    std::string model_path = "/opt/image/model/z_image_turbo-Q5_K_M.gguf";
+    std::string model_path = "/data/models/image/z-image-turbo-Q4_K_M.gguf";
     
     std::cout << "\n[Test 1] Loading model: " << model_path << std::endl;
     

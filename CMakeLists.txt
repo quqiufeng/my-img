@@ -439,6 +439,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_model.cpp")
         BUILD_WITH_INSTALL_RPATH TRUE
     )
     add_test(NAME test_z_image_model COMMAND test_z_image_model)
+    set_tests_properties(test_z_image_model PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_quick.cpp")
@@ -511,6 +512,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
         INTERPROCEDURAL_OPTIMIZATION FALSE
     )
     add_test(NAME test_sdcpp_adapter COMMAND test_sdcpp_adapter)
+    set_tests_properties(test_sdcpp_adapter PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
@@ -556,6 +558,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
         INTERPROCEDURAL_OPTIMIZATION FALSE
     )
     add_test(NAME test_txt2img COMMAND test_txt2img)
+    set_tests_properties(test_txt2img PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
@@ -601,6 +604,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         INTERPROCEDURAL_OPTIMIZATION FALSE
     )
     add_test(NAME test_hires_fix_real COMMAND test_hires_fix_real)
+    set_tests_properties(test_hires_fix_real PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_utils.cpp")

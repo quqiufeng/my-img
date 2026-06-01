@@ -21,7 +21,7 @@ int main() {
     std::cout << "   num_heads: " << params.num_heads << std::endl;
     
     // 3. 尝试加载模型（如果存在）
-    std::string model_path = "/opt/image/model/z_image_turbo-Q5_K_M.gguf";
+    std::string model_path = "/data/models/image/z-image-turbo-Q4_K_M.gguf";
     std::cout << "\n2. Loading model from: " << model_path << std::endl;
     bool loaded = model.load(model_path);
     

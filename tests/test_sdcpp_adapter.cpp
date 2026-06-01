@@ -26,7 +26,7 @@ int main() {
     }
     
     // 4. 尝试加载模型（如果存在）
-    std::string model_path = "/opt/image/model/z_image_turbo-Q5_K_M.gguf";
+    std::string model_path = "/data/models/image/z-image-turbo-Q4_K_M.gguf";
     std::cout << "\n4. Testing model loading..." << std::endl;
     std::cout << "   Model path: " << model_path << std::endl;
     
@@ -34,8 +34,8 @@ int main() {
     GenerationParams params;
     // Z-Image 模型需要使用 diffusion_model_path
     params.diffusion_model_path = model_path;
-    params.vae_path = "/opt/image/model/ae.safetensors";
-    params.llm_path = "/opt/image/model/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
+    params.vae_path = "/data/models/image/ae.safetensors";
+    params.llm_path = "/data/models/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
     params.n_threads = 4;  // 使用4线程测试
     params.wtype = "default";  // 使用模型默认类型
     

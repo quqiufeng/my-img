@@ -9,9 +9,9 @@ int main() {
     std::cout << "=== Z-Image txt2img Test ===" << std::endl;
     
     // 模型路径
-    std::string diffusion_model = "/opt/image/model/z_image_turbo-Q5_K_M.gguf";
-    std::string vae_model = "/opt/image/model/ae.safetensors";
-    std::string llm_model = "/opt/image/model/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
+    std::string diffusion_model = "/data/models/image/z-image-turbo-Q4_K_M.gguf";
+    std::string vae_model = "/data/models/image/ae.safetensors";
+    std::string llm_model = "/data/models/image/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
     
     std::cout << "\n1. Initializing adapter..." << std::endl;
     
