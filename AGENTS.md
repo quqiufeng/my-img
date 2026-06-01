@@ -4,6 +4,17 @@
 
 ---
 
+## 0. 系统安全（最高优先级）
+
+### 0.1 禁止并行测试
+- **ctest 必须串行运行**：`ctest --output-on-failure`（不带 `-j` 参数）
+- **禁止**：`ctest -j$(nproc)` 或任何并行模式
+- **原因**：20GB VRAM 限制，并行运行多个 GPU 测试会导致显存耗尽、系统卡死
+- **所有测试已配置**：`set_tests_properties(... PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)`
+- **违规后果**：系统无响应，需强制重启
+
+---
+
 ## 1. 项目哲学
 
 ### 1.1 核心目标

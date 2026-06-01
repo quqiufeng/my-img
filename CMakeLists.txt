@@ -357,6 +357,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gguf_loader.cpp")
         BUILD_WITH_INSTALL_RPATH TRUE
     )
     add_test(NAME test_gguf_loader COMMAND test_gguf_loader)
+    set_tests_properties(test_gguf_loader PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vae.cpp")
@@ -386,6 +387,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vae.cpp")
         BUILD_WITH_INSTALL_RPATH TRUE
     )
     add_test(NAME test_vae COMMAND test_vae)
+    set_tests_properties(test_vae PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix.cpp")
@@ -416,6 +418,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix.cpp")
         BUILD_WITH_INSTALL_RPATH TRUE
     )
     add_test(NAME test_hires_fix COMMAND test_hires_fix)
+    set_tests_properties(test_hires_fix PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_model.cpp")
@@ -471,6 +474,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_z_image_quick.cpp")
         BUILD_WITH_INSTALL_RPATH TRUE
     )
     add_test(NAME test_z_image_quick COMMAND test_z_image_quick)
+    set_tests_properties(test_z_image_quick PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
