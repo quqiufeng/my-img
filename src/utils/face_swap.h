@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <torch/torch.h>
+#include <opencv2/objdetect.hpp>
 #include "utils/image_utils.h"
 
 namespace myimg {
@@ -57,6 +58,8 @@ private:
     FaceSwapConfig config_;
     bool detection_loaded_ = false;
     bool swap_loaded_ = false;
+    bool use_haar_ = false;
+    cv::CascadeClassifier haar_cascade_;
     
     // 人脸对齐
     torch::Tensor align_face(const torch::Tensor& face, const FaceBox& box);

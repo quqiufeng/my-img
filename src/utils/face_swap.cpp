@@ -3,6 +3,7 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/objdetect.hpp>
 
 namespace myimg {
 
@@ -18,16 +19,25 @@ bool FaceSwap::load_models(const std::string& detection_path, const std::string&
     LOG_INFO("FaceSwap: loading swap model from %s", swap_path.c_str());
     
     try {
-        // 加载 YuNet 人脸检测模型 (ONNX)
+        // 尝试加载 YuNet 人脸检测模型 (ONNX)
         cv::dnn::Net yunet = cv::dnn::readNetFromONNX(detection_path);
-        if (yunet.empty()) {
-            LOG_ERROR("FaceSwap: failed to load detection model");
-            return false;
+        if (!yunet.empty()) {
+            yunet.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+            yunet.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+            detection_loaded_ = true;
+            LOG_INFO("FaceSwap: detection model loaded (YuNet DNN)");
+        } else {
+            LOG_WARN("FaceSwap: YuNet DNN failed, trying Haar cascade");
+            // 回退到 Haar 级联分类器
+            if (haar_cascade_.load("/usr/share/opencv4/haarcascades/haarcascade_frontalface_alt2.xml")) {
+                detection_loaded_ = true;
+                use_haar_ = true;
+                LOG_INFO("FaceSwap: Haar cascade loaded as fallback");
+            } else {
+                LOG_ERROR("FaceSwap: failed to load Haar cascade");
+                detection_loaded_ = false;
+            }
         }
-        yunet.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
-        yunet.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-        detection_loaded_ = true;
-        LOG_INFO("FaceSwap: detection model loaded (YuNet)");
     } catch (const std::exception& e) {
         LOG_ERROR("FaceSwap: failed to load detection model: %s", e.what());
         detection_loaded_ = false;
@@ -60,59 +70,71 @@ std::vector<FaceBox> FaceSwap::detect_faces(const ImageData& image) {
     
     try {
         cv::Mat img(image.height, image.width, CV_8UC3, (void*)image.data.data());
-        cv::Mat blob = cv::dnn::blobFromImage(img, 1.0, cv::Size(320, 320), 
-                                              cv::Scalar(0, 0, 0), true, false);
-        
-        cv::dnn::Net yunet = cv::dnn::readNetFromONNX(config_.detection_model);
-        yunet.setInput(blob);
-        cv::Mat detections = yunet.forward();
-        
         std::vector<FaceBox> faces;
         
-        // YuNet 输出格式: [1, N, 15] 或 [N, 15]
-        // 需要处理 n-dim blob
-        int num_detections = 0;
-        const float* data = nullptr;
-        
-        if (detections.dims == 3) {
-            // [1, N, 15]
-            num_detections = detections.size[1];
-            data = detections.ptr<float>(0);
-        } else if (detections.dims == 2) {
-            // [N, 15]
-            num_detections = detections.rows;
-            data = (float*)detections.data;
+        if (use_haar_) {
+            // 使用 Haar 级联分类器
+            cv::Mat gray;
+            cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+            std::vector<cv::Rect> detected;
+            haar_cascade_.detectMultiScale(gray, detected, 1.1, 3, 0, cv::Size(80, 80));
+            
+            for (size_t i = 0; i < detected.size(); i++) {
+                FaceBox box;
+                box.x = detected[i].x;
+                box.y = detected[i].y;
+                box.w = detected[i].width;
+                box.h = detected[i].height;
+                box.confidence = 0.5f;
+                faces.push_back(box);
+                LOG_INFO("FaceSwap: Haar detected face %zu at (%d,%d,%d,%d)",
+                         i, box.x, box.y, box.w, box.h);
+            }
         } else {
-            LOG_WARN("FaceSwap: unexpected detection output dims=%d", detections.dims);
-            return faces;
-        }
-        
-        LOG_INFO("FaceSwap: YuNet raw output: dims=%d, detections=%d", detections.dims, num_detections);
-        
-        for (int i = 0; i < num_detections; i++) {
-            float confidence = data[i * 15 + 14]; // 最后一列是置信度
-            if (confidence < 0.3f) continue; // 降低阈值以提高检测率
+            // 使用 YuNet DNN
+            cv::Mat blob = cv::dnn::blobFromImage(img, 1.0, cv::Size(320, 320),
+                                                  cv::Scalar(0, 0, 0), true, false);
             
-            FaceBox box;
-            box.x = static_cast<int>(data[i * 15 + 0] * image.width / 320.0f);
-            box.y = static_cast<int>(data[i * 15 + 1] * image.height / 320.0f);
-            box.w = static_cast<int>(data[i * 15 + 2] * image.width / 320.0f);
-            box.h = static_cast<int>(data[i * 15 + 3] * image.height / 320.0f);
-            box.confidence = confidence;
+            cv::dnn::Net yunet = cv::dnn::readNetFromONNX(config_.detection_model);
+            yunet.setInput(blob);
+            cv::Mat detections = yunet.forward();
             
-            // 提取 5 个关键点
-            for (int j = 0; j < 5; j++) {
-                float lx = data[i * 15 + 4 + j * 2] * image.width / 320.0f;
-                float ly = data[i * 15 + 5 + j * 2] * image.height / 320.0f;
-                box.landmarks.push_back({lx, ly});
+            int num_detections = 0;
+            const float* data = nullptr;
+            
+            if (detections.dims == 3) {
+                num_detections = detections.size[1];
+                data = detections.ptr<float>(0);
+            } else if (detections.dims == 2) {
+                num_detections = detections.rows;
+                data = (float*)detections.data;
+            } else {
+                LOG_WARN("FaceSwap: unexpected detection output dims=%d", detections.dims);
+                return faces;
             }
             
-            faces.push_back(box);
-            LOG_INFO("FaceSwap: detected face %d at (%d,%d,%d,%d) conf=%.3f",
-                     i, box.x, box.y, box.w, box.h, confidence);
+            LOG_INFO("FaceSwap: YuNet candidates: %d", num_detections);
+            
+            for (int i = 0; i < num_detections; i++) {
+                float confidence = data[i * 15 + 14];
+                if (confidence < 0.3f) continue;
+                
+                FaceBox box;
+                box.x = static_cast<int>(data[i * 15 + 0] * image.width);
+                box.y = static_cast<int>(data[i * 15 + 1] * image.height);
+                box.w = static_cast<int>(data[i * 15 + 2] * image.width);
+                box.h = static_cast<int>(data[i * 15 + 3] * image.height);
+                box.confidence = confidence;
+                
+                if (box.w <= 0 || box.h <= 0 || box.x < 0 || box.y < 0) continue;
+                
+                faces.push_back(box);
+                LOG_INFO("FaceSwap: YuNet face %d at (%d,%d,%d,%d) conf=%.3f",
+                         i, box.x, box.y, box.w, box.h, confidence);
+            }
         }
         
-        LOG_INFO("FaceSwap: total %zu faces detected (threshold: 0.3)", faces.size());
+        LOG_INFO("FaceSwap: total %zu faces detected", faces.size());
         return faces;
     } catch (const std::exception& e) {
         LOG_ERROR("FaceSwap: face detection failed: %s", e.what());
