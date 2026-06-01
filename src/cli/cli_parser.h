@@ -25,6 +25,12 @@ bool save_preset(const CliOptions& opts, const std::string& preset_name);
 // 加载预设
 bool load_preset(CliOptions& opts, const std::string& preset_path);
 
+// 加载 JSON 配置文件
+bool load_config_file(CliOptions& opts);
+
+// 保存 JSON 配置文件
+bool save_config_file(const CliOptions& opts, const std::string& path);
+
 // 解析采样方法
 SampleMethod parse_sampling_method(const std::string& name);
 

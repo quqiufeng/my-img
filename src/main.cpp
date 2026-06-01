@@ -38,6 +38,14 @@ int main(int argc, char** argv) {
         return 1;
     }
     
+    // 加载配置文件（命令行参数会覆盖配置文件）
+    if (!opts.config_file.empty()) {
+        LOG_INFO("Loading config from: %s", opts.config_file.c_str());
+        if (!load_config_file(opts)) {
+            return 1;
+        }
+    }
+    
     // Read PNG metadata (no model required)
     if (!opts.read_metadata_image.empty()) {
         LOG_INFO("========================================");

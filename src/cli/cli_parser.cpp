@@ -1052,4 +1052,152 @@ Scheduler parse_scheduler(const std::string& name) {
     return Scheduler::Simple;
 }
 
+
+bool load_config_file(CliOptions& opts) {
+    if (opts.config_file.empty()) return true;
+    
+    std::ifstream file(opts.config_file);
+    if (!file.is_open()) {
+        LOG_ERROR("Failed to open config file: %s", opts.config_file.c_str());
+        return false;
+    }
+    
+    try {
+        nlohmann::json config;
+        file >> config;
+        
+        // 模型路径
+        if (config.contains("model")) opts.model = config["model"].get<std::string>();
+        if (config.contains("diffusion_model")) opts.diffusion_model = config["diffusion_model"].get<std::string>();
+        if (config.contains("vae")) opts.vae = config["vae"].get<std::string>();
+        if (config.contains("llm")) opts.llm = config["llm"].get<std::string>();
+        if (config.contains("upscale_model")) opts.upscale_model = config["upscale_model"].get<std::string>();
+        
+        // 生成参数
+        if (config.contains("prompt")) opts.prompt = config["prompt"].get<std::string>();
+        if (config.contains("negative_prompt")) opts.negative_prompt = config["negative_prompt"].get<std::string>();
+        if (config.contains("width")) opts.width = config["width"].get<int>();
+        if (config.contains("height")) opts.height = config["height"].get<int>();
+        if (config.contains("steps")) opts.steps = config["steps"].get<int>();
+        if (config.contains("cfg_scale")) opts.cfg_scale = config["cfg_scale"].get<float>();
+        if (config.contains("sampling_method")) opts.sampling_method = config["sampling_method"].get<std::string>();
+        if (config.contains("scheduler")) opts.scheduler = config["scheduler"].get<std::string>();
+        if (config.contains("seed")) opts.seed = config["seed"].get<int64_t>();
+        if (config.contains("batch_count")) opts.batch_count = config["batch_count"].get<int>();
+        
+        // img2img
+        if (config.contains("init_image")) opts.init_image = config["init_image"].get<std::string>();
+        if (config.contains("strength")) opts.strength = config["strength"].get<float>();
+        if (config.contains("mask_image")) opts.mask_image = config["mask_image"].get<std::string>();
+        
+        // VRAM 优化
+        if (config.contains("diffusion_fa")) opts.diffusion_fa = config["diffusion_fa"].get<bool>();
+        if (config.contains("vae_tiling")) opts.vae_tiling = config["vae_tiling"].get<bool>();
+        if (config.contains("vae_tile_size_w")) opts.vae_tile_size_w = config["vae_tile_size_w"].get<int>();
+        if (config.contains("vae_tile_size_h")) opts.vae_tile_size_h = config["vae_tile_size_h"].get<int>();
+        if (config.contains("vae_tile_overlap")) opts.vae_tile_overlap = config["vae_tile_overlap"].get<float>();
+        
+        // 高级功能
+        if (config.contains("hires")) opts.hires = config["hires"].get<bool>();
+        if (config.contains("hires_width")) opts.hires_width = config["hires_width"].get<int>();
+        if (config.contains("hires_height")) opts.hires_height = config["hires_height"].get<int>();
+        if (config.contains("hires_strength")) opts.hires_strength = config["hires_strength"].get<float>();
+        if (config.contains("hires_steps")) opts.hires_steps = config["hires_steps"].get<int>();
+        
+        if (config.contains("freeu")) opts.freeu = config["freeu"].get<bool>();
+        if (config.contains("freeu_b1")) opts.freeu_b1 = config["freeu_b1"].get<float>();
+        if (config.contains("freeu_b2")) opts.freeu_b2 = config["freeu_b2"].get<float>();
+        if (config.contains("freeu_s1")) opts.freeu_s1 = config["freeu_s1"].get<float>();
+        if (config.contains("freeu_s2")) opts.freeu_s2 = config["freeu_s2"].get<float>();
+        
+        if (config.contains("sag")) opts.sag = config["sag"].get<bool>();
+        if (config.contains("sag_scale")) opts.sag_scale = config["sag_scale"].get<float>();
+        
+        // 输出
+        if (config.contains("output")) opts.output = config["output"].get<std::string>();
+        if (config.contains("batch_output_dir")) opts.batch_output_dir = config["batch_output_dir"].get<std::string>();
+        if (config.contains("jpeg_quality")) opts.jpeg_quality = config["jpeg_quality"].get<int>();
+        
+        LOG_INFO("Loaded config from %s", opts.config_file.c_str());
+        return true;
+        
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to parse config file: %s", e.what());
+        return false;
+    }
+}
+
+
+bool save_config_file(const CliOptions& opts, const std::string& path) {
+    nlohmann::json config;
+    
+    // 模型路径
+    if (!opts.model.empty()) config["model"] = opts.model;
+    if (!opts.diffusion_model.empty()) config["diffusion_model"] = opts.diffusion_model;
+    if (!opts.vae.empty()) config["vae"] = opts.vae;
+    if (!opts.llm.empty()) config["llm"] = opts.llm;
+    if (!opts.upscale_model.empty()) config["upscale_model"] = opts.upscale_model;
+    
+    // 生成参数
+    config["prompt"] = opts.prompt;
+    if (!opts.negative_prompt.empty()) config["negative_prompt"] = opts.negative_prompt;
+    config["width"] = opts.width;
+    config["height"] = opts.height;
+    config["steps"] = opts.steps;
+    config["cfg_scale"] = opts.cfg_scale;
+    config["sampling_method"] = opts.sampling_method;
+    config["scheduler"] = opts.scheduler;
+    config["seed"] = opts.seed;
+    config["batch_count"] = opts.batch_count;
+    
+    // img2img
+    if (!opts.init_image.empty()) config["init_image"] = opts.init_image;
+    if (opts.strength != 0.75f) config["strength"] = opts.strength;
+    if (!opts.mask_image.empty()) config["mask_image"] = opts.mask_image;
+    
+    // VRAM 优化
+    config["diffusion_fa"] = opts.diffusion_fa;
+    config["vae_tiling"] = opts.vae_tiling;
+    if (opts.vae_tile_size_w != 256) config["vae_tile_size_w"] = opts.vae_tile_size_w;
+    if (opts.vae_tile_size_h != 256) config["vae_tile_size_h"] = opts.vae_tile_size_h;
+    if (opts.vae_tile_overlap != 0.8f) config["vae_tile_overlap"] = opts.vae_tile_overlap;
+    
+    // 高级功能
+    if (opts.hires) {
+        config["hires"] = true;
+        config["hires_width"] = opts.hires_width;
+        config["hires_height"] = opts.hires_height;
+        config["hires_strength"] = opts.hires_strength;
+        config["hires_steps"] = opts.hires_steps;
+    }
+    
+    if (opts.freeu) {
+        config["freeu"] = true;
+        config["freeu_b1"] = opts.freeu_b1;
+        config["freeu_b2"] = opts.freeu_b2;
+        config["freeu_s1"] = opts.freeu_s1;
+        config["freeu_s2"] = opts.freeu_s2;
+    }
+    
+    if (opts.sag) {
+        config["sag"] = true;
+        config["sag_scale"] = opts.sag_scale;
+    }
+    
+    // 输出
+    if (!opts.output.empty()) config["output"] = opts.output;
+    if (!opts.batch_output_dir.empty()) config["batch_output_dir"] = opts.batch_output_dir;
+    if (opts.jpeg_quality != 95) config["jpeg_quality"] = opts.jpeg_quality;
+    
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        LOG_ERROR("Failed to write config file: %s", path.c_str());
+        return false;
+    }
+    
+    file << config.dump(2);
+    LOG_INFO("Saved config to %s", path.c_str());
+    return true;
+}
+
 } // namespace myimg
