@@ -113,7 +113,16 @@ if [[ "$PROMPT" != *"masterpiece"* ]]; then
 fi
 ```
 
-**默认负面提示词** (`img2.sh:115`):
+**SAG 参数** (`img2.sh:357-358`):
+
+```bash
+--sag                      # 启用 Self-Attention Guidance
+--sag-scale 1.0            # SAG 强度
+```
+
+> 注：SAG 在 20GB 显存模式下默认启用，可通过环境变量控制。
+
+**默认负面提示词** (`img2.sh:233`):
 
 ```bash
 NEGATIVE_PROMPT="blurry, low quality, worst quality, jpeg artifacts, noise, grain, soft focus, out of focus, hazy, unclear, bad anatomy, deformed, border artifacts, edge distortion, tiling artifacts, edge artifacts, frame distortion, warped edges, stretched proportions, asymmetrical face, off-center, cropped, out of frame, partial face, cut off, incomplete head, cropped head, watermark, text, logo, signature, cropped shoulders, embedding:EasyNegative, embedding:bad-hands-5"
@@ -130,11 +139,12 @@ RTX 4090D 24GB 显存允许使用**更高的基础分辨率**，从而减少 lat
 | 目标分辨率 | 基础分辨率 | 放大倍数 | latent 尺寸变化 | 适用显存 |
 |-----------|-----------|---------|----------------|---------|
 | 3840×2160 | 2560×1440 | **1.5x** | 320×180 → 480×270 | 24GB |
-| 2560×1440 | 2048×1152 | **1.25x** | 256×144 → 320×180 | 24GB |
-| 1920×1080 | 1536×864  | **1.25x** | 192×108 → 240×135 | 24GB |
-| 1280×720  | 1024×576  | **1.25x** | 128×72 → 160×90  | 24GB |
+| 2560×1440 | 1920×1080 | **1.33x** | 240×135 → 320×180 | 20GB+ |
+| 1920×1080 | 1536×864  | **1.25x** | 192×108 → 240×135 | 20GB+ |
+| 1280×720  | 1024×576  | **1.25x** | 128×72 → 160×90  | 20GB+ |
 
 > 对比 RTX 3080 10GB：基础分辨率仅 1280×720，放大 2x，latent 插值损失大得多。
+> 4090D 24GB 可使用更高基础分辨率（如 2048×1152），通过环境变量覆盖。
 
 ### 3.2 分辨率计算代码
 
@@ -144,9 +154,9 @@ if [ "$WIDTH" -eq 3840 ] && [ "$HEIGHT" -eq 2160 ]; then
     LOW_W=2560
     LOW_H=1440
 elif [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
-    # 2K: 2048x1152 基础 → 1.25x 放大（画质最佳）
-    LOW_W=2048
-    LOW_H=1152
+    # 2K: 1920x1080 基础 → 1.33x 放大（20G显存安全方案）
+    LOW_W=1920
+    LOW_H=1080
 elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
     # 1080p: 1536x864 基础 → 1.25x 放大
     LOW_W=1536
@@ -168,9 +178,18 @@ else
     LOW_H=$((LOW_LATENT_H * 8))
 fi
 
-# 最小限制保护
+# 保持比例的最小限制：只在单边小于512时按比例放大
 if [ "$LOW_W" -lt 512 ] || [ "$LOW_H" -lt 512 ]; then
-    # 按比例放大至最小 512
+    TARGET_RATIO=$(echo "scale=6; $WIDTH / $HEIGHT" | bc)
+    if [ "$LOW_W" -lt "$LOW_H" ]; then
+        LOW_W=512
+        LOW_H=$(echo "scale=0; $LOW_W / $TARGET_RATIO / 8 * 8" | bc)
+        if [ "$LOW_H" -lt 512 ]; then LOW_H=512; fi
+    else
+        LOW_H=512
+        LOW_W=$(echo "scale=0; $LOW_H * $TARGET_RATIO / 8 * 8" | bc)
+        if [ "$LOW_W" -lt 512 ]; then LOW_W=512; fi
+    fi
 fi
 ```
 
@@ -203,8 +222,8 @@ SD_CMD=("$SD_CLI"
   --scheduler "$SCHEDULER"
   --diffusion-fa              # Flash Attention
   --vae-tiling                # VAE Tiling
-  --vae-tile-size 256x256
-  --vae-tile-overlap 0.8
+  --vae-tile-size 128x128     # 20GB 安全模式（可覆盖为 256x256）
+  --vae-tile-overlap 0.3
   --freeu                     # FreeU 增强
   --sag                       # Self-Attention Guidance
   --sag-scale 1.0
@@ -592,10 +611,10 @@ bool Image::save_to_file(const std::string& path) const {
 | 阶段 | 时间 | 分辨率 | VRAM |
 |------|------|--------|------|
 | 文本编码 | 0.32s | - | 8.56 MB |
-| 第一阶段采样 (25 steps) | **75.17s** | 2048×1152 | 1553.65 MB |
-| HiRes latent 放大 | 0.30s | 256×144 → 320×180 | - |
-| 第二阶段采样 (55 steps) | **328.12s** | 2560×1440 | 3007.88 MB |
-| VAE 解码 (2 tiles) | **2.90s** | 2560×1440 | 18722.81 MB |
+| 第一阶段采样 (25 steps) | **75.17s** | 1920×1080 | ~1300 MB |
+| HiRes latent 放大 | 0.30s | 240×135 → 320×180 | - |
+| 第二阶段采样 (55 steps) | **328.12s** | 2560×1440 | ~2500 MB |
+| VAE 解码 (8 tiles, 128x128) | **3.4s** | 2560×1440 | ~6657 MB |
 | 生成总计 | **~407s** | - | - |
 
 ### 8.3 后处理阶段
@@ -631,14 +650,15 @@ Total             10606.89     100.0%
 ```
 Phase                    VRAM (MB)    Total (MB)
 ─────────────────────────────────────────────────
-Model Loading           10606.89      10606.89
-Phase 1 Sampling         1553.65      12160.54
-HiRes Sampling           3007.88      13614.77
-VAE Decoding            18722.81      29329.70  ← 峰值
+Model Loading            8980.00       8980.00
+Phase 1 Sampling         1300.00      10280.00
+HiRes Sampling           2500.00      11480.00
+VAE Decoding (128x128)   6657.00      18137.00  ← 峰值
 ─────────────────────────────────────────────────
 ```
 
-> 注：VAE 解码时峰值约 29GB，但 RTX 4090D 24GB 实际通过 tiling 分块处理避免 OOM。
+> 注：使用 128×128 VAE tiling 时峰值约 18GB，RTX 4090D 24GB 安全余量 5.8GB。
+> 若使用 256×256 tiling，峰值约 21GB，24GB 显卡仍可安全运行。
 
 ---
 
@@ -665,16 +685,17 @@ VAE Decoding            18722.81      29329.70  ← 峰值
 
 | 维度 | img1.sh (RTX 3080 10GB) | img2.sh (RTX 4090D 24GB) |
 |------|------------------------|--------------------------|
-| **基础分辨率** | 1280×720 | 2048×1152 |
-| **放大倍数** | 2x | 1.25x |
+| **基础分辨率** | 1280×720 | 1920×1080 |
+| **放大倍数** | 2x | 1.33x |
 | **HiRes Steps** | 45 | 55 |
 | **显存策略** | VAE Tiling + Flash Attention + CPU offload | Flash Attention + VAE Tiling |
+| **SAG** | 关闭 | 启用 |
 | **画质** | 良好（latent 损失较大） | 优秀（latent 损失极小） |
 | **生成时间** | ~11 分钟 | ~6.8 分钟 |
-| **VRAM 峰值** | ~9.5 GB | ~14.5 GB (有效) |
+| **VRAM 峰值** | ~9.5 GB | ~18.1 GB (128x128 tiling) |
 
 ---
 
-**文档生成时间**: 2026-05-31  
-**对应代码版本**: my-img main branch  
-**sd.cpp 版本**: leejet/stable-diffusion.cpp (upstream master)
+**文档生成时间**: 2026-06-01  
+**对应代码版本**: my-img main (commit fdd7a44)  
+**sd.cpp 版本**: leejet/stable-diffusion.cpp (upstream be65ac7 + FreeU/SAG patch)

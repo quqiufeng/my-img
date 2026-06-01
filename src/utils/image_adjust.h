@@ -133,6 +133,12 @@ torch::Tensor graduated_filter(const torch::Tensor& image, float angle, float po
 // radius: 1-5 (blur radius for edge detection)
 torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int radius = 2);
 
+// Edge sharpen: apply sharpening only to edge regions
+// amount: 0.0-3.0 (sharpening strength)
+// radius: 1-5 (edge detection radius)
+// threshold: 0.0-1.0 (edge detection threshold)
+torch::Tensor edge_sharpen(const torch::Tensor& image, float amount, int radius = 2, float threshold = 0.3f);
+
 // Skin tone matching: adjust skin tones towards warm/cool/neutral
 // mode: "warm", "cool", "neutral"
 // strength: 0.0-1.0 (0 = no change, 1 = full effect)

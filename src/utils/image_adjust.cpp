@@ -1033,6 +1033,65 @@ torch::Tensor smart_sharpen(const torch::Tensor& image, float strength, int /*ra
     return result.clamp(0, 1);
 }
 
+// Edge sharpen: apply sharpening only to edge regions
+// amount: 0.0-3.0 (sharpening strength)
+// radius: 1-5 (edge detection radius)
+// threshold: 0.0-1.0 (edge detection threshold)
+torch::Tensor edge_sharpen(const torch::Tensor& image, float amount, int radius, float threshold) {
+    if (amount <= 0.0f) return image.clone();
+    
+    auto img = image.clone();
+    auto device = img.device();
+    int r = std::max(1, std::min(radius, 5));
+    
+    // Sobel edge detection
+    auto sobel_x = torch::tensor({{{-1.0f, 0.0f, 1.0f}, {-2.0f, 0.0f, 2.0f}, {-1.0f, 0.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    auto sobel_y = torch::tensor({{{-1.0f, -2.0f, -1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 2.0f, 1.0f}}},
+                                 torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    sobel_x = sobel_x.unsqueeze(0).contiguous();
+    sobel_y = sobel_y.unsqueeze(0).contiguous();
+    
+    // Convert to grayscale for edge detection
+    auto gray = img.mean(0, true);
+    auto grad_x = torch::conv2d(gray.unsqueeze(0), sobel_x, {}, 1, 1);
+    auto grad_y = torch::conv2d(gray.unsqueeze(0), sobel_y, {}, 1, 1);
+    auto edge_magnitude = (grad_x.squeeze().pow(2) + grad_y.squeeze().pow(2)).sqrt();
+    
+    // Threshold-based edge mask
+    auto edge_max = edge_magnitude.max();
+    auto normalized = edge_magnitude / (edge_max + 1e-6);
+    auto edge_mask = (normalized > threshold).to(torch::kFloat32) * normalized;
+    
+    // Unsharp mask kernel
+    int kernel_size = 2 * r + 1;
+    auto kernel = torch::zeros({1, 1, kernel_size, kernel_size}, torch::TensorOptions().dtype(torch::kFloat32)).to(device);
+    kernel[0][0][r][r] = 2.0f;
+    float weight = -1.0f / (kernel_size * kernel_size - 1);
+    for (int i = 0; i < kernel_size; ++i) {
+        for (int j = 0; j < kernel_size; ++j) {
+            if (i != r || j != r) {
+                kernel[0][0][i][j] = weight;
+            }
+        }
+    }
+    
+    // Apply sharpening to each channel
+    auto sharpened = torch::zeros_like(img);
+    for (int c = 0; c < img.size(0); ++c) {
+        auto ch = img[c].unsqueeze(0).unsqueeze(0);
+        auto sharp_ch = torch::conv2d(ch, kernel, {}, 1, r);
+        sharpened[c] = sharp_ch.squeeze(0).squeeze(0);
+    }
+    
+    // Blend: only sharpen edges
+    float blend = std::min(amount / 3.0f, 1.0f);
+    auto mask = edge_mask.unsqueeze(0);
+    auto result = img * (1.0f - blend * mask) + sharpened * blend * mask;
+    
+    return result.clamp(0, 1);
+}
+
 // Luminance noise reduction: simple box blur on luminance channel
 // strength: 0.0-1.0
 torch::Tensor luminance_denoise(const torch::Tensor& image, float strength) {

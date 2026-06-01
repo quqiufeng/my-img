@@ -59,6 +59,12 @@ ImageData apply_photo_adjustments(ImageData img_data, const CliOptions& opts) {
         if (opts.sharpen_amount > 0.0f) {
             tensor = myimg::usm_sharpen(tensor, opts.sharpen_amount, opts.sharpen_radius, opts.sharpen_threshold);
         }
+        if (opts.smart_sharpen_strength > 0.0f) {
+            tensor = myimg::smart_sharpen(tensor, opts.smart_sharpen_strength, opts.smart_sharpen_radius);
+        }
+        if (opts.edge_sharpen_amount > 0.0f) {
+            tensor = myimg::edge_sharpen(tensor, opts.edge_sharpen_amount, opts.edge_sharpen_radius, opts.edge_sharpen_threshold);
+        }
         
         if (!opts.curves.empty()) {
             tensor = myimg::apply_curves(tensor, opts.curves);
