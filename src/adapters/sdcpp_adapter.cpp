@@ -51,6 +51,9 @@ static sample_method_t convert_sample_method(SampleMethod method) {
         case SampleMethod::RES_Multistep: return RES_MULTISTEP_SAMPLE_METHOD;
         case SampleMethod::RES_2S: return RES_2S_SAMPLE_METHOD;
         case SampleMethod::ER_SDE: return ER_SDE_SAMPLE_METHOD;
+        case SampleMethod::EulerCfgPP: return EULER_CFG_PP_SAMPLE_METHOD;
+        case SampleMethod::EulerACfgPP: return EULER_A_CFG_PP_SAMPLE_METHOD;
+        case SampleMethod::EulerGE: return EULER_GE_SAMPLE_METHOD;
         default: return EULER_SAMPLE_METHOD;
     }
 }
@@ -68,6 +71,7 @@ static scheduler_t convert_scheduler(Scheduler scheduler) {
         case Scheduler::KL_Optimal: return KL_OPTIMAL_SCHEDULER;
         case Scheduler::LCM: return LCM_SCHEDULER;
         case Scheduler::Bong_Tangent: return BONG_TANGENT_SCHEDULER;
+        case Scheduler::LTX2: return LTX2_SCHEDULER;
         default: return SIMPLE_SCHEDULER;
     }
 }
@@ -86,6 +90,7 @@ static sd_type_t convert_wtype(const std::string& wtype) {
     if (wtype == "q5_k" || wtype == "Q5_K") return SD_TYPE_Q5_K;
     if (wtype == "q6_k" || wtype == "Q6_K") return SD_TYPE_Q6_K;
     if (wtype == "q8_k" || wtype == "Q8_K") return SD_TYPE_Q8_K;
+    if (wtype == "q1_0" || wtype == "Q1_0") return SD_TYPE_Q1_0;
     return SD_TYPE_COUNT;  // 使用模型默认类型
 }
 
@@ -168,6 +173,8 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.t5xxl_path = params.t5xxl_path.empty() ? nullptr : params.t5xxl_path.c_str();
     sd_params.llm_path = params.llm_path.empty() ? nullptr : params.llm_path.c_str();
     sd_params.control_net_path = params.control_net_path.empty() ? nullptr : params.control_net_path.c_str();
+    sd_params.audio_vae_path = params.audio_vae_path.empty() ? nullptr : params.audio_vae_path.c_str();
+    sd_params.embeddings_connectors_path = params.embeddings_connectors_path.empty() ? nullptr : params.embeddings_connectors_path.c_str();
     
     // 系统设置
     sd_params.n_threads = params.n_threads > 0 ? params.n_threads : sd_get_num_physical_cores();
@@ -176,8 +183,10 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.flash_attn = params.flash_attn;
     sd_params.diffusion_flash_attn = params.flash_attn;
 
-    // 显存管理: 根据分辨率自动启用 CPU offloading
-    // stable-diffusion.cpp 当前版本不支持 max_vram，改用 keep_*_on_cpu 替代
+    // 显存管理: 上游支持 max_vram (GiB, 0=禁用, -1=自动)
+    sd_params.max_vram = params.max_vram;
+
+    // 根据分辨率自动启用 CPU offloading
     int64_t pixel_count = static_cast<int64_t>(params.width) * params.height;
     bool auto_vae_cpu = false;
     bool auto_clip_cpu = false;
@@ -198,6 +207,21 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     if (!params.wtype.empty() && params.wtype != "default") {
         sd_params.wtype = convert_wtype(params.wtype);
     }
+
+    // VAE 格式
+    if (params.vae_format == "flux") {
+        sd_params.vae_format = SD_VAE_FORMAT_FLUX;
+    } else if (params.vae_format == "sd3") {
+        sd_params.vae_format = SD_VAE_FORMAT_SD3;
+    } else if (params.vae_format == "flux2") {
+        sd_params.vae_format = SD_VAE_FORMAT_FLUX2;
+    } else {
+        sd_params.vae_format = SD_VAE_FORMAT_AUTO;
+    }
+
+    // 后端选择
+    sd_params.backend = params.backend.empty() ? nullptr : params.backend.c_str();
+    sd_params.params_backend = params.params_backend.empty() ? nullptr : params.params_backend.c_str();
 
     // VAE 设置
     sd_params.vae_decode_only = false;
@@ -341,6 +365,9 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
         }
     }
     
+    // 采样器额外参数
+    gen_params.sample_params.extra_sample_args = params.extra_sample_args.empty() ? nullptr : params.extra_sample_args.c_str();
+
     // FreeU
     gen_params.freeu.enabled = params.freeu_enabled;
     if (params.freeu_enabled) {
@@ -348,7 +375,7 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
         gen_params.freeu.b2 = params.freeu_b2;
         gen_params.freeu.s1 = params.freeu_s1;
         gen_params.freeu.s2 = params.freeu_s2;
-        std::cout << "  FreeU: enabled (b1=" << params.freeu_b1 << ", b2=" << params.freeu_b2 
+        std::cout << "  FreeU: enabled (b1=" << params.freeu_b1 << ", b2=" << params.freeu_b2
                   << ", s1=" << params.freeu_s1 << ", s2=" << params.freeu_s2 << ")" << std::endl;
     }
 
@@ -361,12 +388,17 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
 
     // VAE Tiling
     gen_params.vae_tiling_params.enabled = params.vae_tiling;
+    gen_params.vae_tiling_params.temporal_tiling = params.vae_temporal_tiling;
+    gen_params.vae_tiling_params.extra_tiling_args = params.extra_tiling_args.empty() ? nullptr : params.extra_tiling_args.c_str();
     if (params.vae_tiling) {
         gen_params.vae_tiling_params.tile_size_x = params.vae_tile_size_x;
         gen_params.vae_tiling_params.tile_size_y = params.vae_tile_size_y;
         gen_params.vae_tiling_params.target_overlap = params.vae_tile_overlap;
-        std::cout << "  VAE Tiling: " << params.vae_tile_size_x << "x" << params.vae_tile_size_y 
+        std::cout << "  VAE Tiling: " << params.vae_tile_size_x << "x" << params.vae_tile_size_y
                   << " (overlap: " << params.vae_tile_overlap << ")" << std::endl;
+        if (params.vae_temporal_tiling) {
+            std::cout << "  VAE Temporal Tiling: enabled" << std::endl;
+        }
     }
     
     std::cout << "[SDCPPAdapter] Generating image..." << std::endl;
@@ -631,7 +663,7 @@ Image SDCPPAdapter::upscale_with_esrgan(const Image& image, const std::string& m
         return Image();
     }
     
-    upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(model_path.c_str(), false, false, -1, tile_size);
+    upscaler_ctx_t* upscaler_ctx = new_upscaler_ctx(model_path.c_str(), false, false, -1, tile_size, nullptr, nullptr);
     if (!upscaler_ctx) {
         LOG_ERROR("Failed to load upscaler model: %s", model_path.c_str());
         return Image();

@@ -1,0 +1,1 @@
+39e2795 chore(vae): cap tile size to prevent OOM on consumer GPUs

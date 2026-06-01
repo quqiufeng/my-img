@@ -43,6 +43,9 @@ enum class SampleMethod {
     RES_Multistep,
     RES_2S,
     ER_SDE,
+    EulerCfgPP,
+    EulerACfgPP,
+    EulerGE,
 };
 
 // 调度器
@@ -58,6 +61,7 @@ enum class Scheduler {
     KL_Optimal,
     LCM,
     Bong_Tangent,
+    LTX2,
 };
 
 // 预测类型
@@ -159,22 +163,44 @@ struct GenerationParams {
     bool enable_mmap = true;
     bool flash_attn = false;
     
-    // FreeU 参数
+    // 类型设置
+    std::string wtype = "default";  // 权重类型: "f32", "f16", "q4_0", "q5_k", etc.
+
+    // 显存限制（GB, 0 = 禁用, -1 = 自动）
+    float max_vram = 0.0f;
+
+    // VAE 格式 (auto, flux, sd3, flux2)
+    std::string vae_format = "auto";
+
+    // 后端选择 (nullptr = 默认)
+    std::string backend;
+    std::string params_backend;
+
+    // 音频 VAE 路径 (视频生成用)
+    std::string audio_vae_path;
+
+    // Embeddings connectors 路径
+    std::string embeddings_connectors_path;
+
+    // 采样器额外参数
+    std::string extra_sample_args;
+
+    // VAE 时间 tiling (视频生成用)
+    bool vae_temporal_tiling = false;
+
+    // VAE tiling 额外参数
+    std::string extra_tiling_args;
+
+    // FreeU 参数 (当前上游版本暂不支持，保留字段用于向后兼容)
     bool freeu_enabled = false;
     float freeu_b1 = 1.3f;
     float freeu_b2 = 1.4f;
     float freeu_s1 = 0.9f;
     float freeu_s2 = 0.2f;
 
-    // SAG 参数
+    // SAG 参数 (当前上游版本暂不支持，保留字段用于向后兼容)
     bool sag_enabled = false;
     float sag_scale = 1.0f;
-
-    // 类型设置
-    std::string wtype = "default";  // 权重类型: "f32", "f16", "q4_0", "q5_k", etc.
-    
-    // 显存限制（GB, 0 = 不限制）
-    float max_vram = 0.0f;
 };
 
 // sd_image_t 的 RAII 封装（避免裸 malloc/free）

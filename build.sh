@@ -7,7 +7,7 @@
 #
 # 问题 1: 权限 denied
 #   现象: /opt/stable-diffusion.cpp/build 为 root 所有，当前用户无法写入
-#   修复: sudo chown -R $(whoami):$(whoami) /opt/stable-diffusion.cpp/build
+#   修复: sudo chown -R $(whoami):$(whoami) /opt/stable-diffusion.cpp
 #
 # 问题 2: CUDA 非标准路径 (/data/cuda)
 #   现象: libtorch CMake 找不到 CUDA，报 "Cannot find the CUDA libraries"
@@ -30,7 +30,7 @@
 #
 # 问题 5: stable-diffusion.cpp API 不兼容
 #   现象: "sd_ctx_params_t has no member named max_vram"
-#   修复: 注释掉 src/adapters/sdcpp_adapter.cpp:178 的 sd_params.max_vram 赋值
+#   修复: 确保 sd.cpp 已升级到支持该字段的版本
 #
 # 问题 6: OpenCV 缺失
 #   现象: "opencv2/imgproc.hpp: No such file or directory"
@@ -39,9 +39,7 @@
 # 问题 7: LTO 版本不匹配
 #   现象: "bytecode stream generated with LTO version 12.0 instead of 13.1"
 #   原因: stable-diffusion.cpp 用 gcc-12 编译，但 my-img 链接时用了 g++-13
-#   修复: cmake 时统一指定编译器
-#     -DCMAKE_C_COMPILER=/usr/bin/gcc-12
-#     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12
+#   修复: 统一通过环境变量 export CC/CXX，而不是仅在 cmake 中指定
 #
 # 环境要求:
 #   - CUDA: /data/cuda (需符号链接到 /usr/local/cuda)
@@ -70,19 +68,56 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 JOBS="${JOBS:-$(nproc)}"
 
+# 编译器设置（统一使用 GCC-12，避免版本混用）
+export CC=/usr/bin/gcc-12
+export CXX=/usr/bin/g++-12
+
+# CUDA 设置
+export CUDA_HOME=/data/cuda
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}  my-img 构建脚本${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# 检查 GPU
+# 检查编译器
+echo -e "${CYAN}编译器:${NC}"
+echo "  CC:  $CC ($($CC --version | head -1))"
+echo "  CXX: $CXX ($($CXX --version | head -1))"
+echo ""
+
+# 检查 GPU 和 CUDA
 if command -v nvidia-smi &> /dev/null; then
     GPU_INFO=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+    GPU_CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.')
     echo -e "${GREEN}✓ 检测到 GPU: ${GPU_INFO}${NC}"
+    echo "  Compute Capability: ${GPU_CC}"
     USE_CUDA=ON
+    
+    # 检测 CUDA 版本
+    if [ -f "$CUDA_HOME/bin/nvcc" ]; then
+        CUDA_VERSION=$($CUDA_HOME/bin/nvcc --version | grep "release" | awk '{print $5}' | cut -d',' -f1)
+        echo "  CUDA 版本: ${CUDA_VERSION}"
+    fi
+    
+    # 根据 GPU 设置架构
+    case $GPU_CC in
+        86)  CUDA_ARCH=86 ;;
+        89)  CUDA_ARCH=89 ;;
+        75)  CUDA_ARCH=75 ;;
+        80)  CUDA_ARCH=80 ;;
+        90)  CUDA_ARCH=90 ;;
+        120) CUDA_ARCH=120 ;;
+        12)  CUDA_ARCH=120 ;;
+        *)   CUDA_ARCH=86 ;;
+    esac
+    echo "  CUDA_ARCH: ${CUDA_ARCH}"
 else
     echo -e "${YELLOW}⚠ 未检测到 GPU，将使用 CPU 模式${NC}"
     USE_CUDA=OFF
+    CUDA_ARCH=""
 fi
 
 echo ""
@@ -103,14 +138,38 @@ if [ ! -d "${SD_DIR}" ]; then
     exit 1
 fi
 
-mkdir -p "${SD_BUILD_DIR}"
-cd "${SD_BUILD_DIR}"
+# 确保子模块完整
+if [ ! -f "${SD_DIR}/ggml/CMakeLists.txt" ]; then
+    echo -e "${YELLOW}⚠ 子模块缺失，正在更新...${NC}"
+    cd "${SD_DIR}"
+    git submodule update --init --recursive
+fi
 
-cmake .. \
-    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
-    -DSD_CUDA=${USE_CUDA} \
-    -DGGML_CUDA=${USE_CUDA}
+# 清理并创建 build 目录
+cd "${SD_DIR}"
+rm -rf "${SD_BUILD_DIR}"
+mkdir -p "${SD_BUILD_DIR}" && cd "${SD_BUILD_DIR}"
 
+# CMake 配置
+CMAKE_FLAGS=(
+    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
+    -DSD_CUDA="${USE_CUDA}"
+    -DGGML_CUDA="${USE_CUDA}"
+)
+
+if [ "$USE_CUDA" = "ON" ]; then
+    CMAKE_FLAGS+=(
+        -DSD_FLASH_ATTN=ON
+        -DSD_FAST_SOFTMAX=ON
+        -DGGML_NATIVE=OFF
+        -DGGML_LTO=ON
+        -DGGML_CUDA_FA_ALL_QUANTS=ON
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}"
+        -DCMAKE_CUDA_COMPILER="${CUDA_HOME}/bin/nvcc"
+    )
+fi
+
+cmake .. "${CMAKE_FLAGS[@]}"
 make -j${JOBS} stable-diffusion
 
 echo -e "${GREEN}✓ stable-diffusion.cpp 编译完成${NC}"
@@ -122,11 +181,10 @@ echo ""
 echo -e "${BLUE}[2/3] 编译 my-img...${NC}"
 
 cd "${SCRIPT_DIR}"
-mkdir -p "${BUILD_DIR}"
-cd "${BUILD_DIR}"
+mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"
 
 cmake .. \
-    -DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
 
 make -j${JOBS} myimg-cli
 

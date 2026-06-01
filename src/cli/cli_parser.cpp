@@ -63,15 +63,15 @@ void print_usage(const char* argv0) {
     std::cout << "  --hires-scale FLOAT       HiRes scale factor (default: 2.0)\n";
     std::cout << "  --hires-model PATH        External upscaler model path (for model upscaler)\n";
     std::cout << "  --hires-tile-size INT     HiRes upscale tile size (default: 128)\n";
-    std::cout << "\nFreeU Options:\n";
-    std::cout << "  --freeu                   Enable FreeU (boost details and quality)\n";
-    std::cout << "  --freeu-b1 FLOAT          FreeU backbone scale 1 (default: 1.3)\n";
-    std::cout << "  --freeu-b2 FLOAT          FreeU backbone scale 2 (default: 1.4)\n";
-    std::cout << "  --freeu-s1 FLOAT          FreeU skip scale 1 (default: 0.9)\n";
-    std::cout << "  --freeu-s2 FLOAT          FreeU skip scale 2 (default: 0.2)\n";
-    std::cout << "\nSAG Options:\n";
-    std::cout << "  --sag                     Enable Self-Attention Guidance (improves coherence)\n";
-    std::cout << "  --sag-scale FLOAT         SAG scale (default: 1.0)\n";
+    std::cout << "\nAdvanced Options:\n";
+    std::cout << "  --vae-format FORMAT       VAE format: auto, flux, sd3, flux2 (default: auto)\n";
+    std::cout << "  --backend SPEC            Backend spec (e.g. cuda:0)\n";
+    std::cout << "  --params-backend SPEC     Params backend spec\n";
+    std::cout << "  --audio-vae PATH          Audio VAE path (for video generation)\n";
+    std::cout << "  --embeddings-connectors PATH  Embeddings connectors path\n";
+    std::cout << "  --extra-sample-args ARGS  Extra sampler arguments\n";
+    std::cout << "  --vae-temporal-tiling     Enable VAE temporal tiling (for video)\n";
+    std::cout << "  --extra-tiling-args ARGS  Extra VAE tiling arguments\n";
     std::cout << "\nUpscale Options:\n";
     std::cout << "  --upscale-repeats INT     ESRGAN upscale repeats (default: 1)\n";
     std::cout << "  --upscale-tile-size INT   ESRGAN tile size (default: 1440)\n";
@@ -483,13 +483,14 @@ bool load_preset(CliOptions& opts, const std::string& preset_path) {
     get_float("hires_scale", opts.hires_scale);
     get_string("hires_model_path", opts.hires_model_path);
     get_int("hires_tile_size", opts.hires_tile_size);
-    get_bool("freeu", opts.freeu);
-    get_float("freeu_b1", opts.freeu_b1);
-    get_float("freeu_b2", opts.freeu_b2);
-    get_float("freeu_s1", opts.freeu_s1);
-    get_float("freeu_s2", opts.freeu_s2);
-    get_bool("sag", opts.sag);
-    get_float("sag_scale", opts.sag_scale);
+    get_string("vae_format", opts.vae_format);
+    get_string("backend", opts.backend);
+    get_string("params_backend", opts.params_backend);
+    get_string("audio_vae_path", opts.audio_vae_path);
+    get_string("embeddings_connectors_path", opts.embeddings_connectors_path);
+    get_string("extra_sample_args", opts.extra_sample_args);
+    get_bool("vae_temporal_tiling", opts.vae_temporal_tiling);
+    get_string("extra_tiling_args", opts.extra_tiling_args);
     get_bool("embed_metadata", opts.embed_metadata);
     get_string("output", opts.output);
     get_string("init_image", opts.init_image);
@@ -654,25 +655,29 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--hires-tile-size") {
             if (++i >= argc) { LOG_ERROR("Missing value for --hires-tile-size"); return false; }
             if (!safe_convert(argv[i], opts.hires_tile_size, "--hires-tile-size")) return false;
-        } else if (arg == "--freeu") {
-            opts.freeu = true;
-        } else if (arg == "--freeu-b1") {
-            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-b1"); return false; }
-            if (!safe_convert(argv[i], opts.freeu_b1, "--freeu-b1")) return false;
-        } else if (arg == "--freeu-b2") {
-            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-b2"); return false; }
-            if (!safe_convert(argv[i], opts.freeu_b2, "--freeu-b2")) return false;
-        } else if (arg == "--freeu-s1") {
-            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-s1"); return false; }
-            if (!safe_convert(argv[i], opts.freeu_s1, "--freeu-s1")) return false;
-        } else if (arg == "--freeu-s2") {
-            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-s2"); return false; }
-            if (!safe_convert(argv[i], opts.freeu_s2, "--freeu-s2")) return false;
-        } else if (arg == "--sag") {
-            opts.sag = true;
-        } else if (arg == "--sag-scale") {
-            if (++i >= argc) { LOG_ERROR("Missing value for --sag-scale"); return false; }
-            if (!safe_convert(argv[i], opts.sag_scale, "--sag-scale")) return false;
+        } else if (arg == "--vae-format") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --vae-format"); return false; }
+            opts.vae_format = argv[i];
+        } else if (arg == "--backend") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --backend"); return false; }
+            opts.backend = argv[i];
+        } else if (arg == "--params-backend") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --params-backend"); return false; }
+            opts.params_backend = argv[i];
+        } else if (arg == "--audio-vae") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --audio-vae"); return false; }
+            opts.audio_vae_path = argv[i];
+        } else if (arg == "--embeddings-connectors") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --embeddings-connectors"); return false; }
+            opts.embeddings_connectors_path = argv[i];
+        } else if (arg == "--extra-sample-args") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --extra-sample-args"); return false; }
+            opts.extra_sample_args = argv[i];
+        } else if (arg == "--vae-temporal-tiling") {
+            opts.vae_temporal_tiling = true;
+        } else if (arg == "--extra-tiling-args") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --extra-tiling-args"); return false; }
+            opts.extra_tiling_args = argv[i];
         } else if (arg == "--upscale-repeats") {
             if (++i >= argc) { LOG_ERROR("Missing value for --upscale-repeats"); return false; }
             if (!safe_convert(argv[i], opts.upscale_repeats, "--upscale-repeats")) return false;

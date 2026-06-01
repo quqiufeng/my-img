@@ -57,30 +57,48 @@ ls -ld /opt/stable-diffusion.cpp  # 必须是当前用户可写
 sudo chown -R $(whoami):$(whoami) /opt/stable-diffusion.cpp
 ```
 
-### 2.2 一键集成
+### 2.2 一键集成（推荐方式）
+
+项目提供 `build.sh` 脚本，自动完成 sd.cpp 和 my-img 的完整编译：
 
 ```bash
-# 1. Clone sd.cpp
-mkdir -p /opt
-git clone --recursive https://github.com/leejet/stable-diffusion.cpp.git \
-    /opt/stable-diffusion.cpp
+# 方式一：直接使用脚本（自动检测 GPU、设置编译器）
+./build.sh
 
-# 2. 编译静态库
+# 方式二：指定构建类型
+BUILD_TYPE=Debug ./build.sh
+
+# 方式三：指定并行任务数
+JOBS=8 ./build.sh
+```
+
+**脚本执行流程：**
+1. 自动检测 GPU（`nvidia-smi`）
+2. 编译 `/opt/stable-diffusion.cpp` 静态库（含 CUDA 后端）
+3. 编译 `myimg-cli` 可执行文件
+4. 编译核心测试（`test_gguf_loader`, `test_vae`, `test_sdcpp_adapter`）
+
+**脚本特性：**
+- 自动处理 `stable-diffusion.cpp` 和 `my-img` 的依赖顺序
+- 自动设置 `-DCMAKE_C_COMPILER=/usr/bin/gcc-12` 和 `-DCMAKE_CXX_COMPILER=/usr/bin/g++-12`（避免 GCC 版本混用导致的 LTO 错误）
+- 脚本头部包含详细的踩坑记录（权限、CUDA 路径、第三方库等）
+
+### 2.2a 手动编译（供参考）
+
+如需手动控制编译过程：
+
+```bash
+# 1. 编译 sd.cpp 静态库
 cd /opt/stable-diffusion.cpp
-mkdir build && cd build
+mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DSD_CUDA=ON -DGGML_CUDA=ON
 make -j$(nproc) stable-diffusion
 
-# 3. 编译 my-img
+# 2. 编译 my-img
 cd /path/to/my-img
-mkdir build && cd build
+mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc) myimg-cli
-```
-
-或使用项目脚本：
-```bash
-./build.sh
 ```
 
 ### 2.3 CMake 关键配置
@@ -149,6 +167,15 @@ make -j$(nproc) stable-diffusion
 
 ### 3.2 编译 my-img 并修复
 
+**推荐方式：使用 build.sh 一键编译**
+
+```bash
+# 升级后只需执行脚本，自动重新编译 sd.cpp + my-img
+./build.sh
+```
+
+**手动编译（如需单独调试）：**
+
 ```bash
 cd /path/to/my-img/build
 cmake ..
@@ -158,6 +185,7 @@ make -j$(nproc) myimg-cli
 # 1. 适配器错误 → 修改 src/adapters/sdcpp_adapter.cpp
 # 2. -Werror 错误 → 修复 unused variable/parameter
 # 3. 链接错误 → 检查库路径和顺序
+# 4. 本地功能不生效 → 检查 sd.cpp 内部实现是否被覆盖（见 Q6）
 ```
 
 ### 3.3 功能验证
@@ -175,41 +203,78 @@ make -j$(nproc) myimg-cli
 
 ---
 
-## 4. 本次升级实战经验（2026-05-09）
+## 4. 升级实战经验
 
-这次升级上游 leejet 仓库新增了 3 个 commit，整个过程耗时约 15 分钟。但最有趣的并不是升级本身有多快，而是它暴露了三个我们在日常开发中容易忽视的问题。
-
-### 4.1 故事的开始：权限这个"隐形守门员"
-
-升级的第一步是 `git fetch upstream`，但命令立刻失败了——`Permission denied: .git/FETCH_HEAD`。原来 `/opt/stable-diffusion.cpp` 是 root 创建的，普通用户无法写入 `.git/` 目录。
-
-这个错误和 sd.cpp 毫无关系，但它告诉我们：**升级流程的第一个检查项应该是权限，而不是代码**。我们花了 5 分钟修权限，如果一开始就 `ls -ld`，这 5 分钟本可以省掉。
-
-### 4.2 意外的编译失败：不是适配器的问题
-
-sd.cpp 编译很顺利，但当编译 my-img 时，突然冒出来 7 个 `-Werror` 错误：`unused variable 'h'`、`unused parameter 'radius'`……
-
-第一反应是"上游改了 API？"但检查后发现，这些代码几个月来一直这样，只是平时没在 `-Werror` 模式下编译过。它们不是升级引入的，而是**平时积累的技术债**。升级就像一面镜子，照出了那些被我们忽略的警告。
-
-这次我们没有新增任何适配器代码，反而修了 7 个旧文件的编译问题。如果平时就保持 `-Werror` 通过，升级过程会更纯粹。
-
-### 4.3 预期的冲突没有发生
-
-本地有一个 commit（`eef0ffa`）修改了 `sd_img_gen_params_t`，添加了 FreeU/SAG/DynamicCFG 三个结构体。升级前最担心的就是这部分和上游冲突。
-
-但 `git diff HEAD..upstream/master -- include/stable-diffusion.h` 显示，上游只改了 `sd_ctx_params_t`（加了 `max_vram`），两个结构体完全不同。rebase 过程零冲突，一次通过。
-
-这说明**最小侵入设计确实有效**：我们只加了字段，没有改逻辑，所以即使结构体在同一个头文件里，也不会和上游冲突。
-
-### 4.4 数据回顾
+### 4.1 2026-05-09：小步快跑（3 个 commit）
 
 - 上游新增 commit：3 个
 - 适配器修改行数：**0 行**
 - 实际修复内容：7 个文件的 `-Werror`（技术债）
 - API 冲突：**无**
-- 版本锁定：**未执行**（遗漏）
 
-这次升级验证了我们的架构设计是健康的，但也提醒了我们：基础设施（权限、编译规范）和流程（版本锁定）比代码本身更容易成为瓶颈。
+**教训**：权限检查和日常保持 `-Werror` 通过比代码本身更重要。
+
+### 4.2 2026-06-01：大跨越（70 个 commit）
+
+#### 4.2.1 故事的开始：权限 + Git 身份
+
+`git fetch upstream` 失败（Permission denied），修复权限后 `git commit` 又失败（Author identity unknown）。两个和 sd.cpp 完全无关的问题，浪费了 10 分钟。
+
+**教训**：升级前 checklist 应包含：
+```bash
+ls -ld /opt/stable-diffusion.cpp          # 权限
+git config user.name && git config user.email  # Git 身份
+git status                               # 工作区 clean
+```
+
+#### 4.2.2 rebase 冲突：FreeU/SAG 被上游架构覆盖
+
+本地 `eef0ffa` 在 `src/stable-diffusion.cpp` / `src/unet.hpp` / `src/diffusion_model.hpp` 中实现了 FreeU/SAG/DynamicCFG。但上游在这 70 个 commit 中**完全重构了 Diffusion 内部架构**：
+
+- 旧架构：`DiffusionParams` 直接包含 `freeu_enabled`, `sag_enabled` 等字段
+- 新架构：`DiffusionParams` 改用 `std::variant<UNetDiffusionExtra, FluxDiffusionExtra, ...>` 的 `extra` 字段，FreeU 字段被删除
+
+**冲突处理策略**：
+1. `git checkout --theirs src/stable-diffusion.cpp src/diffusion_model.hpp src/unet.hpp` —— 完全接受上游新架构
+2. 保留 `include/stable-diffusion.h` 中的 FreeU/SAG/DynamicCFG 字段（向后兼容）
+3. **手动重新集成** FreeU/SAG 到新架构：
+   - `diffusion_model.hpp`: 在 `DiffusionParams` 中恢复 FreeU 字段
+   - `unet.hpp`: 在 `UnetModelBlock` 中恢复 `set_freeu()` 和 `ggml_scale`
+   - `stable-diffusion.cpp`: 在采样循环中恢复 SAG/DynamicCFG 逻辑，在 `generate_image()` 中恢复参数读取
+
+#### 4.2.3 适配器签名变更
+
+`new_upscaler_ctx()` 新增两个参数：`backend`, `params_backend`。
+
+```cpp
+// 旧签名
+upscaler_ctx_t* new_upscaler_ctx(const char*, bool, bool, int, int);
+// 新签名
+upscaler_ctx_t* new_upscaler_ctx(const char*, bool, bool, int, int, const char*, const char*);
+```
+
+**修复**：`sdcpp_adapter.cpp:634` 添加 `nullptr, nullptr`。
+
+#### 4.2.4 头文件字段保留但内部实现重构
+
+上游保留了 `sd_img_gen_params_t` 中的 `freeu`/`sag`/`dynamic_cfg` 字段（rebase 时合并保留），但 `src/stable-diffusion.cpp` 内部不再读取这些字段。这导致了一个**隐蔽的 bug**：
+
+- 编译通过 ✅
+- 运行时不报错 ✅
+- 但 FreeU/SAG **完全不生效** ❌
+
+**教训**：头文件字段存在 ≠ 功能正常。必须验证 `generate_image()` 中是否有字段读取代码。
+
+#### 4.2.5 数据回顾
+
+- 上游新增 commit：**70 个**（从 eef0ffa 到 be65ac7）
+- rebase 冲突：3 个文件（`stable-diffusion.cpp`, `diffusion_model.hpp`, `unet.hpp`）
+- 适配器修改行数：**1 行**（upscaler_ctx 签名）
+- sd.cpp 重新集成行数：**~45 行**（FreeU/SAG/DynamicCFG）
+- 修复技术债：**2 处**（`<optional>` 头文件缺失、test_z_image_quick 矩阵维度）
+- 编译方式：`./build.sh` 一键编译（自动处理 sd.cpp + my-img 依赖顺序）
+- 编译时间：**~15 分钟**（CUDA 编译较慢）
+- 功能验证：FreeU/SAG 功能恢复，新字段（vae_format, backend 等）已映射
 
 ---
 
@@ -221,30 +286,58 @@ sd.cpp 编译很顺利，但当编译 my-img 时，突然冒出来 7 个 `-Werro
 
 ```bash
 cd /opt/stable-diffusion.cpp
-git diff HEAD~1 -- include/stable-diffusion.h
+git diff HEAD..upstream/master -- include/stable-diffusion.h
 ```
 
 重点看：
 - [ ] `sd_ctx_params_t` 新增/删除字段
-- [ ] `sd_img_gen_params_t` 新增/删除字段  
+- [ ] `sd_img_gen_params_t` 新增/删除字段
 - [ ] `sd_sample_params_t` 子结构变化
+- [ ] `sd_tiling_params_t` / `sd_hires_params_t` 子结构变化
 - [ ] 新增/删除枚举值
-- [ ] 函数签名变更
+- [ ] **函数签名变更**（如 `new_upscaler_ctx`, `generate_video`）
+
+### 5.1a 内部架构 diff（5 分钟）
+
+如果升级跨越较多 commit，必须检查内部实现变更：
+
+```bash
+cd /opt/stable-diffusion.cpp
+git diff HEAD..upstream/master -- src/stable-diffusion.cpp | grep -n "freeu\|sag\|dynamic_cfg\|DiffusionExtraParams"
+```
+
+重点看：
+- [ ] 本地功能（FreeU/SAG）的内部实现是否被删除或重构
+- [ ] `DiffusionParams` 是否从简单字段变为 `std::variant` 模式
+- [ ] `generate_image()` 是否还读取本地添加的字段
+
+**关键原则**：头文件字段存在 ≠ 功能正常。必须验证 `generate_image()` 内部是否有字段读取代码。
 
 ### 5.2 适配器字段覆盖检查
 
 对照头文件，检查 `sdcpp_adapter.cpp`：
 
+**模型加载**：
 ```cpp
 // load_model() 中是否设置了 sd_ctx_params_t 的所有字段？
 sd_ctx_params_t sd_params;
 sd_ctx_params_init(&sd_params);  // ✅ 确保调用初始化
-sd_params.max_vram = params.max_vram;  // ✅ 新增字段要映射
+sd_params.max_vram = params.max_vram;           // ✅ 新增于 2026-06-01
+sd_params.vae_format = convert_vae_format(...); // ✅ 新增于 2026-06-01
+sd_params.backend = params.backend.c_str();     // ✅ 新增于 2026-06-01
+sd_params.audio_vae_path = params.audio_vae_path.c_str();  // ✅ 新增于 2026-06-01
 ```
 
+**图像生成**：
 ```cpp
 // generate() 中是否设置了 sd_img_gen_params_t 的所有字段？
-gen_params.sample_params.guidance.txt_cfg = params.cfg_scale;  // ✅ cfg_scale 映射
+gen_params.sample_params.guidance.txt_cfg = params.cfg_scale;     // ✅ cfg_scale 映射
+gen_params.sample_params.extra_sample_args = ...;                  // ✅ 新增于 2026-06-01
+gen_params.vae_tiling_params.temporal_tiling = ...;               // ✅ 新增于 2026-06-01
+gen_params.vae_tiling_params.extra_tiling_args = ...;             // ✅ 新增于 2026-06-01
+// FreeU/SAG：头文件字段存在，但必须验证 sd.cpp 内部是否读取
+gen_params.freeu.enabled = params.freeu_enabled;  // ⚠️ 需验证 generate_image() 是否读取
+gen_params.sag.enabled = params.sag_enabled;      // ⚠️ 需验证 generate_image() 是否读取
 ```
 
 ### 5.3 枚举映射完整性
@@ -326,6 +419,59 @@ git rebase --continue
 - 合并时确保所有字段都保留
 - 在适配器中添加新字段映射
 
+### Q6：本地功能（FreeU/SAG）升级后不生效
+
+**原因**：上游重构了内部架构（如引入 `DiffusionExtraParams`），`generate_image()` 不再读取本地添加的字段
+
+**检查步骤**：
+```bash
+cd /opt/stable-diffusion.cpp
+grep -n "freeu_enabled\|sag_enabled" src/stable-diffusion.cpp
+# 如果没有结果，说明内部实现被删除了
+```
+
+**修复**（以 FreeU 为例）：
+1. 确认头文件字段保留（`sd_freeu_params_t` 仍在 `sd_img_gen_params_t` 中）
+2. 在 `src/stable-diffusion.cpp` 的 `generate_image()` 中恢复字段读取：
+   ```cpp
+   sd_ctx->sd->freeu_enabled = sd_img_gen_params->freeu.enabled;
+   if (sd_img_gen_params->freeu.enabled) {
+       sd_ctx->sd->freeu_b1 = sd_img_gen_params->freeu.b1;
+       // ...
+   }
+   ```
+3. 如果上游架构变更（如 `DiffusionParams.extra` 变为 variant），需要在 `src/diffusion_model.hpp` 的 `DiffusionParams` 中恢复字段，并在 `src/unet.hpp` 中恢复处理逻辑
+
+### Q7：函数签名变更导致编译错误
+
+**现象**：`too few arguments to function 'new_upscaler_ctx'`
+
+**原因**：上游新增了参数（如 `backend`, `params_backend`）
+
+**修复**：
+```cpp
+// 适配器中使用 nullptr 表示默认值
+upscaler_ctx_t* ctx = new_upscaler_ctx(
+    model_path.c_str(), false, false, -1, tile_size, nullptr, nullptr);
+```
+
+### Q8：矩阵维度不匹配（my-img 内部模型）
+
+**现象**：`mat1 and mat2 shapes cannot be multiplied (1x3840 and 256x15360)`
+
+**原因**：模型中不同模块对 embedding 维度的假设不一致
+
+**排查**：
+```cpp
+// 在 forward 中添加维度检查
+std::cout << "[DEBUG] t_emb shape: " << t_emb.sizes() << std::endl;
+std::cout << "[DEBUG] adaLN weight shape: " << adaLN_modulation_0_->weight.sizes() << std::endl;
+```
+
+**修复原则**：确保所有使用同一 embedding 的模块期望的输入维度一致。常见错误：
+- `TimestepEmbedder` 输出 `min(hidden_size, 1024)`，但 `adaLN` 期望 `hidden_size`
+- 应统一使用 `hidden_size`，避免 "安全截断"
+
 ---
 
 ## 7. 最佳实践总结
@@ -345,7 +491,30 @@ git log --oneline HEAD..upstream/master  # 查看新 commit
 - **避免大跨越**：不要一次性跨越 10+ 个 commit
 - **每次必测**：更新后立即编译 + 基础生成测试
 
-### 7.3 文档化
+### 7.3 编译脚本
+
+**日常开发和升级时，始终使用 `build.sh`：**
+
+```bash
+# 标准编译
+./build.sh
+
+# Debug 模式（调试用）
+BUILD_TYPE=Debug ./build.sh
+
+# 限制并行数（内存不足时）
+JOBS=4 ./build.sh
+```
+
+**脚本优势：**
+- 自动处理 sd.cpp 和 my-img 的编译顺序（先静态库，后可执行文件）
+- 自动检测 GPU 并启用 CUDA
+- 统一使用 GCC-12 编译器（避免 LTO 版本不匹配）
+- 自动编译核心测试
+
+**脚本头部包含完整的踩坑记录**，遇到问题先查看注释。
+
+### 7.4 文档化
 
 ```bash
 # 升级后记录版本
@@ -384,7 +553,10 @@ typedef struct {
     const char* clip_l_path, *clip_g_path, *clip_vision_path;
     const char* t5xxl_path, *llm_path, *llm_vision_path;
     const char* diffusion_model_path, *high_noise_diffusion_model_path;
-    const char* vae_path, *taesd_path, *control_net_path;
+    const char* embeddings_connectors_path;  // ← 新增于 2026-06-01
+    const char* vae_path;
+    const char* audio_vae_path;  // ← 新增于 2026-06-01
+    const char* taesd_path, *control_net_path;
     const sd_embedding_t* embeddings;
     uint32_t embedding_count;
     const char* photo_maker_path, *tensor_type_rules;
@@ -402,7 +574,10 @@ typedef struct {
     bool chroma_use_dit_mask, chroma_use_t5_mask;
     int chroma_t5_mask_pad;
     bool qwen_image_zero_cond_t;
-    float max_vram;  // ← 新增于 2026-05-09
+    enum sd_vae_format_t vae_format;  // ← 新增于 2026-06-01
+    float max_vram;                   // ← 新增于 2026-06-01 (0=禁用, -1=自动)
+    const char* backend;              // ← 新增于 2026-06-01
+    const char* params_backend;       // ← 新增于 2026-06-01
 } sd_ctx_params_t;
 ```
 
@@ -427,13 +602,43 @@ typedef struct {
     sd_image_t control_image;
     float control_strength;
     sd_pm_params_t pm_params;
-    sd_tiling_params_t vae_tiling_params;
+    sd_tiling_params_t vae_tiling_params;  // ← 新增 temporal_tiling, extra_tiling_args
     sd_cache_params_t cache;
-    sd_hires_params_t hires;
-    sd_freeu_params_t freeu;       // ← 本地添加
-    sd_sag_params_t sag;           // ← 本地添加
-    sd_dynamic_cfg_params_t dynamic_cfg;  // ← 本地添加
+    sd_hires_params_t hires;               // ← 新增 custom_sigmas, custom_sigmas_count
+    sd_freeu_params_t freeu;       // ← 本地添加（需验证内部实现）
+    sd_sag_params_t sag;           // ← 本地添加（需验证内部实现）
+    sd_dynamic_cfg_params_t dynamic_cfg;  // ← 本地添加（需验证内部实现）
 } sd_img_gen_params_t;
+```
+
+#### sd_sample_params_t（采样参数）
+
+```c
+typedef struct {
+    enum sample_method_t sample_method;
+    int sample_steps;
+    float eta;
+    int shifted_timestep;
+    float* custom_sigmas;
+    int custom_sigmas_count;
+    float flow_shift;
+    const char* extra_sample_args;  // ← 新增于 2026-06-01
+} sd_sample_params_t;
+```
+
+#### sd_tiling_params_t（VAE Tiling）
+
+```c
+typedef struct {
+    bool enabled;
+    bool temporal_tiling;        // ← 新增于 2026-06-01（视频生成用）
+    int tile_size_x;
+    int tile_size_y;
+    float target_overlap;
+    float rel_size_x;
+    float rel_size_y;
+    const char* extra_tiling_args;  // ← 新增于 2026-06-01
+} sd_tiling_params_t;
 ```
 
 ### B. 相关命令速查
@@ -448,6 +653,8 @@ typedef struct {
 | `git submodule update --init --recursive` | 更新子模块 |
 | `make -j$(nproc) stable-diffusion` | 编译 sd.cpp |
 | `nm build/myimg-cli \| grep generate_image` | 检查符号是否存在 |
+| `grep -n "freeu\|sag" src/stable-diffusion.cpp` | 检查本地功能内部实现是否被删除 |
+| `git show <commit> --stat` | 查看某个 commit 修改了哪些文件 |
 
 ### C. 参考资源
 
@@ -457,6 +664,6 @@ typedef struct {
 
 ---
 
-**最后更新**: 2026-05-09  
+**最后更新**: 2026-06-01  
 **维护者**: my-img Team  
-**版本**: 合并版 v1.0（原 SD_INTEGRATION.md + SD_UPGRADE_GUIDE.md）
+**版本**: v1.1（新增 70 commit 大跨越升级经验、DiffusionExtraParams 架构适配、FreeU/SAG 重新集成指南）

@@ -185,7 +185,7 @@ JointTransformerBlockImpl::JointTransformerBlockImpl(int layer_id, int64_t hidde
     
     if (modulation_) {
         adaLN_modulation_0_ = register_module("adaLN_modulation_0", 
-            torch::nn::Linear(std::min(hidden_size, static_cast<int64_t>(256)), 4 * hidden_size));
+            torch::nn::Linear(hidden_size, 4 * hidden_size));
     }
 }
 
@@ -243,7 +243,7 @@ FinalLayerImpl::FinalLayerImpl(int64_t hidden_size, int64_t patch_size, int64_t 
         torch::nn::LayerNormOptions({hidden_size}).eps(1e-6).elementwise_affine(false)));
     linear_ = register_module("linear", torch::nn::Linear(torch::nn::LinearOptions(hidden_size, patch_size * patch_size * out_channels).bias(true)));
     adaLN_modulation_1_ = register_module("adaLN_modulation_1", 
-        torch::nn::Linear(std::min(hidden_size, static_cast<int64_t>(256)), hidden_size));
+        torch::nn::Linear(hidden_size, hidden_size * 2));
 }
 
 torch::Tensor FinalLayerImpl::forward(torch::Tensor x, torch::Tensor c) {
@@ -304,7 +304,7 @@ ZImageDiTImpl::ZImageDiTImpl(ZImageParams params) : params_(params) {
     std::cout << "[ZImageDiT] x_embedder created" << std::endl;
     
     t_embedder_ = register_module("t_embedder", 
-        TimestepEmbedder(std::min(params.hidden_size, static_cast<int64_t>(1024)), 256, 256));
+        TimestepEmbedder(params.hidden_size, 256, 256));
     std::cout << "[ZImageDiT] t_embedder created" << std::endl;
     
     cap_embedder_0_ = register_module("cap_embedder_0", RMSNorm(params.cap_feat_dim, params.norm_eps));

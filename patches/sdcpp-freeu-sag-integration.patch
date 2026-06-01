@@ -8,11 +8,11 @@ index b0e3af8..3f26a65 100644
  preview.png
 +bin/
 diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
-index c4c1494..3237d8e 100644
+index e15f1aa..1b08eaa 100644
 --- a/include/stable-diffusion.h
 +++ b/include/stable-diffusion.h
-@@ -316,6 +316,26 @@ typedef struct {
-     int upscale_tile_size;
+@@ -346,6 +346,26 @@ typedef struct {
+     int custom_sigmas_count;
  } sd_hires_params_t;
  
 +typedef struct {
@@ -38,7 +38,7 @@ index c4c1494..3237d8e 100644
  typedef struct {
      const sd_lora_t* loras;
      uint32_t lora_count;
-@@ -340,6 +360,9 @@ typedef struct {
+@@ -370,6 +390,9 @@ typedef struct {
      sd_tiling_params_t vae_tiling_params;
      sd_cache_params_t cache;
      sd_hires_params_t hires;
@@ -49,13 +49,13 @@ index c4c1494..3237d8e 100644
  
  typedef struct {
 diff --git a/src/diffusion_model.hpp b/src/diffusion_model.hpp
-index 1a202a1..a4ac5ae 100644
+index 80c1154..fa817d9 100644
 --- a/src/diffusion_model.hpp
 +++ b/src/diffusion_model.hpp
-@@ -29,6 +29,11 @@ struct DiffusionParams {
-     const sd::Tensor<float>* vace_context             = nullptr;
-     float vace_strength                               = 1.f;
-     const std::vector<int>* skip_layers               = nullptr;
+@@ -67,6 +67,11 @@ struct DiffusionParams {
+     const std::vector<sd::Tensor<float>>* ref_latents = nullptr;
+     bool increase_ref_index                           = false;
+     DiffusionExtraParams extra                        = std::monostate{};
 +    bool freeu_enabled = false;
 +    float freeu_b1 = 1.3f;
 +    float freeu_b2 = 1.4f;
@@ -64,19 +64,11 @@ index 1a202a1..a4ac5ae 100644
  };
  
  template <typename T>
-@@ -112,6 +117,7 @@ struct UNetModel : public DiffusionModel {
-         GGML_ASSERT(diffusion_params.x != nullptr);
-         GGML_ASSERT(diffusion_params.timesteps != nullptr);
-         static const std::vector<sd::Tensor<float>> empty_controls;
-+        unet.set_freeu(diffusion_params.freeu_enabled, diffusion_params.freeu_b1, diffusion_params.freeu_b2, diffusion_params.freeu_s1, diffusion_params.freeu_s2);
-         return unet.compute(n_threads,
-                             *diffusion_params.x,
-                             *diffusion_params.timesteps,
 diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
-index fd439ff..504290d 100644
+index 28598eb..667a351 100644
 --- a/src/stable-diffusion.cpp
 +++ b/src/stable-diffusion.cpp
-@@ -150,6 +150,23 @@ public:
+@@ -183,6 +183,23 @@ public:
      bool is_using_v_parameterization     = false;
      bool is_using_edm_v_parameterization = false;
  
@@ -100,32 +92,43 @@ index fd439ff..504290d 100644
      std::map<std::string, ggml_tensor*> tensors;
  
      // lora_name => multiplier
-@@ -1767,6 +1784,24 @@ public:
-             if (is_skiplayer_step && !skip_cond_out.empty()) {
-                 latent_result += (cond_out - skip_cond_out) * slg_scale;
+@@ -2097,6 +2114,11 @@ public:
+                 } else {
+                     diffusion_params.extra = std::monostate{};
+                 }
++                diffusion_params.freeu_enabled = this->freeu_enabled;
++                diffusion_params.freeu_b1 = this->freeu_b1;
++                diffusion_params.freeu_b2 = this->freeu_b2;
++                diffusion_params.freeu_s1 = this->freeu_s1;
++                diffusion_params.freeu_s2 = this->freeu_s2;
+ 
+                 sd::Tensor<float> cached_output;
+                 if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
+@@ -2180,6 +2202,23 @@ public:
+                 return {};
              }
-+
+ 
 +            // SAG (Self-Attention Guidance)
 +            if (this->sag_enabled && !uncond_out.empty()) {
-+                latent_result = latent_result * this->sag_scale + uncond_out * (1.0f - this->sag_scale);
++                guided.pred = guided.pred * this->sag_scale + uncond_out * (1.0f - this->sag_scale);
 +            }
 +
 +            // Dynamic CFG (Dynamic Thresholding)
 +            if (this->dynamic_cfg_enabled) {
 +                float max_val = 0.0f;
-+                for (int64_t i = 0; i < latent_result.numel(); i++) {
-+                    float val = std::abs(latent_result.data()[i]);
++                for (int64_t i = 0; i < guided.pred.numel(); i++) {
++                    float val = std::abs(guided.pred.data()[i]);
 +                    if (val > max_val) max_val = val;
 +                }
 +                if (max_val > 1.0f) {
-+                    latent_result = latent_result / max_val;
++                    guided.pred = guided.pred / max_val;
 +                }
 +            }
 +
-             denoised = latent_result * c_out + x * c_skip;
-             if (cache_runtime.spectrum_enabled) {
-                 cache_runtime.spectrum.update(denoised);
-@@ -3370,6 +3405,23 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
+             denoised = guided.pred * c_out + x * c_skip;
+             sd::guidance::GuiderOutput output;
+             output.pred = denoised;
+@@ -4374,6 +4413,23 @@ SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* s
      sd_ctx->sd->sampler_rng->manual_seed(request.seed);
      sd_ctx->sd->set_flow_shift(sd_img_gen_params->sample_params.flow_shift);
      sd_ctx->sd->apply_loras(sd_img_gen_params->loras, sd_img_gen_params->lora_count);
@@ -150,13 +153,13 @@ index fd439ff..504290d 100644
      ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
  
 diff --git a/src/unet.hpp b/src/unet.hpp
-index d7ea8c3..094ac3b 100644
+index ef46874..e5676d7 100644
 --- a/src/unet.hpp
 +++ b/src/unet.hpp
-@@ -183,6 +183,19 @@ protected:
- 
+@@ -185,6 +185,19 @@ protected:
  public:
      int model_channels  = 320;
+     int adm_in_channels = 2816;  // only for VERSION_SDXL/SVD
 +    bool freeu_enabled = false;
 +    float freeu_b1 = 1.3f;
 +    float freeu_b2 = 1.4f;
@@ -170,10 +173,10 @@ index d7ea8c3..094ac3b 100644
 +        freeu_s1 = s1;
 +        freeu_s2 = s2;
 +    }
-     int adm_in_channels = 2816;  // only for VERSION_SDXL/SVD
  
      UnetModelBlock(SDVersion version = VERSION_SD1, const String2TensorStorage& tensor_storage_map = {})
-@@ -555,6 +568,13 @@ public:
+         : version(version) {
+@@ -556,6 +569,14 @@ public:
                      control_offset--;
                  }
  
@@ -184,16 +187,40 @@ index d7ea8c3..094ac3b 100644
 +                    h = ggml_scale(ctx->ggml_ctx, h, b);
 +                    h_skip = ggml_scale(ctx->ggml_ctx, h_skip, s);
 +                }
++
                  h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
  
                  std::string name = "output_blocks." + std::to_string(output_block_idx) + ".0";
-@@ -618,6 +638,9 @@ struct UNetModelRunner : public GGMLRunner {
-     void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string prefix) {
-         unet.get_param_tensors(tensors, prefix);
-     }
-+    void set_freeu(bool enabled, float b1, float b2, float s1, float s2) {
-+        unet.set_freeu(enabled, b1, b2, s1, s2);
-+    }
- 
-     ggml_cgraph* build_graph(const sd::Tensor<float>& x_tensor,
-                              const sd::Tensor<float>& timesteps_tensor,
+@@ -689,6 +710,7 @@ struct UNetModelRunner : public DiffusionModelRunner {
+         GGML_ASSERT(diffusion_params.timesteps != nullptr);
+         const auto* extra = diffusion_extra_as<UNetDiffusionExtra>(diffusion_params);
+         static const std::vector<sd::Tensor<float>> empty_controls;
++        unet.set_freeu(diffusion_params.freeu_enabled, diffusion_params.freeu_b1, diffusion_params.freeu_b2, diffusion_params.freeu_s1, diffusion_params.freeu_s2);
+         return compute(n_threads,
+                        *diffusion_params.x,
+                        *diffusion_params.timesteps,
+diff --git a/src/vae.hpp b/src/vae.hpp
+index cc4cd96..8a2369e 100644
+--- a/src/vae.hpp
++++ b/src/vae.hpp
+@@ -176,6 +176,20 @@ public:
+             float tile_overlap;
+             int tile_size_x, tile_size_y;
+             get_tile_sizes(tile_size_x, tile_size_y, tile_overlap, tiling_params, input.shape()[0], input.shape()[1]);
++
++            // Cap output tile size to prevent OOM on consumer GPUs
++            // 1280x768 decode needs ~6GB buffer; cap at ~1024 output to stay under ~7GB per tile
++            const int max_output_tile = 1024;
++            int output_tile_x = tile_size_x * scale_factor;
++            int output_tile_y = tile_size_y * scale_factor;
++            if (output_tile_x > max_output_tile || output_tile_y > max_output_tile) {
++                float scale = (float)max_output_tile / std::max(output_tile_x, output_tile_y);
++                tile_size_x = std::max(4, (int)(tile_size_x * scale));
++                tile_size_y = std::max(4, (int)(tile_size_y * scale));
++                tile_size_x = std::min(tile_size_x, (int)input.shape()[0]);
++                tile_size_y = std::min(tile_size_y, (int)input.shape()[1]);
++            }
++
+             if (!silent) {
+                 LOG_DEBUG("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
+             }

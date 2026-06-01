@@ -182,7 +182,29 @@ struct CliOptions {
     // 系统
     int threads = -1;
     bool verbose = false;
-    float max_vram = 0.0f;  // 最大显存限制 (GB, 0 = 不限制)
+    float max_vram = 0.0f;  // 最大显存限制 (GB, 0 = 禁用, -1 = 自动)
+
+    // VAE 格式
+    std::string vae_format = "auto";  // auto, flux, sd3, flux2
+
+    // 后端选择
+    std::string backend;
+    std::string params_backend;
+
+    // 音频 VAE 路径 (视频生成用)
+    std::string audio_vae_path;
+
+    // Embeddings connectors 路径
+    std::string embeddings_connectors_path;
+
+    // 采样器额外参数
+    std::string extra_sample_args;
+
+    // VAE 时间 tiling (视频生成用)
+    bool vae_temporal_tiling = false;
+
+    // VAE tiling 额外参数
+    std::string extra_tiling_args;
 };
 
 } // namespace myimg

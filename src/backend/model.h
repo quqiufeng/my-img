@@ -2,6 +2,7 @@
 
 #include <torch/torch.h>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace myimg {
