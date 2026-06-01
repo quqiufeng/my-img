@@ -23,6 +23,8 @@
 #include "utils/lut_loader.h"
 #include "utils/dehaze.h"
 #include "utils/log.h"
+#include "utils/vram_monitor.h"
+#include "utils/report_generator.h"
 #ifdef HAVE_OPENCV
 #include "utils/controlnet_preprocessors.h"
 #endif
@@ -37,6 +39,14 @@ int main(int argc, char** argv) {
         print_usage(argv[0]);
         return 1;
     }
+    
+    // 设置日志级别
+    if (opts.log_level == "trace") Logger::instance().set_level(LogLevel::Trace);
+    else if (opts.log_level == "debug") Logger::instance().set_level(LogLevel::Debug);
+    else if (opts.log_level == "info") Logger::instance().set_level(LogLevel::Info);
+    else if (opts.log_level == "warn") Logger::instance().set_level(LogLevel::Warn);
+    else if (opts.log_level == "error") Logger::instance().set_level(LogLevel::Error);
+    else if (opts.log_level == "fatal") Logger::instance().set_level(LogLevel::Fatal);
     
     // 加载配置文件（命令行参数会覆盖配置文件）
     if (!opts.config_file.empty()) {
@@ -646,6 +656,12 @@ int main(int argc, char** argv) {
     std::cout << "Output: " << opts.output << "\n";
     LOG_INFO("========================================\n");
     
+    // 初始化报告生成器
+    ReportGenerator report_gen;
+    if (!opts.report_path.empty()) {
+        report_gen.start_generation(params);
+    }
+    
     // 初始化适配器
     myimg::SDCPPAdapter adapter;
     if (!adapter.initialize(params)) {
@@ -654,9 +670,19 @@ int main(int argc, char** argv) {
     }
     
     // 设置进度回调
-    adapter.set_progress_callback([](int step, int steps, float time) {
+    adapter.set_progress_callback([&opts, &report_gen](int step, int steps, float time) {
         float progress = (float)step / steps * 100.0f;
-        std::cout << "\r  Progress: " << step << "/" << steps << " (" << (int)progress << "%) - " << time << "s/step" << std::flush;
+        std::cout << "\r  Progress: " << step << "/" << steps << " (" << (int)progress << "%) - " << time << "s/step";
+        
+        if (opts.show_vram) {
+            float vram_mb = VRAMMonitor::get_used_vram_mb();
+            std::cout << " [VRAM: " << std::fixed << std::setprecision(1) << vram_mb << " MB]";
+        }
+        std::cout << std::flush;
+        
+        if (!opts.report_path.empty()) {
+            report_gen.record_step(step, time, VRAMMonitor::get_used_vram_mb());
+        }
     });
     
     // 设置预览回调
@@ -863,6 +889,21 @@ int main(int argc, char** argv) {
         std::cout << "Generated " << opts.batch_count << " images\n";
     }
     std::cout << "Seed start: " << opts.seed << "\n";
+    
+    // 保存生成报告
+    if (!opts.report_path.empty()) {
+        report_gen.end_generation(opts.output, opts.width, opts.height);
+        report_gen.get_report().save_to_file(opts.report_path);
+    }
+    
+    // 显示VRAM峰值
+    if (opts.show_vram) {
+        float peak_vram = VRAMMonitor::get_peak_vram_mb();
+        if (peak_vram > 0.0f) {
+            std::cout << "Peak VRAM: " << std::fixed << std::setprecision(1) << peak_vram << " MB\n";
+        }
+    }
+    
     LOG_INFO("========================================");
     
     return 0;

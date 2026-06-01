@@ -186,6 +186,8 @@ set(MYIMG_SOURCES
     src/main.cpp
     src/cli/cli_parser.cpp
     src/cli/workflow_parser.cpp
+    src/utils/vram_monitor.cpp
+    src/utils/report_generator.cpp
     src/pipeline/photo_adjustment.cpp
     src/adapters/sdcpp_adapter.cpp
     src/utils/image_utils.cpp

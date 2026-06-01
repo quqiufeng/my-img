@@ -86,6 +86,11 @@ struct CliOptions {
     int preview_interval = 1;
     std::string preview_mode = "vae";  // vae, tae, proj
     std::string preview_dir = "/tmp/myimg-preview";
+    
+    // 日志与报告
+    std::string log_level = "info";  // trace, debug, info, warn, error, fatal
+    std::string report_path;         // 生成报告输出路径
+    bool show_vram = false;          // 显示VRAM使用情况
 
     // Embeddings
     std::string embedding_dir;

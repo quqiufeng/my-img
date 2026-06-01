@@ -84,6 +84,10 @@ void print_usage(const char* argv0) {
     std::cout << "  --preview-interval INT    Preview save interval in steps (default: 1)\n";
     std::cout << "  --preview-mode MODE       Preview mode: vae, tae, proj (default: vae)\n";
     std::cout << "  --preview-dir PATH        Preview output directory (default: /tmp/myimg-preview)\n";
+    std::cout << "\nLog & Report Options:\n";
+    std::cout << "  --log-level LEVEL         Log level: trace, debug, info, warn, error, fatal (default: info)\n";
+    std::cout << "  --report PATH             Save generation report to JSON file\n";
+    std::cout << "  --show-vram               Show VRAM usage during generation\n";
     std::cout << "\nOutput Options:\n";
     std::cout << "  -o, --output PATH         Output path (default: output.png)\n";
     std::cout << "  --embed-metadata          Embed generation parameters in PNG metadata\n";
@@ -611,6 +615,14 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--preview-dir") {
             if (++i >= argc) { LOG_ERROR("Missing value for --preview-dir"); return false; }
             opts.preview_dir = argv[i];
+        } else if (arg == "--log-level") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --log-level"); return false; }
+            opts.log_level = argv[i];
+        } else if (arg == "--report") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --report"); return false; }
+            opts.report_path = argv[i];
+        } else if (arg == "--show-vram") {
+            opts.show_vram = true;
         } else if (arg == "-p" || arg == "--prompt") {
             if (++i >= argc) { LOG_ERROR("Missing value for -p/--prompt"); return false; }
             opts.prompt = argv[i];
