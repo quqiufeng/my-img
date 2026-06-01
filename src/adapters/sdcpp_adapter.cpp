@@ -614,6 +614,7 @@ Image SDCPPAdapter::generate_with_schedule(const GenerationParams& params) {
         
         GenerationParams stage_params = params;
         stage_params.prompt = entry.prompt;
+        stage_params.prompt_schedule.clear(); // 防止递归！
         if (!entry.negative_prompt.empty()) {
             stage_params.negative_prompt = entry.negative_prompt;
         }

@@ -162,7 +162,7 @@ NC="\033[0m"
 MODEL_DIR="${MODEL_DIR:-/opt/image/model}"
 # 使用 my-img 编译后的二进制（开发完成后验证用）
 SD_CLI="${SD_CLI:-/opt/my-img/build/myimg-cli}"
-DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z_image_turbo-Q5_K_M.gguf}"
+DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z-image-turbo-Q4_K_M.gguf}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
 UPSCALE_MODEL="${UPSCALE_MODEL:-$MODEL_DIR/2x_ESRGAN.gguf}"
