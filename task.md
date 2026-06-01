@@ -684,12 +684,13 @@
 - **难度**: 低
 - **状态**: ✅ 已完成（2026-04-30）
 
-#### Task 15.3: 预览图
-- [ ] 生成过程中实时预览
-- [ ] TAE/TAESD 快速解码预览
-- [ ] CLI 参数：`--preview-method vae`
+#### Task 15.3: 预览图 ✅
+- [x] 生成过程中实时预览
+- [x] VAE/TAE/PROJ 解码预览
+- [x] CLI 参数：`--preview`, `--preview-interval N`, `--preview-mode vae|tae|proj`, `--preview-dir PATH`
 - **优先级**: P2
 - **难度**: 中
+- **状态**: ✅ 已完成（2026-06-01）
 
 #### Task 15.4: 日志与调试
 - [ ] 分级日志（DEBUG/INFO/WARN/ERROR）
@@ -876,9 +877,9 @@
 | 优化 | Flash Attention | ✅ | - |
 | 体验 | CLI 参数 | ✅ | - |
 | 体验 | 元数据 | ✅ | P2 |
-| 体验 | 预览图 | ⏳ | P2 |
-| 体验 | 配置文件 | ⏳ | P2 |
-| 体验 | Workflow JSON | ⏳ | P2 |
+| 体验 | 预览图 | ✅ | P2 |
+| 体验 | 配置文件 | ✅ | P2 |
+| 体验 | Workflow JSON | ✅ | P2 |
 | 体验 | Server | ⏳ | P3 |
 
 ---
