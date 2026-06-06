@@ -482,6 +482,7 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
             IPAdapterConfig ipa_config;
             ipa_config.model_path = params.ipadapter_model;
             ipa_config.clip_vision_path = params.ipadapter_clip_vision;
+            ipa_config.projection_path = params.ipadapter_projection;
             ipa_config.image_path = params.ipadapter_image;
             ipa_config.weight = params.ipadapter_weight;
             ipa_config.start_at = params.ipadapter_start_at;

@@ -11,11 +11,11 @@ namespace myimg {
 struct IPAdapterConfig {
     std::string model_path;          // IPAdapter 模型路径 (.onnx)
     std::string clip_vision_path;    // CLIP Vision 模型路径 (.onnx)
+    std::string projection_path;     // 线性投影层 768→2560 (.onnx), 可选
     std::string image_path;          // 参考图像路径
     float weight = 1.0f;             // 注入权重 (0.0-1.0)
     float start_at = 0.0f;           // 开始注入的步数比例 (0.0-1.0)
     float end_at = 1.0f;             // 结束注入的步数比例 (0.0-1.0)
-    bool faceid = false;             // 是否使用 FaceID 模式
 };
 
 class IPAdapter {
@@ -38,8 +38,8 @@ public:
     bool load_reference_image(const std::string& image_path);
 
     // 获取计算好的 image tokens（扁平化 float 向量）
-    // 形状: [1, 768] — 由 IPAdapter MLP 输出
-    // 需要投影到 2560-dim (cap_feat_dim) 后方能拼接到 Z-Image 的 text context
+    // 形状: [1, 2560] — 经 IPAdapter MLP + 线性投影层映射到 Z-Image context 空间
+    // 可直接拼接到 text context（2560-dim cap_feat_dim）
     const std::vector<float>& get_image_tokens() const { return image_tokens_; }
 
     // 是否已加载
@@ -51,7 +51,7 @@ private:
     IPAdapterConfig config_;
     bool model_loaded_ = false;
 
-    // 缓存 image tokens (IPAdapter MLP output, [1, 768])
+    // 缓存 image tokens (投影后, [1, 2560])
     std::vector<float> image_tokens_;
 
     // ONNX Runtime 实现细节 (PIMPL)

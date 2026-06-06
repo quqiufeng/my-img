@@ -449,6 +449,7 @@ int main(int argc, char** argv) {
     params.ipadapter = opts.ipadapter;
     params.ipadapter_model = opts.ipadapter_model;
     params.ipadapter_clip_vision = opts.ipadapter_clip_vision;
+    params.ipadapter_projection = opts.ipadapter_projection;
     params.ipadapter_image = opts.ipadapter_image;
     params.ipadapter_weight = opts.ipadapter_weight;
     params.ipadapter_start_at = opts.ipadapter_start_at;

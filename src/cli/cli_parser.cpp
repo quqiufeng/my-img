@@ -127,12 +127,13 @@ void print_usage(const char* argv0) {
     std::cout << "  --face-restore-fidelity F Fidelity 0.0-1.0 (default: 0.5)\n";
     std::cout << "\nIPAdapter (Image Prompt):\n";
     std::cout << "  --ipadapter               Enable IPAdapter\n";
-    std::cout << "  --ipadapter-model PATH    IPAdapter model path\n";
+    std::cout << "  --ipadapter-model PATH       IPAdapter model path\n";
     std::cout << "  --ipadapter-clip-vision PATH  CLIP Vision model path\n";
-    std::cout << "  --ipadapter-image PATH    Reference image path\n";
-    std::cout << "  --ipadapter-weight FLOAT  Weight 0.0-1.0 (default: 1.0)\n";
-    std::cout << "  --ipadapter-start FLOAT   Start step ratio 0.0-1.0 (default: 0.0)\n";
-    std::cout << "  --ipadapter-end FLOAT     End step ratio 0.0-1.0 (default: 1.0)\n";
+    std::cout << "  --ipadapter-projection PATH   768->2560 linear projection (optional)\n";
+    std::cout << "  --ipadapter-image PATH        Reference image path\n";
+    std::cout << "  --ipadapter-weight FLOAT      Weight 0.0-1.0 (default: 1.0)\n";
+    std::cout << "  --ipadapter-start FLOAT       Start step ratio 0.0-1.0 (default: 0.0)\n";
+    std::cout << "  --ipadapter-end FLOAT         End step ratio 0.0-1.0 (default: 1.0)\n";
     std::cout << "\nT2I-Adapter:\n";
     std::cout << "  --t2i-adapter             Enable T2I-Adapter\n";
     std::cout << "  --t2i-adapter-model PATH  T2I-Adapter model path\n";
@@ -928,6 +929,9 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--ipadapter-clip-vision") {
             if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-clip-vision"); return false; }
             opts.ipadapter_clip_vision = argv[i];
+        } else if (arg == "--ipadapter-projection") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-projection"); return false; }
+            opts.ipadapter_projection = argv[i];
         } else if (arg == "--ipadapter-image") {
             if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-image"); return false; }
             opts.ipadapter_image = argv[i];

@@ -23,6 +23,7 @@ struct IPAdapter::Impl {
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Session> clip_session;
     std::unique_ptr<Ort::Session> ipa_session;
+    std::unique_ptr<Ort::Session> proj_session;  // 768→2560 线性投影
 
     // CLIP Vision 输入输出名
     std::string clip_input_name;
@@ -31,6 +32,10 @@ struct IPAdapter::Impl {
     // IPAdapter MLP 输入输出名
     std::string ipa_input_name;
     std::string ipa_output_name;
+
+    // 投影层输入输出名
+    std::string proj_input_name;
+    std::string proj_output_name;
 
     Impl() {
         session_options.SetIntraOpNumThreads(4);
@@ -165,6 +170,75 @@ struct IPAdapter::Impl {
         }
     }
 
+    bool load_projection(const std::string& path) {
+        try {
+            proj_session = std::make_unique<Ort::Session>(env, path.c_str(), session_options);
+
+            auto input_name_ptr = proj_session->GetInputNameAllocated(0, Ort::AllocatorWithDefaultOptions());
+            proj_input_name = input_name_ptr.get();
+
+            auto output_name_ptr = proj_session->GetOutputNameAllocated(0, Ort::AllocatorWithDefaultOptions());
+            proj_output_name = output_name_ptr.get();
+
+            LOG_INFO("IPAdapter: Projection ONNX model loaded: %s", path.c_str());
+            LOG_INFO("  Input: %s", proj_input_name.c_str());
+            LOG_INFO("  Output: %s", proj_output_name.c_str());
+
+            return true;
+        } catch (const Ort::Exception& e) {
+            LOG_ERROR("IPAdapter: Failed to load projection: %s", e.what());
+            return false;
+        }
+    }
+
+    // 运行投影层 768→2560
+    // input: [1, 768] float32 IPAdapter output
+    // output: [1, 2560] float32 projected to Z-Image context space
+    std::vector<float> run_projection(const std::vector<float>& ipa_tokens) {
+        if (!proj_session) {
+            LOG_WARN("IPAdapter: projection session not loaded, using zero-pad");
+            // Fall back to zero-padding: first 768 dims = tokens, rest = 0
+            std::vector<float> result(2560, 0.0f);
+            size_t copy_n = std::min(ipa_tokens.size(), (size_t)768);
+            std::copy(ipa_tokens.begin(), ipa_tokens.begin() + copy_n, result.begin());
+            return result;
+        }
+
+        try {
+            std::vector<int64_t> input_shape = {1, 768};
+            Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+                OrtArenaAllocator, OrtMemTypeDefault);
+
+            size_t input_size = std::min(ipa_tokens.size(), (size_t)768);
+            Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+                memory_info, const_cast<float*>(ipa_tokens.data()),
+                input_size, input_shape.data(), input_shape.size());
+
+            const char* input_names[] = {proj_input_name.c_str()};
+            const char* output_names[] = {proj_output_name.c_str()};
+
+            auto output_tensors = proj_session->Run(Ort::RunOptions{nullptr},
+                                                     input_names, &input_tensor, 1,
+                                                     output_names, 1);
+
+            if (output_tensors.empty() || !output_tensors[0].IsTensor()) {
+                LOG_ERROR("IPAdapter: Projection inference returned no output");
+                return {};
+            }
+
+            auto output_info = output_tensors[0].GetTensorTypeAndShapeInfo();
+            size_t num_elements = output_info.GetElementCount();
+            float* output_data = output_tensors[0].GetTensorMutableData<float>();
+            std::vector<float> result(output_data, output_data + num_elements);
+
+            LOG_INFO("IPAdapter: Projection output size: %zu floats (768→2560)", num_elements);
+            return result;
+        } catch (const Ort::Exception& e) {
+            LOG_ERROR("IPAdapter: Projection inference failed: %s", e.what());
+            return {};
+        }
+    }
+
     // 运行 IPAdapter MLP 推理
     // input: [1, 1024] float32 CLIP image embedding
     // output: [1, 768] float32 image tokens
@@ -254,6 +328,14 @@ bool IPAdapter::load_model(const std::string& model_path, const std::string& cli
     // 再加载 IPAdapter MLP（较小，5.4MB）
     bool ipa_ok = impl_->load_ipadapter(model_path);
 
+    // 可选：加载线性投影层 768→2560
+    if (!config_.projection_path.empty()) {
+        LOG_INFO("  Projection: %s", config_.projection_path.c_str());
+        impl_->load_projection(config_.projection_path);
+    } else {
+        LOG_INFO("  Projection: not provided, using zero-pad fallback");
+    }
+
     model_loaded_ = clip_ok && ipa_ok;
 
     if (!model_loaded_) {
@@ -262,7 +344,7 @@ bool IPAdapter::load_model(const std::string& model_path, const std::string& cli
                  ipa_ok ? "partially failed (CLIP Vision)" :
                           "failed (both models)");
     } else {
-        LOG_INFO("IPAdapter: both models loaded successfully");
+        LOG_INFO("IPAdapter: all models loaded successfully");
     }
 
     return model_loaded_;
@@ -325,24 +407,29 @@ bool IPAdapter::load_reference_image(const std::string& image_path) {
     }
 
     // 4. 运行 IPAdapter MLP 推理
-    image_tokens_ = impl_->run_ipadapter(clip_embedding);
-    if (image_tokens_.empty()) {
+    auto raw_tokens = impl_->run_ipadapter(clip_embedding);
+    if (raw_tokens.empty()) {
         LOG_ERROR("IPAdapter: IPAdapter MLP inference failed");
         return false;
     }
-    LOG_INFO("IPAdapter: image tokens size: %zu", image_tokens_.size());
+    LOG_INFO("IPAdapter: IPAdapter MLP output size: %zu (768-dim)", raw_tokens.size());
 
-    // 验证 output shape
-    if (image_tokens_.size() != 768) {
-        LOG_WARN("IPAdapter: IPAdapter output size %zu, expected 768",
-                 image_tokens_.size());
+    // 5. 运行线性投影层 768→2560
+    auto projected = impl_->run_projection(raw_tokens);
+    if (projected.empty()) {
+        LOG_ERROR("IPAdapter: projection failed");
+        return false;
     }
+
+    image_tokens_ = std::move(projected);
+    LOG_INFO("IPAdapter: projected tokens size: %zu (2560-dim, Z-Image context space)",
+             image_tokens_.size());
 
     // 打印统计信息
     float min_val = *std::min_element(image_tokens_.begin(), image_tokens_.end());
     float max_val = *std::max_element(image_tokens_.begin(), image_tokens_.end());
     float mean_val = std::accumulate(image_tokens_.begin(), image_tokens_.end(), 0.0f) / image_tokens_.size();
-    LOG_INFO("IPAdapter: image tokens stats: min=%.4f, max=%.4f, mean=%.4f",
+    LOG_INFO("IPAdapter: projected tokens stats: min=%.4f, max=%.4f, mean=%.4f",
              min_val, max_val, mean_val);
 
     return true;

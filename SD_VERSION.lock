@@ -1,1 +1,1 @@
-39e2795 chore(vae): cap tile size to prevent OOM on consumer GPUs
+99e9276 feat(ipadapter): inject image tokens into conditioning (Phase 3)

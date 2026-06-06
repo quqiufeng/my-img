@@ -29,19 +29,36 @@ my-img (C++ Application)
 
 ### 1.2 当前对 sd.cpp 的改动
 
-截至本次升级，本地改动仅 21 行：
+截至本次升级，本地改动约 **80 行**，分布在 2 个文件：
 
-```diff
-# 1. 恢复 8 个 static 关键字（原生代码本来就有）
--int64_t resolve_seed(int64_t seed) {
-+static int64_t resolve_seed(int64_t seed) {
+### sd_img_gen_params_t 头文件（3 字段，~6 行）
 
-# 2. 删除了末尾废弃的扩展 API include
--#include "stable-diffusion-ext.cpp"
-+
+`include/stable-diffusion.h` — 为 IPAdapter 注入新增 3 个字段：
+
+```c
+// IPAdapter: image prompt tokens
+const float* ipadapter_tokens;      // [N * 768] image tokens from CLIP Vision + IPAdapter MLP, NULL = disabled
+int ipadapter_num_tokens;           // N (number of image token vectors)
+float ipadapter_weight;             // scale factor applied to tokens (0.0-1.0)
 ```
 
-**升级时无需担心冲突**，直接 rebase 即可。
+### 条件注入逻辑（~50 行）
+
+`src/stable-diffusion.cpp` — 在 `prepare_image_generation_embeds()` 中，`get_learned_condition()` 返回后将 IPAdapter token 注入 conditioning：
+
+```cpp
+// 位于 LOG_INFO("get_learned_condition completed...") 之后
+if (sd_img_gen_params->ipadapter_tokens != nullptr && ...) {
+    // 1. 创建 [ctx_dim, num_ipa_tokens] 张量，零填充 768→ctx_dim
+    // 2. 沿 dim=1 拼接到 cond.c_crossattn 和 uncond.c_crossattn
+    // 3. 形状变化: [2560, 9] → [2560, 10] (9 text + 1 image token)
+}
+```
+
+**升级冲突风险**：中等
+- 如果上游改动 `prepare_image_generation_embeds()` 流程，需要迁移注入逻辑
+- 如果上游新增/删除 `sd_img_gen_params_t` 字段，需合并 IPAdapter 字段
+- 注入后的 shape 变化依赖 Z-Image PE 机制（PE 基于 `context->ne[1]` 在 graph-build time 生成），需验证 PE 兼容
 
 ---
 
@@ -608,6 +625,10 @@ typedef struct {
     sd_freeu_params_t freeu;       // ← 本地添加（需验证内部实现）
     sd_sag_params_t sag;           // ← 本地添加（需验证内部实现）
     sd_dynamic_cfg_params_t dynamic_cfg;  // ← 本地添加（需验证内部实现）
+    // IPAdapter: 本地添加 2026-06-06
+    const float* ipadapter_tokens;      // [N * 768], NULL = disabled
+    int ipadapter_num_tokens;           // N
+    float ipadapter_weight;             // 0.0-1.0
 } sd_img_gen_params_t;
 ```
 
@@ -664,6 +685,36 @@ typedef struct {
 
 ---
 
-**最后更新**: 2026-06-01  
+### 4.3 2026-06-06：GPU 后端修复 + IPAdapter Phase 3
+
+#### 4.3.1 模型推理挂起
+
+**现象**：生成在 "z_image compute buffer size: 173.32 MB(RAM)" 后无响应，GPU 利用率仅 38%，VRAM 仅 729 MiB。
+
+**原因**：sd.cpp **未启用 CUDA**（`GGML_CUDA:BOOL=OFF`），所有 tensor 分配在 RAM，但模型权重在 VRAM 中，两个空间无法互相访问 → 无响应。
+
+**修复**：
+1. `cmake .. -DGGML_CUDA=ON -DSD_CUDA=ON` 重建 sd.cpp
+2. 使用 `build.sh`（自动检测 GPU 并设置 CUDA 参数）
+3. `GGML_LTO=OFF` 避免 GCC 12 vs 13 LTO 版本不匹配
+
+**验证**：生成后显示 `ggml_cuda_init: found 1 CUDA devices (Total VRAM: 20052 MiB)`，z_image compute buffer 变为 270.28 MB(VRAM)，采样步进正常。
+
+#### 4.3.2 build.sh 改进
+
+1. 新增 `--quick` 模式：跳过 sd.cpp 重新编译（节省 ~10 分钟 CUDA 编译），仅重链 myimg-cli
+2. 为 myimg cmake 显式传递 `-DCMAKE_C_COMPILER` / `-DCMAKE_CXX_COMPILER`（之前仅依赖环境变量）
+3. `GGML_LTO=ON` → `OFF`：避免 GCC 版本混用时的 LTO 链接失败
+4. 测试编译跳过 `test_vae`（需要已移除的 libtorch）
+
+#### 4.3.3 数据回顾
+
+- CUDA build 耗时：~15 分钟（包含 ~8 分钟 CUDA kernel 编译）
+- 生成速度：640×640, 5 steps → ~5s (CUDA)
+- IPAdapter 注入后生成：640×640, 5 steps → ~5s (与无 IPAdapter 几乎一致)
+
+---
+
+**最后更新**: 2026-06-06  
 **维护者**: my-img Team  
 **版本**: v1.1（新增 70 commit 大跨越升级经验、DiffusionExtraParams 架构适配、FreeU/SAG 重新集成指南）

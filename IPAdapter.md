@@ -212,26 +212,29 @@ IPAdapter MLP [1, 768]            IPAdapter MLP [1, 768]
 ### 3.2 CLI 参数（已实现）
 
 ```
---ipadapter               Enable IPAdapter
---ipadapter-model PATH    IPAdapter model path
+--ipadapter                   Enable IPAdapter
+--ipadapter-model PATH        IPAdapter model path
 --ipadapter-clip-vision PATH  CLIP Vision model path
---ipadapter-image PATH    Reference image path
---ipadapter-weight FLOAT  Weight 0.0-1.0 (default: 1.0)
---ipadapter-start FLOAT   Start step ratio 0.0-1.0 (default: 0.0)
---ipadapter-end FLOAT     End step ratio 0.0-1.0 (default: 1.0)
+--ipadapter-projection PATH   768->2560 linear projection (optional)
+--ipadapter-image PATH        Reference image path
+--ipadapter-weight FLOAT      Weight 0.0-1.0 (default: 1.0)
+--ipadapter-start FLOAT       Start step ratio 0.0-1.0 (default: 0.0)
+--ipadapter-end FLOAT         End step ratio 0.0-1.0 (default: 1.0)
 ```
 
 ### 3.3 模型文件
 
 ```
 /data/models/image/
-├── ipadapter.onnx          (13K)     ← ONNX 头文件（外部数据格式）
-├── ipadapter.onnx.data     (5.4M)    ← ONNX 权重（2 层 MLP: 1024→768→768）
-├── clip_vision_sd15.safetensors (2.4G)  ← CLIP Vision 原始 PyTorch（不再使用）
-├── clip_vision.onnx        (397K)    ← CLIP Vision ONNX 头文件 ✅
-├── clip_vision.onnx.data   (2.36G)   ← CLIP Vision ONNX 权重 ✅
-├── inswapper_128.onnx      (529M)    ← Face Swap（不相关）
-└── yunet_320_320.onnx      (5.8M)    ← 人脸检测（不相关）
+├── ipadapter.onnx                (13K)     ← ONNX 头文件（外部数据格式）
+├── ipadapter.onnx.data           (5.4M)    ← ONNX 权重（2 层 MLP: 1024→768→768）
+├── ipadapter_proj.onnx           (0.3K)    ← 线性投影 ONNX 头文件 ✅
+├── ipadapter_proj.onnx.data      (15M)     ← 投影权重（MatMul 768×2560 + Bias）
+├── clip_vision_sd15.safetensors  (2.4G)    ← CLIP Vision 原始 PyTorch（不再使用）
+├── clip_vision.onnx              (397K)    ← CLIP Vision ONNX 头文件 ✅
+├── clip_vision.onnx.data         (2.36G)   ← CLIP Vision ONNX 权重 ✅
+├── inswapper_128.onnx            (529M)    ← Face Swap（不相关）
+└── yunet_320_320.onnx            (5.8M)    ← 人脸检测（不相关）
 ```
 
 **模型详细信息**：
@@ -240,6 +243,7 @@ IPAdapter MLP [1, 768]            IPAdapter MLP [1, 768]
 |------|------|------|------|------|
 | `clip_vision.onnx` | OpenCLIP ViT-bigG/14 | ~2.4B | `[1,3,224,224]` (image) + `[1,257]` (attention_mask) | `[1,1024]` (global embedding) |
 | `ipadapter.onnx` | 2-layer MLP | 1.38M | `[1,1024]` (CLIP embedding) | `[1,768]` (image tokens) |
+| `ipadapter_proj.onnx` | Linear(768→2560) | 1.97M | `[1,768]` (IPA tokens) | `[1,2560]` (Z-Image context) |
 
 ---
 
@@ -410,15 +414,18 @@ float* out_data = output[0].GetTensorMutableData<float>();
 - [x] 接入 sdcpp_adapter.cpp 生成流程（--ipadapter 参数触发加载 + 推理）
 - [x] 跨平台兼容：ipadapter.h 不依赖 ONNX Runtime 头文件（PIMPL），仅 .cpp 文件链接
 
-### Phase 3：上下文注入（DiT 适配）⏳（下一阶段）
+### Phase 3：上下文注入（DiT 适配）✅（完成）
 
-- [ ] 添加 Linear 投影层 768→2560（cap_feat_dim），将 IPAdapter 输出投影到 Z-Image 的 context 空间
-- [ ] 修改 sd.cpp 的 `generate_image()` 或新增 `generate_image_with_ipadapter()` 函数，接受 IPAdapter tokens
-- [ ] 在 `get_learned_condition()` 后，将 image tokens 拼接到 `SDCondition.c_crossattn` 的 [77, 2560] context 上
-- [ ] 修改 `ZImageModel::forward_core()` 或调用处，使 image tokens 通过 `cap_embedder` 进入 `JointAttention`
-- [ ] 实现权重控制（ipadapter_weight → 缩放 image tokens）
-- [ ] 实现步数控制（start_at / end_at）
-- [ ] 处理维度投影（768→2560）— 可以是简单 Linear 层或 ONNX 模型
+- [x] 修改 sd.cpp 的 `sd_img_gen_params_t`，新增 `ipadapter_tokens` / `ipadapter_num_tokens` / `ipadapter_weight` 字段
+- [x] 在 `prepare_image_generation_embeds()` 中，`get_learned_condition()` 后注入 image tokens：
+  - 创建 `[ctx_dim, num_ipa_tokens]` 张量（768→ctx_dim 零填充）
+  - 沿 dim=1 拼接到 `cond.c_crossattn` 和 `uncond.c_crossattn`
+  - 已验证 shape 变化：`[2560, 9]` → `[2560, 10]`
+- [x] 实现权重控制（`ipadapter_weight` → 缩放 image tokens）
+- [x] `sdcpp_adapter.cpp` 中接入：`--ipadapter` 触发完整管线并将 token 指针传给 `sd_img_gen_params_t`
+- [x] PE 兼容性验证：Z-Image 在 graph-build time 基于 `context->ne[1]` 生成 PE，注入 token 后自动适配，断言通过
+- [x] 线性投影层 768→2560（ONNX 模型，identity init，可后续替换为训练权重）
+- [ ] 步数控制（start_at / end_at）
 
 ### Phase 4：集成与优化
 
@@ -462,6 +469,41 @@ float* out_data = output[0].GetTensorMutableData<float>();
 **理由**：
 - DiT 的 JointAttention 天然支持文本+图像混合，context 拼接是非常自然的注入方式
 - 无需额外的 attention 层修改
+
+### 2026-06-06 (5)：Phase 3.1 — 线性投影层 768→2560
+
+**问题**：IPAdapter MLP 输出 768-dim，Z-Image context 是 2560-dim，零填充导致 70% 维度为空。
+
+**决策**：
+1. 创建 ONNX 模型 `ipadapter_proj.onnx`，包含 `MatMul(768×2560) + Add` 两个算子
+2. 初始化权重为 identity-like（前 768 维对角线为 1，其余为 0），功能等价于零填充
+3. 投影层为可选加载：提供 `--ipadapter-projection PATH` 参数，不提供时回退到零填充
+4. 未来可替换 `.data` 权重文件为训练好的投影矩阵
+
+**实现**：
+- `ipadapter.cpp`: 新增 `proj_session`, `load_projection()`, `run_projection()` 
+- `run_projection()` 在投影层未加载时自动回退到 C++ 零填充（无需 ONNX）
+- sd.cpp 注入代码改为使用 `ctx_dim` 而非硬编码 768，支持任意维度 token
+- CLI: `--ipadapter-projection` 参数
+
+### 2026-06-06 (4)：Phase 3 注入实现 — 零填充 + concat
+
+**问题**：如何将 IPAdapter 的 768-dim token 注入到 Z-Image DiT 的 2560-dim context 中？
+
+**决策**：
+1. 在 `prepare_image_generation_embeds()` 中实现注入，而非在采样循环中逐个 attention 层修改
+2. 768→2560 使用**零填充**（先填充到完整 ctx_dim，剩余 1792 位为 0），而非训练 Linear 层
+3. **拼接**（concat）而非相加：沿 dim=1 追加 token 到 `cond.c_crossattn` 和 `uncond.c_crossattn`
+4. 注入点：`get_learned_condition()` 返回后（line 4164），生成最终 embeds 前
+
+**理由**：
+- 零填充是可行的 prototype — DiT 的 `cap_embedder` 用 RMSNorm + Linear 处理 context，零填充维度不会干扰已学习的权重
+- 拼接而非相加保持 token 独立性，不污染原始 text tokens
+- `prepare_image_generation_embeds()` 是统一入口，一次修改覆盖所有采样路径
+
+**验证**：
+- 注入后 shape: `[2560, 9]` → `[2560, 10]` ✅
+- Z-Image PE 断言通过（graph-build time 基于 `context->ne[1]` 生成 PE）✅
 
 ### 2026-06-06 (3)：ONNX Runtime + CUDA 12.6 适配
 
@@ -562,7 +604,9 @@ TEST_CASE("IPAdapter: context concatenation", "[ipadapter][unit]") {
 |------|----------|------|
 | P1：ONNX Runtime 安装 + 模型转换 | 2026-06-06 | ✅ 已完成 |
 | P2：CLIP Vision + IPAdapter ONNX 推理 | 2026-06-06 | ✅ 已完成 |
-| P3：条件编码注入 + 生成流程集成 | 下一轮 | ⏳ 待开始 |
+| P3：条件编码注入 + 生成流程集成 | 2026-06-06 | ✅ 已完成（零填充投影 + 无步数控制） |
+| P3.1：线性投影层 768→2560 | 2026-06-06 | ✅ 已完成 |
+| P3.2：步数控制 start_at / end_at | 下一轮 | ⏳ 待开始 |
 | P4：HiRes Fix + 高清测试 | - | ⏳ 待开始 |
 | P5：抠脸 + 参数调优 | - | ⏳ 待开始 |
 

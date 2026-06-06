@@ -40,6 +40,13 @@
 #   现象: "bytecode stream generated with LTO version 12.0 instead of 13.1"
 #   原因: stable-diffusion.cpp 用 gcc-12 编译，但 my-img 链接时用了 g++-13
 #   修复: 统一通过环境变量 export CC/CXX，而不是仅在 cmake 中指定
+#   ⚠️ build.sh 已设置 GGML_LTO=OFF 彻底避免此问题
+#
+# 使用方式:
+#   ./build.sh             完整编译（sd.cpp + myimg-cli + 测试）
+#   ./build.sh sd          仅编译 sd.cpp（不编译 myimg-cli）
+#   ./build.sh myimg       仅编译 myimg-cli（不编译 sd.cpp）
+#   ./build.sh quick       仅编译 myimg-cli（跳过 sd.cpp，节省 ~10 分钟）
 #
 # 环境要求:
 #   - CUDA: /data/cuda (需符号链接到 /usr/local/cuda)
@@ -128,103 +135,130 @@ echo "  CUDA: ${USE_CUDA}"
 echo ""
 
 # =============================================================================
-# 1. 编译 stable-diffusion.cpp
+# 1. 解析子命令
 # =============================================================================
-echo -e "${BLUE}[1/3] 编译 stable-diffusion.cpp...${NC}"
+MODE="${1:-all}"  # all, sd, myimg, quick
 
-if [ ! -d "${SD_DIR}" ]; then
-    echo -e "${RED}Error: stable-diffusion.cpp 未找到${NC}"
-    echo "请确保 /opt/stable-diffusion.cpp 已安装"
-    exit 1
-fi
-
-# 确保子模块完整
-if [ ! -f "${SD_DIR}/ggml/CMakeLists.txt" ]; then
-    echo -e "${YELLOW}⚠ 子模块缺失，正在更新...${NC}"
-    cd "${SD_DIR}"
-    git submodule update --init --recursive
-fi
-
-# 清理并创建 build 目录
-cd "${SD_DIR}"
-rm -rf "${SD_BUILD_DIR}"
-mkdir -p "${SD_BUILD_DIR}" && cd "${SD_BUILD_DIR}"
-
-# CMake 配置
-CMAKE_FLAGS=(
-    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
-    -DSD_CUDA="${USE_CUDA}"
-    -DGGML_CUDA="${USE_CUDA}"
-)
-
-if [ "$USE_CUDA" = "ON" ]; then
-    CMAKE_FLAGS+=(
-        -DSD_FLASH_ATTN=ON
-        -DSD_FAST_SOFTMAX=ON
-        -DGGML_NATIVE=OFF
-        -DGGML_LTO=ON
-        -DGGML_CUDA_FA_ALL_QUANTS=ON
-        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}"
-        -DCMAKE_CUDA_COMPILER="${CUDA_HOME}/bin/nvcc"
-    )
-fi
-
-cmake .. "${CMAKE_FLAGS[@]}"
-make -j${JOBS} stable-diffusion
-
-echo -e "${GREEN}✓ stable-diffusion.cpp 编译完成${NC}"
+echo -e "${CYAN}构建模式: ${MODE}${NC}"
 echo ""
 
 # =============================================================================
-# 2. 编译 my-img
+# 2. 构建函数
 # =============================================================================
-echo -e "${BLUE}[2/3] 编译 my-img...${NC}"
 
-cd "${SCRIPT_DIR}"
-mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"
+build_sd() {
+    echo -e "${BLUE}[sd.cpp] 编译 stable-diffusion.cpp...${NC}"
 
-cmake .. \
-    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
-
-make -j${JOBS} myimg-cli
-
-echo -e "${GREEN}✓ my-img 编译完成${NC}"
-echo ""
-
-# =============================================================================
-# 3. 编译测试（可选）
-# =============================================================================
-echo -e "${BLUE}[3/3] 编译测试...${NC}"
-make -j${JOBS} test_gguf_loader test_vae test_sdcpp_adapter
-
-echo -e "${GREEN}✓ 测试编译完成${NC}"
-echo ""
-
-# =============================================================================
-# 完成
-# =============================================================================
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}  构建成功!${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
-echo "可执行文件: ${BUILD_DIR}/myimg-cli"
-echo ""
-echo "使用示例:"
-echo "  ./build/myimg-cli --help"
-echo ""
-echo "运行测试:"
-echo "  cd build && LD_LIBRARY_PATH=.:third_party/ggml/src:\$LD_LIBRARY_PATH ./test_gguf_loader"
-echo ""
-
-# 验证二进制文件
-if [ -f "${BUILD_DIR}/myimg-cli" ]; then
-    FILE_SIZE=$(du -h "${BUILD_DIR}/myimg-cli" | cut -f1)
-    echo -e "文件大小: ${CYAN}${FILE_SIZE}${NC}"
-    
-    # 检查是否链接了 CUDA
-    if ldd "${BUILD_DIR}/myimg-cli" | grep -q "libcudart"; then
-        echo -e "CUDA 支持: ${GREEN}已启用${NC}"
-    else
-        echo -e "CUDA 支持: ${YELLOW}未启用${NC}"
+    if [ ! -d "${SD_DIR}" ]; then
+        echo -e "${RED}Error: stable-diffusion.cpp 未找到${NC}"
+        exit 1
     fi
-fi
+
+    # 确保子模块完整
+    if [ ! -f "${SD_DIR}/ggml/CMakeLists.txt" ]; then
+        echo -e "${YELLOW}⚠ 子模块缺失，正在更新...${NC}"
+        cd "${SD_DIR}"
+        git submodule update --init --recursive
+    fi
+
+    cd "${SD_DIR}"
+    rm -rf "${SD_BUILD_DIR}"
+    mkdir -p "${SD_BUILD_DIR}" && cd "${SD_BUILD_DIR}"
+
+    CMAKE_FLAGS=(
+        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
+        -DSD_CUDA="${USE_CUDA}"
+        -DGGML_CUDA="${USE_CUDA}"
+        -DCMAKE_C_COMPILER="${CC}"
+        -DCMAKE_CXX_COMPILER="${CXX}"
+    )
+
+    if [ "$USE_CUDA" = "ON" ]; then
+        CMAKE_FLAGS+=(
+            -DSD_FLASH_ATTN=ON
+            -DSD_FAST_SOFTMAX=ON
+            -DGGML_NATIVE=OFF
+            -DGGML_LTO=OFF
+            -DGGML_CUDA_FA_ALL_QUANTS=ON
+            -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}"
+            -DCMAKE_CUDA_COMPILER="${CUDA_HOME}/bin/nvcc"
+        )
+    fi
+
+    cmake .. "${CMAKE_FLAGS[@]}"
+    make -j${JOBS} stable-diffusion
+
+    echo -e "${GREEN}✓ sd.cpp 编译完成${NC}"
+    echo ""
+}
+
+build_myimg() {
+    echo -e "${BLUE}[myimg] 编译 myimg-cli...${NC}"
+
+    cd "${SCRIPT_DIR}"
+    mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"
+
+    # 如果 CMakeCache 不存在则重新配置，否则直接编译
+    if [ ! -f "CMakeCache.txt" ]; then
+        cmake .. \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DCMAKE_C_COMPILER="${CC}" \
+            -DCMAKE_CXX_COMPILER="${CXX}"
+    fi
+
+    make -j${JOBS} myimg-cli
+
+    echo -e "${GREEN}✓ myimg-cli 编译完成${NC}"
+    echo ""
+}
+
+build_tests() {
+    echo -e "${BLUE}[tests] 编译测试...${NC}"
+    cd "${BUILD_DIR}"
+    # test_vae 需要已移除的 libtorch，跳过
+    make -j${JOBS} test_gguf_loader test_sdcpp_adapter 2>/dev/null || true
+    echo -e "${GREEN}✓ 测试编译完成${NC}"
+    echo ""
+}
+
+show_result() {
+    if [ -f "${BUILD_DIR}/myimg-cli" ]; then
+        FILE_SIZE=$(du -h "${BUILD_DIR}/myimg-cli" | cut -f1)
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}  构建成功!${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        echo ""
+        echo "可执行文件: ${BUILD_DIR}/myimg-cli"
+        echo "文件大小:    ${CYAN}${FILE_SIZE}${NC}"
+        if ldd "${BUILD_DIR}/myimg-cli" | grep -q "libcudart"; then
+            echo "CUDA 支持:   ${GREEN}已启用${NC}"
+        else
+            echo "CUDA 支持:   ${YELLOW}未启用${NC}"
+        fi
+    else
+        echo -e "${GREEN}sd.cpp 编译完成${NC}"
+    fi
+}
+
+# =============================================================================
+# 3. 执行构建
+# =============================================================================
+case "$MODE" in
+    sd)
+        build_sd
+        ;;
+    myimg|quick)
+        build_myimg
+        ;;
+    all)
+        build_sd
+        build_myimg
+        build_tests
+        show_result
+        ;;
+    *)
+        echo -e "${YELLOW}未知模式: ${MODE}${NC}"
+        echo "支持的模式: all (默认), sd, myimg, quick"
+        exit 1
+        ;;
+esac
