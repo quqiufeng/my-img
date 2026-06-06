@@ -1,16 +1,16 @@
 #pragma once
 
 #include <string>
-#include <torch/torch.h>
-#include "utils/image_utils.h"
+#include <vector>
+#include <memory>
 
 namespace myimg {
 
 // IPAdapter: 图像提示词
 // 通过 CLIP Vision 提取图像特征，注入到扩散模型的注意力中
 struct IPAdapterConfig {
-    std::string model_path;          // IPAdapter 模型路径 (.safetensors/.bin)
-    std::string clip_vision_path;    // CLIP Vision 模型路径
+    std::string model_path;          // IPAdapter 模型路径 (.onnx)
+    std::string clip_vision_path;    // CLIP Vision 模型路径 (.onnx)
     std::string image_path;          // 参考图像路径
     float weight = 1.0f;             // 注入权重 (0.0-1.0)
     float start_at = 0.0f;           // 开始注入的步数比例 (0.0-1.0)
@@ -20,40 +20,43 @@ struct IPAdapterConfig {
 
 class IPAdapter {
 public:
-    IPAdapter() = default;
+    IPAdapter();
     explicit IPAdapter(const IPAdapterConfig& config);
-    
-    // 加载模型
+    ~IPAdapter();
+
+    // 禁止拷贝，允许移动
+    IPAdapter(const IPAdapter&) = delete;
+    IPAdapter& operator=(const IPAdapter&) = delete;
+    IPAdapter(IPAdapter&&) noexcept;
+    IPAdapter& operator=(IPAdapter&&) noexcept;
+
+    // 加载 ONNX 模型（CLIP Vision + IPAdapter MLP）
     bool load_model(const std::string& model_path, const std::string& clip_vision_path);
-    
-    // 加载参考图像
+
+    // 加载参考图像，提取特征
+    // 内部会运行 CLIP Vision → IPAdapter MLP 完整管线
     bool load_reference_image(const std::string& image_path);
-    
-    // 提取图像特征
-    torch::Tensor extract_image_features(const torch::Tensor& image);
-    
-    // 注入注意力（在采样过程中调用）
-    // latent: 当前 latent
-    // step: 当前步数
-    // total_steps: 总步数
-    torch::Tensor apply_ipadapter(const torch::Tensor& latent, int step, int total_steps);
-    
+
+    // 获取计算好的 image tokens（扁平化 float 向量）
+    // 形状: [1, 768] — 由 IPAdapter MLP 输出
+    // 需要投影到 2560-dim (cap_feat_dim) 后方能拼接到 Z-Image 的 text context
+    const std::vector<float>& get_image_tokens() const { return image_tokens_; }
+
     // 是否已加载
-    bool is_loaded() const { return model_loaded_ && clip_vision_loaded_; }
-    
+    bool is_loaded() const { return model_loaded_; }
+
     const IPAdapterConfig& config() const { return config_; }
-    
+
 private:
     IPAdapterConfig config_;
     bool model_loaded_ = false;
-    bool clip_vision_loaded_ = false;
-    torch::Tensor image_features_;   // 缓存的图像特征
-    
-    // CLIP Vision 推理
-    torch::Tensor clip_vision_encode(const torch::Tensor& image);
-    
-    // IPAdapter 注意力注入
-    torch::Tensor inject_attention(const torch::Tensor& latent, const torch::Tensor& image_features);
+
+    // 缓存 image tokens (IPAdapter MLP output, [1, 768])
+    std::vector<float> image_tokens_;
+
+    // ONNX Runtime 实现细节 (PIMPL)
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace myimg

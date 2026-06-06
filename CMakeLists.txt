@@ -167,6 +167,8 @@ elseif(EXISTS /opt/onnxruntime-linux-x64-1.20.1)
     set(ONNXRUNTIME_ROOT /opt/onnxruntime-linux-x64-1.20.1)
 elseif(EXISTS /opt/onnxruntime-linux-x64-gpu-1.16.3)
     set(ONNXRUNTIME_ROOT /opt/onnxruntime-linux-x64-gpu-1.16.3)
+elseif(EXISTS /data/venv/onnxruntime-linux-x64-gpu-1.20.1)
+    set(ONNXRUNTIME_ROOT /data/venv/onnxruntime-linux-x64-gpu-1.20.1)
 endif()
 
 if(ONNXRUNTIME_ROOT AND EXISTS "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so")

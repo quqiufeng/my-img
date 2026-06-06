@@ -5,6 +5,7 @@
 #include "utils/face_restoration.h"
 #include "utils/face_swap.h"
 #include "utils/latent_ops.h"
+#include "utils/ipadapter.h"
 #include <stable-diffusion.h>
 
 #include <iostream>
@@ -12,6 +13,8 @@
 #include <chrono>
 #include <cctype>
 #include <filesystem>
+#include <numeric>
+#include <algorithm>
 
 #include <stb_image_write.h>
 #include <jpeglib.h>
@@ -474,6 +477,38 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     }
     if (params.ipadapter) {
         std::cout << "  IPAdapter: enabled (weight: " << params.ipadapter_weight << ")" << std::endl;
+        std::cout << "  IPAdapter: loading models..." << std::endl;
+        try {
+            IPAdapterConfig ipa_config;
+            ipa_config.model_path = params.ipadapter_model;
+            ipa_config.clip_vision_path = params.ipadapter_clip_vision;
+            ipa_config.image_path = params.ipadapter_image;
+            ipa_config.weight = params.ipadapter_weight;
+            ipa_config.start_at = params.ipadapter_start_at;
+            ipa_config.end_at = params.ipadapter_end_at;
+
+            ipadapter_ = std::make_unique<IPAdapter>(ipa_config);
+
+            if (ipadapter_ && ipadapter_->is_loaded()) {
+                auto& tokens = ipadapter_->get_image_tokens();
+                std::cout << "  IPAdapter: image tokens computed, size="
+                          << tokens.size() << " floats" << std::endl;
+                if (!tokens.empty()) {
+                    float min_val = *std::min_element(tokens.begin(), tokens.end());
+                    float max_val = *std::max_element(tokens.begin(), tokens.end());
+                    float sum = std::accumulate(tokens.begin(), tokens.end(), 0.0f);
+                    float mean_val = sum / tokens.size();
+                    std::cout << "  IPAdapter: token stats: min=" << min_val
+                              << " max=" << max_val << " mean=" << mean_val << std::endl;
+                }
+            } else {
+                std::cout << "  IPAdapter: model loading failed ("
+                          << (params.ipadapter_model.empty() ? "no model" : params.ipadapter_model)
+                          << ")" << std::endl;
+            }
+        } catch (const std::exception& e) {
+            LOG_WARN("IPAdapter initialization failed: %s", e.what());
+        }
     }
     if (params.t2i_adapter) {
         std::cout << "  T2I-Adapter: enabled (strength: " << params.t2i_adapter_strength << ")" << std::endl;

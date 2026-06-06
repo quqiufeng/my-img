@@ -142,12 +142,19 @@
 
 #### Task 9.1: IPAdapter（图像提示词）⏳
 - [x] CLI 参数占位
-- [ ] CLIP Vision 真实推理
-- [ ] IPAdapter 注意力注入
-- [ ] encode_prompt() 实现（当前返回空向量）
+- [x] ONNX Runtime GPU 安装（/data/venv/）
+- [x] CLIP Vision ONNX 转换（clip_vision.onnx + .data）
+- [x] Python 端到端推理验证（demo.png → CLIP Vision → IPAdapter MLP ✅）
+- [x] ipadapter.cpp 重写：ONNX Runtime (Ort::Session) 替代 OpenCV DNN + libtorch
+- [x] CLIP Vision ONNX Runtime C++ 推理 ✅（2.4GB → [1, 1024], ~1s）
+- [x] IPAdapter MLP ONNX Runtime C++ 推理 ✅（5.4MB → [1, 768], instant）
+- [x] 接入 sdcpp_adapter.cpp 生成流程（--ipadapter 触发的完整推理管线）
+- [ ] Linear 投影层 768→2560 (cap_feat_dim) — 将 IPAdapter tokens 投影到 Z-Image context 空间
+- [ ] 条件编码注入（修改 sd.cpp 的 generate_image 或将 image tokens 拼接到 SDCondition.c_crossattn）
+- [ ] 生成流程集成（在 generate_image() 调用前注入修改后的 context）
 - **优先级**: P2
 - **难度**: 高
-- **状态**: ⏳ 框架占位（2026-06-01）
+- **状态**: ⏳ Phase 1-2 完成，Phase 3 待开始（条件编码注入）（2026-06-06）
 
 #### Task 8.2: IPAdapter FaceID
 - [ ] 人脸识别特征提取

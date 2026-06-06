@@ -1,14 +1,235 @@
 #include "utils/ipadapter.h"
 #include "utils/log.h"
-#include "utils/image_utils.h"
-#include <filesystem>
-#include <opencv2/dnn.hpp>
+
+#include <onnxruntime_cxx_api.h>
+
+#include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
+
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cmath>
+#include <numeric>
 
 namespace myimg {
 
-IPAdapter::IPAdapter(const IPAdapterConfig& config) 
-    : config_(config) {
+// ============================================================
+// PIMPL: ONNX Runtime 实现细节
+// ============================================================
+struct IPAdapter::Impl {
+    Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "IPAdapter"};
+    Ort::SessionOptions session_options;
+    std::unique_ptr<Ort::Session> clip_session;
+    std::unique_ptr<Ort::Session> ipa_session;
+
+    // CLIP Vision 输入输出名
+    std::string clip_input_name;
+    std::string clip_output_name;
+
+    // IPAdapter MLP 输入输出名
+    std::string ipa_input_name;
+    std::string ipa_output_name;
+
+    Impl() {
+        session_options.SetIntraOpNumThreads(4);
+        session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    }
+
+    ~Impl() = default;
+
+    // 禁止拷贝
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+
+    bool load_clip_vision(const std::string& path) {
+        try {
+            clip_session = std::make_unique<Ort::Session>(env, path.c_str(), session_options);
+
+            // 获取输入输出名
+            auto input_count = clip_session->GetInputCount();
+            auto output_count = clip_session->GetOutputCount();
+
+            if (input_count < 1 || output_count < 1) {
+                LOG_ERROR("IPAdapter: CLIP Vision has no inputs/outputs");
+                return false;
+            }
+
+            auto input_name_ptr = clip_session->GetInputNameAllocated(0, Ort::AllocatorWithDefaultOptions());
+            clip_input_name = input_name_ptr.get();
+
+            auto output_name_ptr = clip_session->GetOutputNameAllocated(0, Ort::AllocatorWithDefaultOptions());
+            clip_output_name = output_name_ptr.get();
+
+            LOG_INFO("IPAdapter: CLIP Vision ONNX model loaded: %s", path.c_str());
+            LOG_INFO("  Input: %s", clip_input_name.c_str());
+            LOG_INFO("  Output: %s", clip_output_name.c_str());
+
+            // 获取输入 shape 信息
+            auto input_type_info = clip_session->GetInputTypeInfo(0);
+            auto input_shape = input_type_info.GetTensorTypeAndShapeInfo().GetShape();
+            std::string shape_str = "[";
+            for (size_t i = 0; i < input_shape.size(); i++) {
+                if (i > 0) shape_str += ", ";
+                if (input_shape[i] == -1) {
+                    shape_str += "N";
+                } else {
+                    shape_str += std::to_string(input_shape[i]);
+                }
+            }
+            shape_str += "]";
+            LOG_INFO("  Input shape: %s", shape_str.c_str());
+
+            return true;
+        } catch (const Ort::Exception& e) {
+            LOG_ERROR("IPAdapter: Failed to load CLIP Vision: %s", e.what());
+            return false;
+        }
+    }
+
+    bool load_ipadapter(const std::string& path) {
+        try {
+            ipa_session = std::make_unique<Ort::Session>(env, path.c_str(), session_options);
+
+            auto input_name_ptr = ipa_session->GetInputNameAllocated(0, Ort::AllocatorWithDefaultOptions());
+            ipa_input_name = input_name_ptr.get();
+
+            auto output_name_ptr = ipa_session->GetOutputNameAllocated(0, Ort::AllocatorWithDefaultOptions());
+            ipa_output_name = output_name_ptr.get();
+
+            LOG_INFO("IPAdapter: IPAdapter MLP ONNX model loaded: %s", path.c_str());
+            LOG_INFO("  Input: %s", ipa_input_name.c_str());
+            LOG_INFO("  Output: %s", ipa_output_name.c_str());
+
+            return true;
+        } catch (const Ort::Exception& e) {
+            LOG_ERROR("IPAdapter: Failed to load IPAdapter MLP: %s", e.what());
+            return false;
+        }
+    }
+
+    // 运行 CLIP Vision 推理
+    // input: [1, 3, 224, 224] float32 normalized image
+    // output: [1, 1024] float32 image embedding
+    std::vector<float> run_clip_vision(const std::vector<float>& input_image) {
+        if (!clip_session) {
+            LOG_ERROR("IPAdapter: CLIP Vision session not loaded");
+            return {};
+        }
+
+        try {
+            // 构建 input tensor
+            std::vector<int64_t> input_shape = {1, 3, 224, 224};
+            Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+                OrtArenaAllocator, OrtMemTypeDefault);
+
+            Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+                memory_info, const_cast<float*>(input_image.data()),
+                input_image.size(), input_shape.data(), input_shape.size());
+
+            // 运行推理
+            const char* input_names[] = {clip_input_name.c_str()};
+            const char* output_names[] = {clip_output_name.c_str()};
+
+            auto output_tensors = clip_session->Run(Ort::RunOptions{nullptr},
+                                                     input_names, &input_tensor, 1,
+                                                     output_names, 1);
+
+            if (output_tensors.empty() || !output_tensors[0].IsTensor()) {
+                LOG_ERROR("IPAdapter: CLIP Vision inference returned no output");
+                return {};
+            }
+
+            // 读取输出
+            auto output_info = output_tensors[0].GetTensorTypeAndShapeInfo();
+            auto output_shape = output_info.GetShape();
+            size_t num_elements = output_info.GetElementCount();
+
+            if (num_elements == 0) {
+                LOG_ERROR("IPAdapter: CLIP Vision output is empty");
+                return {};
+            }
+
+            float* output_data = output_tensors[0].GetTensorMutableData<float>();
+            std::vector<float> result(output_data, output_data + num_elements);
+
+            LOG_INFO("IPAdapter: CLIP Vision output shape [%zu x %zu]",
+                     output_shape.size() >= 1 ? (size_t)output_shape[0] : 0,
+                     output_shape.size() >= 2 ? (size_t)output_shape[1] : num_elements);
+
+            return result;
+        } catch (const Ort::Exception& e) {
+            LOG_ERROR("IPAdapter: CLIP Vision inference failed: %s", e.what());
+            return {};
+        }
+    }
+
+    // 运行 IPAdapter MLP 推理
+    // input: [1, 1024] float32 CLIP image embedding
+    // output: [1, 768] float32 image tokens
+    std::vector<float> run_ipadapter(const std::vector<float>& clip_embedding) {
+        if (!ipa_session) {
+            LOG_ERROR("IPAdapter: IPAdapter session not loaded");
+            return {};
+        }
+
+        try {
+            // 构建 input tensor
+            std::vector<int64_t> input_shape = {1, 1024};
+            Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(
+                OrtArenaAllocator, OrtMemTypeDefault);
+
+            Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+                memory_info, const_cast<float*>(clip_embedding.data()),
+                clip_embedding.size(), input_shape.data(), input_shape.size());
+
+            // 运行推理
+            const char* input_names[] = {ipa_input_name.c_str()};
+            const char* output_names[] = {ipa_output_name.c_str()};
+
+            auto output_tensors = ipa_session->Run(Ort::RunOptions{nullptr},
+                                                    input_names, &input_tensor, 1,
+                                                    output_names, 1);
+
+            if (output_tensors.empty() || !output_tensors[0].IsTensor()) {
+                LOG_ERROR("IPAdapter: IPAdapter MLP inference returned no output");
+                return {};
+            }
+
+            // 读取输出
+            auto output_info = output_tensors[0].GetTensorTypeAndShapeInfo();
+            size_t num_elements = output_info.GetElementCount();
+
+            if (num_elements == 0) {
+                LOG_ERROR("IPAdapter: IPAdapter MLP output is empty");
+                return {};
+            }
+
+            float* output_data = output_tensors[0].GetTensorMutableData<float>();
+            std::vector<float> result(output_data, output_data + num_elements);
+
+            LOG_INFO("IPAdapter: IPAdapter MLP output size: %zu floats", num_elements);
+
+            return result;
+        } catch (const Ort::Exception& e) {
+            LOG_ERROR("IPAdapter: IPAdapter MLP inference failed: %s", e.what());
+            return {};
+        }
+    }
+};
+
+// ============================================================
+// IPAdapter 公共接口实现
+// ============================================================
+
+IPAdapter::IPAdapter()
+    : impl_(std::make_unique<Impl>()) {
+}
+
+IPAdapter::IPAdapter(const IPAdapterConfig& config)
+    : config_(config)
+    , impl_(std::make_unique<Impl>()) {
     if (!config_.model_path.empty() && !config_.clip_vision_path.empty()) {
         load_model(config_.model_path, config_.clip_vision_path);
     }
@@ -17,173 +238,114 @@ IPAdapter::IPAdapter(const IPAdapterConfig& config)
     }
 }
 
+IPAdapter::~IPAdapter() = default;
+
+IPAdapter::IPAdapter(IPAdapter&&) noexcept = default;
+IPAdapter& IPAdapter::operator=(IPAdapter&&) noexcept = default;
+
 bool IPAdapter::load_model(const std::string& model_path, const std::string& clip_vision_path) {
-    LOG_INFO("IPAdapter: loading IPAdapter model from %s", model_path.c_str());
-    LOG_INFO("IPAdapter: loading CLIP Vision model from %s", clip_vision_path.c_str());
-    
-    try {
-        // 加载 IPAdapter ONNX 模型
-        if (std::filesystem::exists(model_path)) {
-            cv::dnn::Net ip_net = cv::dnn::readNetFromONNX(model_path);
-            if (!ip_net.empty()) {
-                ip_net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
-                ip_net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-                LOG_INFO("IPAdapter: IPAdapter ONNX model loaded");
-                model_loaded_ = true;
-            }
-        }
-        
-        // 加载 CLIP Vision ONNX 模型
-        if (std::filesystem::exists(clip_vision_path)) {
-            cv::dnn::Net clip_net = cv::dnn::readNetFromONNX(clip_vision_path);
-            if (!clip_net.empty()) {
-                clip_net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
-                clip_net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-                LOG_INFO("IPAdapter: CLIP Vision ONNX model loaded");
-                clip_vision_loaded_ = true;
-            }
-        }
-        
-        if (!model_loaded_) {
-            LOG_WARN("IPAdapter: model loading failed");
-            return false;
-        }
-        
-        return true;
-    } catch (const std::exception& e) {
-        LOG_ERROR("IPAdapter: model loading failed: %s", e.what());
-        return false;
+    LOG_INFO("IPAdapter: loading models...");
+    LOG_INFO("  IPAdapter MLP: %s", model_path.c_str());
+    LOG_INFO("  CLIP Vision: %s", clip_vision_path.c_str());
+
+    // 先加载 CLIP Vision（更大，2.4GB）
+    bool clip_ok = impl_->load_clip_vision(clip_vision_path);
+
+    // 再加载 IPAdapter MLP（较小，5.4MB）
+    bool ipa_ok = impl_->load_ipadapter(model_path);
+
+    model_loaded_ = clip_ok && ipa_ok;
+
+    if (!model_loaded_) {
+        LOG_WARN("IPAdapter: model loading %s",
+                 clip_ok ? "partially failed (IPAdapter MLP)" :
+                 ipa_ok ? "partially failed (CLIP Vision)" :
+                          "failed (both models)");
+    } else {
+        LOG_INFO("IPAdapter: both models loaded successfully");
     }
+
+    return model_loaded_;
 }
 
 bool IPAdapter::load_reference_image(const std::string& image_path) {
-    LOG_INFO("IPAdapter: loading reference image from %s", image_path.c_str());
-    
-    if (!std::filesystem::exists(image_path)) {
-        LOG_ERROR("IPAdapter: image not found: %s", image_path.c_str());
+    LOG_INFO("IPAdapter: processing reference image: %s", image_path.c_str());
+
+    if (!model_loaded_) {
+        LOG_WARN("IPAdapter: models not loaded, cannot process image");
         return false;
     }
-    
-    try {
-        auto image = load_image(image_path);
-        image_features_ = extract_image_features(image);
-        return image_features_.defined();
-    } catch (const std::exception& e) {
-        LOG_ERROR("IPAdapter: failed to load reference image: %s", e.what());
+
+    // 1. 加载图像 (OpenCV)
+    cv::Mat img = cv::imread(image_path, cv::IMREAD_COLOR);
+    if (img.empty()) {
+        LOG_ERROR("IPAdapter: failed to load image: %s", image_path.c_str());
         return false;
     }
-}
+    LOG_INFO("IPAdapter: loaded image %dx%d", img.cols, img.rows);
 
-torch::Tensor IPAdapter::extract_image_features(const torch::Tensor& image) {
-    if (!clip_vision_loaded_) {
-        LOG_WARN("IPAdapter: CLIP Vision model not loaded");
-        return torch::Tensor();
-    }
-    
-    try {
-        auto img_data = tensor_to_image_data(image);
-        cv::Mat img(img_data.height, img_data.width, CV_8UC3, (void*)img_data.data.data());
-        
-        // CLIP 预处理：Resize 224x224，归一化
-        cv::Mat resized;
-        cv::resize(img, resized, cv::Size(224, 224));
-        cv::Mat blob = cv::dnn::blobFromImage(resized, 1.0 / 255.0, cv::Size(224, 224),
-                                              cv::Scalar(0.485, 0.456, 0.406), true, false);
-        
-        cv::dnn::Net clip_net = cv::dnn::readNetFromONNX(config_.clip_vision_path);
-        clip_net.setInput(blob);
-        cv::Mat features = clip_net.forward();
-        
-        auto sizes = features.size;
-        auto tensor = torch::from_blob(features.data, {sizes[0], sizes[1]}, torch::kFloat32).clone();
-        
-        LOG_INFO("IPAdapter: extracted image features, shape: [%ld, %ld]", tensor.size(0), tensor.size(1));
-        return tensor;
-    } catch (const std::exception& e) {
-        LOG_ERROR("IPAdapter: feature extraction failed: %s", e.what());
-        return torch::Tensor();
-    }
-}
+    // 2. 预处理: BGR→RGB, resize 224x224, float32, normalize
+    cv::Mat rgb;
+    cv::cvtColor(img, rgb, cv::COLOR_BGR2RGB);
 
-torch::Tensor IPAdapter::apply_ipadapter(const torch::Tensor& latent, int step, int total_steps) {
-    if (!is_loaded() || !image_features_.defined()) {
-        return latent;
-    }
-    
-    float progress = static_cast<float>(step) / total_steps;
-    
-    // 检查是否在注入范围内
-    if (progress < config_.start_at || progress > config_.end_at) {
-        return latent;
-    }
-    
-    // 计算当前步数的有效权重
-    float effective_weight = config_.weight;
-    if (progress < config_.start_at + 0.1f) {
-        effective_weight *= (progress - config_.start_at) / 0.1f;
-    } else if (progress > config_.end_at - 0.1f) {
-        effective_weight *= (config_.end_at - progress) / 0.1f;
-    }
-    
-    try {
-        // 通过 IPAdapter 模型投影图像特征
-        cv::dnn::Net ip_net = cv::dnn::readNetFromONNX(config_.model_path);
-        
-        // 准备输入
-        auto features_cpu = image_features_.to(torch::kCPU);
-        cv::Mat img_features(image_features_.size(0), image_features_.size(1), CV_32F, features_cpu.data_ptr<float>());
-        cv::Mat blob = cv::dnn::blobFromImage(img_features, 1.0, cv::Size(), cv::Scalar(), false, false);
-        
-        ip_net.setInput(blob);
-        cv::Mat projected = ip_net.forward();
-        
-        // 转换为 torch tensor
-        auto sizes = projected.size;
-        auto projected_tensor = torch::from_blob(projected.data, {sizes[0], sizes[1]}, torch::kFloat32).clone();
-        
-        // 应用到 latent（简化版）
-        return inject_attention(latent, projected_tensor * effective_weight);
-    } catch (const std::exception& e) {
-        LOG_WARN("IPAdapter: apply failed: %s", e.what());
-        return latent;
-    }
-}
+    cv::Mat resized;
+    cv::resize(rgb, resized, cv::Size(224, 224), 0, 0, cv::INTER_LINEAR);
 
-torch::Tensor IPAdapter::clip_vision_encode(const torch::Tensor& image) {
-    (void)image;
-    return torch::Tensor();
-}
+    // Convert to float32 and normalize
+    // CLIP normalization: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    const float mean[3] = {0.485f, 0.456f, 0.406f};
+    const float std_val[3] = {0.229f, 0.224f, 0.225f};
 
-torch::Tensor IPAdapter::inject_attention(const torch::Tensor& latent, const torch::Tensor& image_features) {
-    try {
-        // 简化版注意力注入
-        // 将图像特征扩展为与 latent 兼容的形状
-        auto expanded_features = image_features.unsqueeze(-1).unsqueeze(-1);
-        expanded_features = expanded_features.expand({latent.size(0), -1, latent.size(2), latent.size(3)});
-        
-        // 调整通道数
-        if (expanded_features.size(1) != latent.size(1)) {
-            auto target_channels = latent.size(1);
-            auto current_channels = expanded_features.size(1);
-            
-            if (current_channels < target_channels) {
-                auto padding = torch::zeros({expanded_features.size(0), 
-                                            target_channels - current_channels,
-                                            expanded_features.size(2), 
-                                            expanded_features.size(3)}, 
-                                           expanded_features.options());
-                expanded_features = torch::cat({expanded_features, padding}, 1);
-            } else {
-                expanded_features = expanded_features.narrow(1, 0, target_channels);
-            }
+    std::vector<float> input_data(3 * 224 * 224);
+    for (int y = 0; y < 224; y++) {
+        for (int x = 0; x < 224; x++) {
+            cv::Vec3b pixel = resized.at<cv::Vec3b>(y, x);
+            // CHW format
+            input_data[0 * 224 * 224 + y * 224 + x] = (pixel[0] / 255.0f - mean[0]) / std_val[0];  // R
+            input_data[1 * 224 * 224 + y * 224 + x] = (pixel[1] / 255.0f - mean[1]) / std_val[1];  // G
+            input_data[2 * 224 * 224 + y * 224 + x] = (pixel[2] / 255.0f - mean[2]) / std_val[2];  // B
         }
-        
-        // 特征融合
-        return latent * (1.0f + expanded_features * 0.05f);
-    } catch (const std::exception& e) {
-        LOG_WARN("IPAdapter: attention injection failed: %s", e.what());
-        return latent;
     }
+
+    LOG_INFO("IPAdapter: preprocessed image to [1, 3, 224, 224] float32 CHW");
+
+    // 3. 运行 CLIP Vision 推理
+    auto clip_embedding = impl_->run_clip_vision(input_data);
+    if (clip_embedding.empty()) {
+        LOG_ERROR("IPAdapter: CLIP Vision inference failed");
+        return false;
+    }
+    LOG_INFO("IPAdapter: CLIP Vision embedding size: %zu", clip_embedding.size());
+
+    // 验证 shape 正确
+    if (clip_embedding.size() != 1024) {
+        LOG_WARN("IPAdapter: CLIP Vision output size %zu, expected 1024",
+                 clip_embedding.size());
+        // 仍然继续，让 IPAdapter MLP 决定
+    }
+
+    // 4. 运行 IPAdapter MLP 推理
+    image_tokens_ = impl_->run_ipadapter(clip_embedding);
+    if (image_tokens_.empty()) {
+        LOG_ERROR("IPAdapter: IPAdapter MLP inference failed");
+        return false;
+    }
+    LOG_INFO("IPAdapter: image tokens size: %zu", image_tokens_.size());
+
+    // 验证 output shape
+    if (image_tokens_.size() != 768) {
+        LOG_WARN("IPAdapter: IPAdapter output size %zu, expected 768",
+                 image_tokens_.size());
+    }
+
+    // 打印统计信息
+    float min_val = *std::min_element(image_tokens_.begin(), image_tokens_.end());
+    float max_val = *std::max_element(image_tokens_.begin(), image_tokens_.end());
+    float mean_val = std::accumulate(image_tokens_.begin(), image_tokens_.end(), 0.0f) / image_tokens_.size();
+    LOG_INFO("IPAdapter: image tokens stats: min=%.4f, max=%.4f, mean=%.4f",
+             min_val, max_val, mean_val);
+
+    return true;
 }
 
 } // namespace myimg

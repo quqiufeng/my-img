@@ -11,6 +11,9 @@
 
 namespace myimg {
 
+// 前向声明
+class IPAdapter;
+
 // 图像数据结构
 struct Image {
     int width = 0;
@@ -415,6 +418,7 @@ private:
     PreviewCallback preview_callback_;
     int preview_interval_ = 1;
     std::string preview_mode_ = "vae";
+    std::unique_ptr<IPAdapter> ipadapter_;  // IPAdapter (懒加载)
     
     // 内部辅助函数
     bool load_model(const GenerationParams& params);
