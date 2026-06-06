@@ -37,6 +37,25 @@
 #   20G 显卡安全余量: 4.4GB ✅
 #
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+# ┃                    【当前出图基准 (2026-06-06)】                              ┃
+# ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+#
+# 扩散模型: z_image_turbo-Q5_K_M.gguf (5.3GB VRAM)
+# VAE:      ae.safetensors (160MB VRAM)
+# LLM:      Qwen3-4B-Instruct-2507-Q4_K_M.gguf (3.5GB VRAM)
+# 分辨率:   1920×1080 → 2560×1440 (HiRes)
+# 步数:     20 → 45 (HiRes)
+# HiRes strength: 0.35
+# CFG:      3.2 | Sampler: euler | Scheduler: discrete
+# FreeU:    b1=1.4, b2=1.5
+# SAG:      开启 (scale=1.0)
+# 增强:     clarity 0.4, sharpen 0.8, smart-sharpen 0.5, edge-sharpen 1.5
+# VAE tiling: 128×128, overlap 0.5
+# 出图时间: ~12 分钟 (RTX 3080 20GB)
+#
+# ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+#
+# ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 # ┃                    【VAE Tiling 显存原理详解】                                ┃
 # ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 #
@@ -159,10 +178,10 @@ BLUE="\033[0;34m"
 CYAN="\033[0;36m"
 NC="\033[0m"
 
-MODEL_DIR="${MODEL_DIR:-/opt/image/model}"
+MODEL_DIR="${MODEL_DIR:-/data/models/image}"
 # 使用 my-img 编译后的二进制（开发完成后验证用）
 SD_CLI="${SD_CLI:-/opt/my-img/build/myimg-cli}"
-DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z-image-turbo-Q4_K_M.gguf}"
+DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z_image_turbo-Q5_K_M.gguf}"
 VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
 LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
 UPSCALE_MODEL="${UPSCALE_MODEL:-$MODEL_DIR/2x_ESRGAN.gguf}"
@@ -283,9 +302,9 @@ if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Err
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
-STEPS="${STEPS:-25}"
-HIRES_STEPS="${HIRES_STEPS:-55}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
+STEPS="${STEPS:-20}"
+HIRES_STEPS="${HIRES_STEPS:-45}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.35}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
     echo -e "${BLUE}[INFO] Ultra HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
@@ -309,6 +328,10 @@ if [ -n "$OUTPUT_FILE" ]; then
         OUTPUT_DIR="$HOME"
         OUTPUT="$OUTPUT_FILE"
     fi
+    # 用户指定路径，加时间戳后缀防止覆盖
+    BASE="${OUTPUT%.png}"
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    OUTPUT="${BASE}_${TIMESTAMP}.png"
 else
     OUTPUT_DIR="$HOME"
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -408,7 +431,7 @@ echo "========================================"
 echo ""
 
 SEED="${SEED:-$RANDOM}"
-echo "Generating..."
+echo "Generating...  $(date '+%H:%M:%S')"
 
 SD_CMD=("$SD_CLI"
   --diffusion-model "$DIFFUSION_MODEL"
@@ -428,9 +451,7 @@ SD_CMD=("$SD_CLI"
   --freeu-b2 1.5
   --sag
   --sag-scale 1.0
-  --auto-enhance
-  --vibrance 0.3
-  --clarity 0.6
+  --clarity 0.4
   --sharpen 0.8
   --sharpen-radius 2
   --smart-sharpen 0.5
@@ -438,7 +459,7 @@ SD_CMD=("$SD_CLI"
   --edge-sharpen 1.5
   --edge-sharpen-radius 2
   --edge-sharpen-threshold 0.3
-  --embd-dir "$MODEL_DIR/embeddings"
+  $( [ -d "$MODEL_DIR/embeddings" ] && echo "--embd-dir $MODEL_DIR/embeddings" || true )
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires
@@ -497,67 +518,31 @@ if [ "$UPSCALE_FLAG" -eq 1 ]; then
     SD_CMD+=(--upscale-tile-size 1440)
 fi
 
+START_TIME=$(date +%s)
 "${SD_CMD[@]}"
+END_TIME=$(date +%s)
+GEN_DURATION=$((END_TIME - START_TIME))
 
 if [ -f "$OUTPUT_PATH" ]; then
     FILE_SIZE=$(du -h "$OUTPUT_PATH" | cut -f1)
     
-    # Save generation parameters to sidecar JSON for A/B comparison
-    SIDECAR_PATH="${OUTPUT_PATH%.png}.json"
-    cat > "$SIDECAR_PATH" <<EOF
-{
-  "prompt": "$PROMPT",
-  "negative_prompt": "$NEGATIVE_PROMPT",
-  "width": $WIDTH,
-  "height": $HEIGHT,
-  "low_res": {"width": $LOW_W, "height": $LOW_H},
-  "seed": $SEED,
-  "cfg_scale": $CFG_SCALE,
-  "steps": $STEPS,
-  "hires_steps": $HIRES_STEPS,
-  "hires_strength": $HIRES_STRENGTH,
-  "sampler": "$SAMPLING_METHOD",
-  "scheduler": "$SCHEDULER",
-  "vae_tile_size": "$VAE_TILE_SIZE",
-  "vae_tile_overlap": $VAE_TILE_OVERLAP,
-  "freeu": true,
-  "freeu_b1": 1.4,
-  "freeu_b2": 1.5,
-  "sag": true,
-  "sag_scale": 1.0,
-  "vibrance": 0.3,
-  "clarity": 0.6,
-  "sharpen": 0.8,
-  "smart_sharpen": 0.5,
-  "edge_sharpen": 1.5,
-  "upscale": $UPSCALE_FLAG,
-  "lora": "$LORA_CONFIG",
-  "prompt_schedule": "$PROMPT_SCHEDULE",
-  "regional_prompts": "$REGIONAL_PROMPTS",
-  "face_restore": $FACE_RESTORE_FLAG,
-  "face_restore_model": "$FACE_RESTORE_MODEL",
-  "face_swap": $FACE_SWAP_FLAG,
-  "face_swap_source": "$FACE_SWAP_SOURCE",
-  "ipadapter": $IPADAPTER_FLAG,
-  "ipadapter_model": "$IPADAPTER_MODEL",
-  "ipadapter_image": "$IPADAPTER_IMAGE",
-  "t2i_adapter": $T2I_ADAPTER_FLAG,
-  "t2i_adapter_model": "$T2I_ADAPTER_MODEL",
-  "t2i_adapter_image": "$T2I_ADAPTER_IMAGE",
-  "photomaker": $PHOTOMAKER_FLAG,
-  "photomaker_model": "$PHOTOMAKER_MODEL",
-  "photomaker_id_images": "$PHOTOMAKER_ID_IMAGES"
-}
-EOF
+    # Format duration
+    if [ $GEN_DURATION -ge 60 ]; then
+        DURATION_MIN=$((GEN_DURATION / 60))
+        DURATION_SEC=$((GEN_DURATION % 60))
+        DURATION_STR="${DURATION_MIN}m ${DURATION_SEC}s"
+    else
+        DURATION_STR="${GEN_DURATION}s"
+    fi
     
     echo ""
     echo "========================================"
     echo -e "${GREEN}✓ Generation successful!${NC}"
-    echo -e "File: ${GREEN}$OUTPUT_PATH${NC}"
-    echo -e "Size: ${BLUE}$FILE_SIZE${NC}"
-    echo -e "Seed: ${YELLOW}$SEED${NC}"
-    echo -e "CFG: ${CYAN}$CFG_SCALE${NC}"
-    echo -e "Sidecar: ${CYAN}$SIDECAR_PATH${NC}"
+    echo -e "File:   ${GREEN}$OUTPUT_PATH${NC}"
+    echo -e "Size:   ${BLUE}$FILE_SIZE${NC}"
+    echo -e "Time:   ${YELLOW}$DURATION_STR${NC}"
+    echo -e "Seed:   ${YELLOW}$SEED${NC}"
+    echo -e "CFG:    ${CYAN}$CFG_SCALE${NC}"
     echo "========================================"
 else
     echo ""

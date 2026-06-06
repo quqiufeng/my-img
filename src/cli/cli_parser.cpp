@@ -51,6 +51,12 @@ void print_usage(const char* argv0) {
     std::cout << "  --vae-tiling              Enable VAE tiling\n";
     std::cout << "  --vae-tile-size WxH       VAE tile size (default: 256x256)\n";
     std::cout << "  --vae-tile-overlap FLOAT  VAE tile overlap (default: 0.8)\n";
+    std::cout << "\nEnhancement Options:\n";
+    std::cout << "  --freeu                   Enable FreeU (detail enhancement)\n";
+    std::cout << "  --freeu-b1 FLOAT          FreeU backbone skip 1 (default: 1.3)\n";
+    std::cout << "  --freeu-b2 FLOAT          FreeU backbone skip 2 (default: 1.4)\n";
+    std::cout << "  --sag                     Enable Self-Attention Guidance\n";
+    std::cout << "  --sag-scale FLOAT         SAG scale (default: 1.0)\n";
     std::cout << "\nHiRes Fix Options:\n";
     std::cout << "  --hires                   Enable HiRes Fix\n";
     std::cout << "  --hires-width INT         HiRes target width (default: 2560)\n";
@@ -611,6 +617,19 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--vae-tile-overlap") {
             if (++i >= argc) { LOG_ERROR("Missing value for --vae-tile-overlap"); return false; }
             if (!safe_convert(argv[i], opts.vae_tile_overlap, "--vae-tile-overlap")) return false;
+        } else if (arg == "--freeu") {
+            opts.freeu = true;
+        } else if (arg == "--freeu-b1") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-b1"); return false; }
+            if (!safe_convert(argv[i], opts.freeu_b1, "--freeu-b1")) return false;
+        } else if (arg == "--freeu-b2") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-b2"); return false; }
+            if (!safe_convert(argv[i], opts.freeu_b2, "--freeu-b2")) return false;
+        } else if (arg == "--sag") {
+            opts.sag = true;
+        } else if (arg == "--sag-scale") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --sag-scale"); return false; }
+            if (!safe_convert(argv[i], opts.sag_scale, "--sag-scale")) return false;
         } else if (arg == "--hires") {
             opts.hires = true;
         } else if (arg == "--hires-width") {

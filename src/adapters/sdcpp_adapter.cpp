@@ -192,13 +192,15 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.max_vram = params.max_vram;
 
     // 根据分辨率自动启用 CPU offloading
+    // 20GB VRAM 的 RTX 3080 可轻松容纳 VAE(160MB) 和 LLM(1.5GB)，
+    // 因此仅在极高分辨率（>4MP）时才 offload
     int64_t pixel_count = static_cast<int64_t>(params.width) * params.height;
     bool auto_vae_cpu = false;
     bool auto_clip_cpu = false;
-    if (pixel_count > 1024 * 1024) {
+    if (pixel_count > 2048 * 2048) {
         auto_vae_cpu = true;
     }
-    if (pixel_count > 1280 * 1280) {
+    if (pixel_count > 2560 * 2560) {
         auto_clip_cpu = true;
     }
     if (params.max_vram > 0 && params.max_vram < 10.0f) {
