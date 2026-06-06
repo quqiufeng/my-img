@@ -3,7 +3,7 @@
 > **目标**：在 my-img（纯 C++ ComfyUI）中实现 IPAdapter 图像提示词功能
 > **后端**：stable-diffusion.cpp（GGML/CUDA）
 > **模型**：Z-Image Turbo（SDXL 架构，Flow Matching → **DiT**）
-> **当前状态**：🚧 Phase 2/5 基本完成（ipadapter.cpp 重写、ONNX Runtime 推理通过、已验证 C++ 端到端管线 ✅）
+> **当前状态**：🚧 Phase 3 全部完成（注入 + 步进控制 ✅），Phase 4 HiRes Fix 集成验证通过 ✅。下一步：**IPAdapter Face ID 人脸克隆**
 >
 > **核心理念**：市面上没有 C++ 原生的 IPAdapter 实现。
 > ComfyUI（Python）→ my-img（C++），这次也一样。
@@ -224,18 +224,34 @@ IPAdapter MLP [1, 768]            IPAdapter MLP [1, 768]
 
 ### 3.3 模型文件
 
+#### 基础 IPAdapter（style transfer，当前可用）
+
 ```
 /data/models/image/
 ├── ipadapter.onnx                (13K)     ← ONNX 头文件（外部数据格式）
 ├── ipadapter.onnx.data           (5.4M)    ← ONNX 权重（2 层 MLP: 1024→768→768）
 ├── ipadapter_proj.onnx           (0.3K)    ← 线性投影 ONNX 头文件 ✅
-├── ipadapter_proj.onnx.data      (15M)     ← 投影权重（MatMul 768×2560 + Bias）
-├── clip_vision_sd15.safetensors  (2.4G)    ← CLIP Vision 原始 PyTorch（不再使用）
+├── ipadapter_proj.onnx.data      (15M)     ← 投影权重（MatMul 768×2560 + Bias，identity init）
 ├── clip_vision.onnx              (397K)    ← CLIP Vision ONNX 头文件 ✅
 ├── clip_vision.onnx.data         (2.36G)   ← CLIP Vision ONNX 权重 ✅
-├── inswapper_128.onnx            (529M)    ← Face Swap（不相关）
-└── yunet_320_320.onnx            (5.8M)    ← 人脸检测（不相关）
 ```
+
+#### IPAdapter Face ID（人脸克隆，待集成）
+
+```
+/data/models/image/
+├── inswapper_128.onnx            (529M)    ← Face Swap 模型（已有 ✅）
+├── yunet_320_320.onnx            (5.8M)    ← 人脸检测（已有 ✅）
+```
+
+**需要补充的模型**（从 `insightface` Python 包提取或转换）：
+
+| 模型 | 来源 | 用途 | 状态 |
+|------|------|------|------|
+| `w600k_r50.onnx` | insightface buffalo_l | ArcFace 人脸特征提取 (512-dim) | 📦 已下载到 `/tmp/insightface_models/` |
+| `det_10g.onnx` | insightface buffalo_l | 人脸检测 | 📦 已下载到 `/tmp/insightface_models/` |
+| `ip-adapter-faceid_sd15.safetensors` | hf.co/h94/IP-Adapter-FaceID | Face ID MLP 权重 | ❌ 待获取 |
+| Face ID → ONNX 转换 | Python 脚本 | Face ID MLP ONNX 推理 | ❌ 待转换 |
 
 **模型详细信息**：
 
@@ -414,32 +430,69 @@ float* out_data = output[0].GetTensorMutableData<float>();
 - [x] 接入 sdcpp_adapter.cpp 生成流程（--ipadapter 参数触发加载 + 推理）
 - [x] 跨平台兼容：ipadapter.h 不依赖 ONNX Runtime 头文件（PIMPL），仅 .cpp 文件链接
 
-### Phase 3：上下文注入（DiT 适配）✅（完成）
+### Phase 3：上下文注入（DiT 适配）✅（完成 2026-06-06）
 
 - [x] 修改 sd.cpp 的 `sd_img_gen_params_t`，新增 `ipadapter_tokens` / `ipadapter_num_tokens` / `ipadapter_weight` 字段
-- [x] 在 `prepare_image_generation_embeds()` 中，`get_learned_condition()` 后注入 image tokens：
-  - 创建 `[ctx_dim, num_ipa_tokens]` 张量（768→ctx_dim 零填充）
-  - 沿 dim=1 拼接到 `cond.c_crossattn` 和 `uncond.c_crossattn`
-  - 已验证 shape 变化：`[2560, 9]` → `[2560, 10]`
+- [x] 在 `prepare_image_generation_embeds()` 中，`get_learned_condition()` 后注入 image tokens
 - [x] 实现权重控制（`ipadapter_weight` → 缩放 image tokens）
-- [x] `sdcpp_adapter.cpp` 中接入：`--ipadapter` 触发完整管线并将 token 指针传给 `sd_img_gen_params_t`
-- [x] PE 兼容性验证：Z-Image 在 graph-build time 基于 `context->ne[1]` 生成 PE，注入 token 后自动适配，断言通过
-- [x] 线性投影层 768→2560（ONNX 模型，identity init，可后续替换为训练权重）
-- [ ] 步数控制（start_at / end_at）
+- [x] `sdcpp_adapter.cpp` 中接入：`--ipadapter` 触发完整管线
+- [x] PE 兼容性验证通过
+- [x] 线性投影层 768→2560（ONNX 模型，identity init）
+- [x] **步数控制（start_at / end_at）** — `sd::ops::slice()` 在 denoise lambda 中裁切 IPA tokens
 
-### Phase 4：集成与优化
+### Phase 4：HiRes Fix 集成 ✅（完成 2026-06-06）
 
-- [ ] 接入 HiRes Fix（高分辨率下保持 IPAdapter 效果）
-- [ ] 接入 FreeU + SAG（与 IPAdapter 兼容性测试）
-- [ ] 2560×1440 高清生成测试
-- [ ] VRAM 优化
+- [x] IPA 自动继承到 HiRes 第二遍采样（复用 `embeds.cond`）
+- [x] 步进控制在两遍采样中独立生效
+- [x] 2560×1440 全尺寸生成测试通过（~7.4 min, VRAM 峰值 ~18.4 GB）
+- [x] FreeU + IPAdapter 兼容性验证通过
 
-### Phase 5：完善
+### Phase 5：VRAM 优化（RTX 3080 20GB）
 
-- [ ] 多人脸/多参考图支持
-- [ ] 抠脸预处理（人脸检测 + 裁剪）
-- [ ] 权重退火（linear / cosine schedule）
-- [ ] 与 ControlNet 协同工作
+- [x] VAE Tiling 128×128（峰值 6.6 GB VRAM）
+- [x] Flash Attention 启用
+- [ ] 进一步优化 VAE tile overlap 减少 artifacts
+- [ ] CPU offload 策略（显存不足时）
+
+### Phase 6：IPAdapter Face ID（人脸克隆）
+
+**目标**：用参考图的人脸特征控制生成，实现人脸克隆（face preservation）。
+
+**所需模型**：
+
+| 模型 | 格式 | 大小 | 来源 | 状态 |
+|------|------|------|------|------|
+| ArcFace `w600k_r50` | ONNX | ~20MB | insightface buffalo_l | 📦 已下载（`/tmp/insightface_models/`） |
+| Face detection `det_10g` | ONNX | ~10MB | insightface buffalo_l | 📦 已下载 |
+| `ip-adapter-faceid-plusv2_sd15` | safetensors | ~100MB | Hugging Face h94/IP-Adapter-FaceID | ❌ 待下载 |
+| FaceID MLP → ONNX 转换脚本 | Python | - | 自研 | ❌ 待编写 |
+
+**实现步骤**：
+
+- [ ] 1. 下载 IPAdapter Face ID PyTorch 权重（`h94/IP-Adapter-FaceID`）
+- [ ] 2. 编写 Python 脚本，将 Face ID MLP 导出为 ONNX
+- [ ] 3. 将 ArcFace ONNX 复制到 `/data/models/image/`
+- [ ] 4. 在 `ipadapter.cpp` 中添加 ArcFace 人脸特征提取
+- [ ] 5. 修改注入逻辑：Face ID 特征 (512-dim) + CLIP 特征 (1024-dim) → 拼接 → Face ID MLP → 768-dim
+- [ ] 6. 测试人脸相似度
+
+**依赖安装**：
+```bash
+# Python 环境（仅用于模型下载和转换，运行时不需要）
+pip install insightface onnx onnxruntime
+
+# 模型下载
+python3 -c "from insightface.app import FaceAnalysis; FaceAnalysis(name='buffalo_l')"
+
+# 下载 IPAdapter Face ID
+wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15.bin
+```
+
+**C++ 运行时依赖**：
+- ONNX Runtime GPU（已有 ✅）
+- OpenCV（已有 ✅）
+- 新增：ArcFace ONNX（待复制到 `/data/models/image/`）
+- 新增：Face ID MLP ONNX（待转换）
 
 ---
 
