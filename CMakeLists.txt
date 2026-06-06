@@ -27,6 +27,9 @@ elseif(EXISTS /opt/libtorch)
     set(LIBTORCH_ROOT /opt/libtorch)
 elseif(EXISTS /usr/local/libtorch)
     set(LIBTORCH_ROOT /usr/local/libtorch)
+elseif(EXISTS /data/venv/libtorch)
+    set(LIBTORCH_ROOT /data/venv/libtorch)
+    message(STATUS "[my-img] Found libtorch at /data/venv/libtorch")
 endif()
 
 # 如果还没找到，尝试从 python torch 包获取路径

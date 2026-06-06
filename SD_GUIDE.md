@@ -29,35 +29,64 @@ my-img (C++ Application)
 
 ### 1.2 当前对 sd.cpp 的改动
 
-截至本次升级，本地改动约 **80 行**，分布在 2 个文件：
+截至本次升级，本地改动约 **65 行净增**，分布在 3 个文件：
 
-### sd_img_gen_params_t 头文件（3 字段，~6 行）
+> git diff 实际统计：**3 文件，+65 / −11**（+54 净增）
 
-`include/stable-diffusion.h` — 为 IPAdapter 注入新增 3 个字段：
+### sd_img_gen_params_t 头文件（5 字段，~10 行）
+
+`include/stable-diffusion.h` — 为 IPAdapter 注入 + 步进控制新增 5 个字段：
 
 ```c
 // IPAdapter: image prompt tokens
 const float* ipadapter_tokens;      // [N * 768] image tokens from CLIP Vision + IPAdapter MLP, NULL = disabled
 int ipadapter_num_tokens;           // N (number of image token vectors)
 float ipadapter_weight;             // scale factor applied to tokens (0.0-1.0)
+float ipadapter_start_at;           // step control: fraction 0.0-1.0 (0 = first step)
+float ipadapter_end_at;             // step control: fraction 0.0-1.0 (1 = last step)
 ```
 
-### 条件注入逻辑（~50 行）
+### 条件注入 + 步进控制逻辑（~65 行）
 
-`src/stable-diffusion.cpp` — 在 `prepare_image_generation_embeds()` 中，`get_learned_condition()` 返回后将 IPAdapter token 注入 conditioning：
+`src/stable-diffusion.cpp` — 两处修改：
+
+**A. `prepare_image_generation_embeds()`** — `get_learned_condition()` 返回后将 IPAdapter token 注入 conditioning，并记录步进控制参数：
 
 ```cpp
 // 位于 LOG_INFO("get_learned_condition completed...") 之后
+// A1: 注入 image tokens
 if (sd_img_gen_params->ipadapter_tokens != nullptr && ...) {
-    // 1. 创建 [ctx_dim, num_ipa_tokens] 张量，零填充 768→ctx_dim
-    // 2. 沿 dim=1 拼接到 cond.c_crossattn 和 uncond.c_crossattn
-    // 3. 形状变化: [2560, 9] → [2560, 10] (9 text + 1 image token)
+    // 1. 记录注入前 token 数 (ipa_orig_tokens)
+    // 2. 创建 [ctx_dim, num_ipa_tokens] 张量，weight 缩放
+    // 3. 沿 dim=1 拼接到 cond.c_crossattn 和 uncond.c_crossattn
+    // 4. 形状变化: [2560, 9] → [2560, 10] (9 text + 1 image token)
 }
+// A2: 从 ipadapter_start_at/end_at 比例计算实际步进区间
+ipa_start_step = (int)(start_ratio * sample_steps);
+ipa_end_step   = (int)(end_ratio * sample_steps);
+// 存入 ImageGenerationEmbeds 传给 sample()
 ```
 
+**B. `sample()` 方法** — denoise lambda 中条件切片 IPA tokens：
+
+```cpp
+// 每次 denoise 步进前：
+SDCondition cond_for_step = cond;
+if (step < ipa_start_step || step >= ipa_end_step) {
+    // 用 sd::ops::slice() 沿 dim=1 裁掉最后的 IPA tokens
+    cond_for_step.c_crossattn = sd::ops::slice(c_crossattn, 1, 0, ipa_orig_tokens);
+}
+cond_out = run_condition(cond_for_step);  // 使用裁切后的 conditioning
+// uncond 同理
+```
+
+**原理**：Z-Image DiT 的 PE 在 graph-build time 根据 `context->ne[1]` 动态生成。IPA 注入时 `ne[1]` 已包含额外 token，PE 适应新大小。裁切时只改变运行时数据，不改变 graph 结构，因此 PE 依然有效。
+
 **升级冲突风险**：中等
-- 如果上游改动 `prepare_image_generation_embeds()` 流程，需要迁移注入逻辑
-- 如果上游新增/删除 `sd_img_gen_params_t` 字段，需合并 IPAdapter 字段
+- 如果上游改动 `prepare_image_generation_embeds()` 流程，需要迁移注入 + 步进逻辑
+- `ImageGenerationEmbeds` 结构体新增了 `ipa_orig_tokens` / `ipa_start_step` / `ipa_end_step` 3 个字段
+- `sample()` 方法签名新增 `ipa_orig_tokens` / `ipa_start_step` / `ipa_end_step` 3 个参数（带默认值 0）
+- denoise lambda 中的 slice 逻辑依赖 `sd::ops::slice()` 可用性
 - 注入后的 shape 变化依赖 Z-Image PE 机制（PE 基于 `context->ne[1]` 在 graph-build time 生成），需验证 PE 兼容
 
 ---
@@ -629,6 +658,8 @@ typedef struct {
     const float* ipadapter_tokens;      // [N * 768], NULL = disabled
     int ipadapter_num_tokens;           // N
     float ipadapter_weight;             // 0.0-1.0
+    float ipadapter_start_at;           // step control: fraction 0.0-1.0 (added 2026-06-06)
+    float ipadapter_end_at;             // step control: fraction 0.0-1.0 (added 2026-06-06)
 } sd_img_gen_params_t;
 ```
 
@@ -702,19 +733,51 @@ typedef struct {
 
 #### 4.3.2 build.sh 改进
 
-1. 新增 `--quick` 模式：跳过 sd.cpp 重新编译（节省 ~10 分钟 CUDA 编译），仅重链 myimg-cli
+1. 新增子命令 `sd`（仅 sd.cpp）、`myimg`/`quick`（仅 myimg-cli）、`all`（默认，全部编译）
 2. 为 myimg cmake 显式传递 `-DCMAKE_C_COMPILER` / `-DCMAKE_CXX_COMPILER`（之前仅依赖环境变量）
 3. `GGML_LTO=ON` → `OFF`：避免 GCC 版本混用时的 LTO 链接失败
 4. 测试编译跳过 `test_vae`（需要已移除的 libtorch）
 
-#### 4.3.3 数据回顾
+#### 4.3.3 LD_LIBRARY_PATH 清零
 
-- CUDA build 耗时：~15 分钟（包含 ~8 分钟 CUDA kernel 编译）
-- 生成速度：640×640, 5 steps → ~5s (CUDA)
-- IPAdapter 注入后生成：640×640, 5 steps → ~5s (与无 IPAdapter 几乎一致)
+**问题**：运行时必须设置 `LD_LIBRARY_PATH=/data/venv/onnxruntime-linux-x64-gpu-1.20.1/lib`，否则找不到 ONNX Runtime 的 `.so`。
+
+**修复**：将 5 个 ONNX Runtime 共享库 symlink 到 `/usr/local/lib/` + `ldconfig` 注册：
+- `libonnxruntime.so` / `.so.1` / `.so.1.20.1`（主库）
+- `libonnxruntime_providers_cuda.so`（CUDA provider）
+- `libonnxruntime_providers_shared.so` / `_tensorrt.so`
+
+**验证**：`ldconfig -p | grep onnxruntime` 输出 5 条，`unset LD_LIBRARY_PATH && myimg-cli --help` 正常运行。
+
+**额外**：libtorch C++ 安装到 `/data/venv/libtorch`（symlink → `/data/libtorch_cuda`），并在 `my-img/CMakeLists.txt` 中添加搜索路径。
+
+#### 4.3.4 IPAdapter Phase 3 完成：步进控制
+
+**需求**：支持 `--ipadapter-start FLOAT` / `--ipadapter-end FLOAT`（0.0~1.0 比例），在指定步进区间外自动关闭 IPA 影响。
+
+**实现**（sd.cpp 侧，3 处改动）：
+
+1. **`include/stable-diffusion.h`**：`sd_img_gen_params_t` 新增 `ipadapter_start_at` / `ipadapter_end_at` 字段
+2. **`src/stable-diffusion.cpp` 的 `prepare_image_generation_embeds()`**：注入 IPA 时记录 `ipa_orig_tokens`（注入前 token 数），从比例 × 总步数计算 `ipa_start_step` / `ipa_end_step`，存入 `ImageGenerationEmbeds`
+3. **`src/stable-diffusion.cpp` 的 `sample()` 方法**：denoise lambda 中，当 `step < ipa_start_step || step >= ipa_end_step` 时，用 `sd::ops::slice(c_crossattn, 1, 0, ipa_orig_tokens)` 沿 token 维度裁掉 IPA tokens
+
+**my-img 侧**：
+- `sdcpp_adapter.cpp`：将 `ipadapter_start_at` / `ipadapter_end_at` 传入 `sd_img_gen_params_t`
+- `cli_parser.cpp`：解析 `--ipadapter-start` / `--ipadapter-end` 参数
+- `cli_options.h` / `sdcpp_adapter.h`：新增字段定义（默认值 0.0 / 1.0，即全步进驻留）
+
+#### 4.3.5 数据回顾
+
+- **sd.cpp 改动**：3 文件，+65 / −11 行
+- **my-img 改动**：4 文件（`sdcpp_adapter.cpp`, `cli_parser.cpp`, `cli_options.h`, `sdcpp_adapter.h`）+ CMakeLists.txt 新增 `/data/venv/libtorch` 搜索路径
+- **CUDA build 耗时**：~15 分钟（包含 ~8 分钟 CUDA kernel 编译）
+- **生成速度**：640×640, 5 steps → ~5s (CUDA)
+- **IPAdapter 注入后生成**：640×640, 5 steps → ~5s (与无 IPAdapter 几乎一致)
+- **LD_LIBRARY_PATH**：已清零，无需设置
+- **当前 sd.cpp commit**：`e1aa1a2` (2026-06-06)
 
 ---
 
 **最后更新**: 2026-06-06  
 **维护者**: my-img Team  
-**版本**: v1.1（新增 70 commit 大跨越升级经验、DiffusionExtraParams 架构适配、FreeU/SAG 重新集成指南）
+**版本**: v1.2（新增 IPAdapter 步进控制、LD_LIBRARY_PATH 清零、libtorch 安装指南）
