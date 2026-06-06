@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# 图像生成脚本 - RTX 3080 10G 专用版 (低显存优化)
+# 图像生成脚本 - 小图放大优化版 (1280x720 → 2560x1440)
 # =============================================================================
 #
 # 【出图原理 / Why HiRes Fix】
@@ -9,15 +9,26 @@
 #   1. 先生成低分辨率图像（构图、骨架正确）
 #   2. 在 latent 空间放大后 refine（保留结构 + 补充细节）
 #
-# 【3080 10G 显存限制】
-# 10G 显存无法直接以高分辨率作为基础（会 OOM 爆显存），因此：
-#   - 基础分辨率只能到 1280x720（latent 160x90，刚好在显存极限）
-#   - 再通过 HiRes Fix 放大到目标 2560x1440（2x 放大）
-#   - 虽然放大倍数较大，但这是 10G 显存下生成 2560x1440 的唯一可行方案
-#   - 最终画质尚可，但不如高显存方案（如 4090D 的 1920x1080 基础）
+# 【优化思路】
+# 与 img2.sh (1920x1080 base) 不同，本脚本使用 1280x720 作为 base，
+# 再 2x HiRes 到 2560x1440。速度更快（约 8-9 分钟），适合快速出图。
+#
+# 【当前出图基准 (2026-06-06)】
+# 扩散模型: z_image_turbo-Q5_K_M.gguf (5.3GB VRAM)
+# VAE:      ae.safetensors (160MB VRAM)
+# LLM:      Qwen3-4B-Instruct-2507-Q4_K_M.gguf (3.5GB VRAM)
+# 分辨率:   1280×720 → 2560×1440 (2x HiRes)
+# 步数:     20 → 45 (HiRes)
+# HiRes strength: 0.30
+# CFG:      3.2 | Sampler: euler | Scheduler: discrete
+# FreeU:    b1=1.4, b2=1.5
+# SAG:      开启 (scale=0.5)
+# 增强:     clarity 0.4, sharpen 0.8, smart-sharpen 0.5, edge-sharpen 1.5
+# VAE tiling: 128×128, overlap 0.5
+# 出图时间: ~8-9 分钟 (RTX 3080 20GB)
 #
 # 【参考提示词示例 (人像)】
-# ./img1.sh "half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up" "~/portrait_2560x1440.png" 2560 1440
+# ./img1.sh "solo, single woman, half body portrait of a young woman, soft natural lighting, elegant pose, studio lighting, sharp eyes, clean white background, medium close up" "~/portrait.png" 2560 1440
 #
 # 【参数说明】
 #   $1 - 提示词 (Prompt)
@@ -28,9 +39,6 @@
 # =============================================================================
 set -euo pipefail
 
-# 设置 ONNX Runtime 库路径
-export LD_LIBRARY_PATH=/home/dministrator/onnxruntime-linux-x64-1.20.1/lib:$LD_LIBRARY_PATH
-
 RED="\033[0;31m"
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
@@ -39,11 +47,11 @@ CYAN="\033[0;36m"
 NC="\033[0m"
 
 MODEL_DIR="${MODEL_DIR:-/data/models/image}"
-SD_CLI="${SD_CLI:-/home/dministrator/my-img/build/myimg-cli}"
-DIFFUSION_MODEL="$MODEL_DIR/z-image-turbo-Q4_K_M.gguf"
-VAE_MODEL="$MODEL_DIR/ae.safetensors"
-LLM_MODEL="$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-UPSCALE_MODEL="$MODEL_DIR/2x_ESRGAN.gguf"
+SD_CLI="${SD_CLI:-/opt/my-img/build/myimg-cli}"
+DIFFUSION_MODEL="${DIFFUSION_MODEL:-$MODEL_DIR/z_image_turbo-Q5_K_M.gguf}"
+VAE_MODEL="${VAE_MODEL:-$MODEL_DIR/ae.safetensors}"
+LLM_MODEL="${LLM_MODEL:-$MODEL_DIR/Qwen3-4B-Instruct-2507-Q4_K_M.gguf}"
+UPSCALE_MODEL="${UPSCALE_MODEL:-$MODEL_DIR/2x_ESRGAN.gguf}"
 
 UPSCALE_FLAG=0
 ARGS=()
@@ -85,15 +93,13 @@ echo -e "${GREEN}✓ All checks passed${NC}"
 if ! [[ "$WIDTH" =~ ^[0-9]+$ ]] || [ "$WIDTH" -le 0 ]; then echo -e "${RED}Error: width must be positive integer${NC}"; exit 1; fi
 if ! [[ "$HEIGHT" =~ ^[0-9]+$ ]] || [ "$HEIGHT" -le 0 ]; then echo -e "${RED}Error: height must be positive integer${NC}"; exit 1; fi
 
-# HD optimized parameters (实测调优)
-# 人像推荐: euler + discrete + cfg 3.2 + strength 0.30 + 1280x720低分辨率 (边缘最稳定)
-# 风景推荐: dpm++2m + karras + cfg 1.5 + strength 0.35
+# HD optimized parameters
 SAMPLING_METHOD="${SAMPLING_METHOD:-euler}"
 SCHEDULER="${SCHEDULER:-discrete}"
 CFG_SCALE="${CFG_SCALE:-3.2}"
-STEPS="${STEPS:-25}"
-HIRES_STEPS="${HIRES_STEPS:-60}"
-HIRES_STRENGTH="${HIRES_STRENGTH:-0.25}"
+STEPS="${STEPS:-20}"
+HIRES_STEPS="${HIRES_STEPS:-45}"
+HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 
 if [ "$WIDTH" -ge 1920 ] && [ "$HEIGHT" -ge 1080 ]; then
     echo -e "${BLUE}[INFO] Ultra HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
@@ -101,7 +107,7 @@ else
     echo -e "${BLUE}[INFO] HD Mode: steps=$STEPS, cfg=$CFG_SCALE, sampler=$SAMPLING_METHOD${NC}"
 fi
 
-# Add quality keywords - enhanced for realism and edge stability
+# Add quality keywords
 QUALITY_PREFIX="masterpiece, best quality, ultra-detailed, sharp focus, 8k uhd, photorealistic, highly detailed, crisp, clear, centered composition, complete face, full head, professional portrait"
 if [[ "$PROMPT" != *"masterpiece"* ]]; then
     PROMPT="$QUALITY_PREFIX, $PROMPT"
@@ -117,6 +123,10 @@ if [ -n "$OUTPUT_FILE" ]; then
         OUTPUT_DIR="$HOME"
         OUTPUT="$OUTPUT_FILE"
     fi
+    # 时间戳后缀防止覆盖
+    BASE="${OUTPUT%.png}"
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    OUTPUT="${BASE}_${TIMESTAMP}.png"
 else
     OUTPUT_DIR="$HOME"
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -130,18 +140,10 @@ OUTPUT_PATH="$OUTPUT_DIR/$OUTPUT"
 TARGET_LATENT_W=$((WIDTH / 8))
 TARGET_LATENT_H=$((HEIGHT / 8))
 
-# 关键修复：确保低分辨率 latent 宽高比与目标严格匹配
-# Z-Image 模型 latent 对齐到 8 的倍数后，比例必须保持一致
-# 
-# 修复出图不清晰问题：提高基础分辨率，避免 640x360 细节丢失
-# 1024x576 -> HiRes Fix -> 1280x720 (放大 1.25x，latent 插值损失小)
-#
-# 对于 16:9 比例，使用已知正确的低分辨率对
+# 低分辨率计算
 # 2560x1440 (latent 320x180, ratio=1.778):
-#   1280x720 -> latent 160x90 (ratio=1.778) 推荐，放大倍数最小，边缘最稳定
-#   1024x576 -> latent 128x72 (ratio=1.778) 备选，放大倍数适中
-# 1280x720 (latent 160x90, ratio=1.778):
-#   1024x576 -> latent 128x72 (ratio=1.778) 修复版，避免 640x360 模糊
+#   1280x720 -> latent 160x90 (ratio=1.778) 推荐，2x 放大
+#   1024x576 -> latent 128x72 (ratio=1.778) 备选
 if [ "$WIDTH" -eq 2560 ] && [ "$HEIGHT" -eq 1440 ]; then
     LOW_W=1280
     LOW_H=720
@@ -149,23 +151,17 @@ elif [ "$WIDTH" -eq 1920 ] && [ "$HEIGHT" -eq 1080 ]; then
     LOW_W=1024
     LOW_H=576
 elif [ "$WIDTH" -eq 1280 ] && [ "$HEIGHT" -eq 720 ]; then
-    # 修复：从 640x360 提高到 1024x576，避免细节丢失
     LOW_W=1024
     LOW_H=576
 else
-    # 通用计算：确保 latent 能被 8 整除且比例匹配
     LOW_LATENT_W=$((TARGET_LATENT_W / 2))
     LOW_LATENT_H=$((TARGET_LATENT_H / 2))
-    
-    # 对齐到 8 的倍数
     LOW_LATENT_W=$(((LOW_LATENT_W + 7) / 8 * 8))
     LOW_LATENT_H=$(((LOW_LATENT_H + 7) / 8 * 8))
-    
     LOW_W=$((LOW_LATENT_W * 8))
     LOW_H=$((LOW_LATENT_H * 8))
 fi
 
-# 保持比例的最小限制：只在单边小于512时按比例放大
 if [ "$LOW_W" -lt 512 ] || [ "$LOW_H" -lt 512 ]; then
     TARGET_RATIO=$(echo "scale=6; $WIDTH / $HEIGHT" | bc)
     if [ "$LOW_W" -lt "$LOW_H" ]; then
@@ -201,7 +197,7 @@ echo "========================================"
 echo ""
 
 SEED="${SEED:-$RANDOM}"
-echo "Generating..."
+echo "Generating...  $(date '+%H:%M:%S')"
 
 SD_CMD=("$SD_CLI"
   --diffusion-model "$DIFFUSION_MODEL"
@@ -214,18 +210,22 @@ SD_CMD=("$SD_CLI"
   --scheduler "$SCHEDULER"
   --diffusion-fa
   --vae-tiling
-  --vae-tile-size 256x256
-  --vae-tile-overlap 0.75
+  --vae-tile-size 128x128
+  --vae-tile-overlap 0.5
   --freeu
   --freeu-b1 1.4
   --freeu-b2 1.5
   --sag
   --sag-scale 0.5
-  --auto-enhance
   --clarity 0.4
-  --sharpen 1.2
+  --sharpen 0.8
   --sharpen-radius 2
-  --embd-dir "$MODEL_DIR/embeddings"
+  --smart-sharpen 0.5
+  --smart-sharpen-radius 2
+  --edge-sharpen 1.5
+  --edge-sharpen-radius 2
+  --edge-sharpen-threshold 0.3
+  $( [ -d "$MODEL_DIR/embeddings" ] && echo "--embd-dir $MODEL_DIR/embeddings" || true )
   -W "$LOW_W" -H "$LOW_H"
   --steps "$STEPS"
   --hires
@@ -243,17 +243,30 @@ if [ "$UPSCALE_FLAG" -eq 1 ]; then
     SD_CMD+=(--upscale-tile-size 1440)
 fi
 
+START_TIME=$(date +%s)
 "${SD_CMD[@]}"
+END_TIME=$(date +%s)
+GEN_DURATION=$((END_TIME - START_TIME))
 
 if [ -f "$OUTPUT_PATH" ]; then
     FILE_SIZE=$(du -h "$OUTPUT_PATH" | cut -f1)
+
+    if [ $GEN_DURATION -ge 60 ]; then
+        DURATION_MIN=$((GEN_DURATION / 60))
+        DURATION_SEC=$((GEN_DURATION % 60))
+        DURATION_STR="${DURATION_MIN}m ${DURATION_SEC}s"
+    else
+        DURATION_STR="${GEN_DURATION}s"
+    fi
+
     echo ""
     echo "========================================"
     echo -e "${GREEN}✓ Generation successful!${NC}"
-    echo -e "File: ${GREEN}$OUTPUT_PATH${NC}"
-    echo -e "Size: ${BLUE}$FILE_SIZE${NC}"
-    echo -e "Seed: ${YELLOW}$SEED${NC}"
-    echo -e "CFG: ${CYAN}$CFG_SCALE${NC}"
+    echo -e "File:   ${GREEN}$OUTPUT_PATH${NC}"
+    echo -e "Size:   ${BLUE}$FILE_SIZE${NC}"
+    echo -e "Time:   ${YELLOW}$DURATION_STR${NC}"
+    echo -e "Seed:   ${YELLOW}$SEED${NC}"
+    echo -e "CFG:    ${CYAN}$CFG_SCALE${NC}"
     echo "========================================"
 else
     echo ""
