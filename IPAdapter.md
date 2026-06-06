@@ -579,65 +579,80 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 | 模型格式 | ONNX | 跨平台，推理效率高 |
 | 线性投影 | 简单 Linear 层 | 768→2560，可以用 ONNX 或用简单的 C++ 矩阵乘 |
 
-## 7. 测试计划
+## 7. 已知问题与修复计划
 
-### 7.1 单元测试
+### 7.1 当前问题：IPAdapter 效果几乎不可感知
 
-```cpp
-TEST_CASE("IPAdapter: CLIP Vision feature extraction", "[ipadapter][unit]") {
-    // 加载 ONNX CLIP Vision
-    // 提取图像特征
-    // 验证特征 shape 和数值范围
-}
+**现象**（2026-06-06 测试）：
+- 生成图（`--ipadapter-weight 0.8`）与无 IPAdapter 相比，风格/光线/构图几乎无差异
+- 参考图的人脸特征完全未传递到生成结果
 
-TEST_CASE("IPAdapter: image token projection", "[ipadapter][unit]") {
-    // 加载 IPAdapter MLP
-    // 投影图像特征为 image tokens
-    // 验证 tokens shape
-}
+**根因诊断**：
 
-TEST_CASE("IPAdapter: context concatenation", "[ipadapter][unit]") {
-    // 拼接 text context + image tokens
-    // 验证 shape 正确
-    // 验证语义保持
-}
-```
+| 问题 | 严重程度 | 说明 |
+|------|----------|------|
+| **Token 数量不足** | 🔴 高 | 当前 `ipadapter.onnx` 输出 `[1, 768]`，标准 IPAdapter 用 4-16 个 token 才能编码足够图像信息 |
+| **投影权重未训练** | 🔴 高 | 768→2560 投影是 identity init，1792/2560 维为 0，信号被严重稀释 |
+| **Token 数与 PE 兼容性** | 🟡 中 | Z-Image DiT PE 在 graph-build time 生成，增加 token 数需验证 PE 是否仍正确 |
+| **注入代码通路验证** | 🟡 中 | 尚未做 weight=1.5 极端测试，无法 100% 确认注入代码是否真正生效 |
 
-### 7.2 集成测试
+**为什么不是 Face ID 的问题**：
+- 基础 IPAdapter 本应能传递**整体风格/光线/构图**，即使不做 Face ID
+- 当前效果弱到连风格都无法感知，说明是注入信号本身太弱，不是 Face ID 缺失
+
+### 7.2 修复方案（优先级排序）
+
+**方案 1：换多 token 的 IPAdapter 模型（高优先级）**
+- 目标：找输出 `[N, 768]`（N≥4）的 IPAdapter ONNX 模型替代当前 `[1, 768]`
+- 来源：ComfyUI IPAdapter Plus 模型、Diffusers IPAdapter  checkpoint
+- 验证：token 数增加后，Z-Image PE 断言是否仍通过
+
+**方案 2：训练投影权重（高优先级）**
+- 目标：让 768→2560 投影真正学会映射，而非 identity init
+- 方法：收集 50-100 张参考图+生成图对，用对比学习或 MSE loss 训练投影矩阵
+- 输入：CLIP Vision 输出 [1024] → IPAdapter MLP → [768] → 投影 → [2560]
+- 输出：与目标图像的 CLIP 特征对齐
+- 替代：直接用 PyTorch 训练，导出 ONNX 替换 `.data` 文件
+
+**方案 3：极端权重测试（立即可做）**
+- 命令：`--ipadapter-weight 1.5`（超出正常范围）
+- 目的：确认注入代码通路是否真的在生效
+- 如果 1.5 仍无效果 → 注入代码有 bug，需排查
+- 如果 1.5 有明显效果 → 只是信号弱，需方案 1/2
+
+### 7.3 测试计划
 
 ```bash
-# 1280x720 基础测试
+# 方案 3：极端权重验证（5 分钟）
 ./myimg-cli \
   --diffusion-model ... \
-  --ipadapter --ipadapter-model ... \
-  --ipadapter-clip-vision ... --ipadapter-image ref.jpg \
-  --ipadapter-weight 0.8 \
-  -p "portrait of a person" \
-  -W 1280 -H 720 --steps 20 -s 42 \
-  -o test_ipadapter_base.png
+  --ipadapter --ipadapter-weight 1.5 \
+  --ipadapter-image ref.png \
+  -p "a photo" -W 640 -H 384 --steps 5 \
+  -o test_extreme_weight.png
 
-# 2560x1440 高清测试
+# 对照组：无 IPAdapter
 ./myimg-cli \
-  ... \
-  -W 1280 -H 720 --steps 20 \
-  --hires --hires-width 2560 --hires-height 1440 \
-  --hires-strength 0.30 --hires-steps 45 \
-  -o test_ipadapter_hires.png
+  --diffusion-model ... \
+  -p "a photo" -W 640 -H 384 --steps 5 \
+  -o test_no_ipa.png
 
-# 组合测试（FreeU + SAG + IPAdapter）
-./myimg-cli \
-  ... \
-  --freeu --freeu-b1 1.4 --freeu-b2 1.5 \
-  --sag --sag-scale 0.5 \
-  --ipadapter ... \
-  -o test_ipadapter_all.png
+# 方案 1：找多 token 模型后测试
+# 待补充
+
+# 方案 2：训练投影后测试
+# 待补充
 ```
 
-### 7.3 效果验证
+### 7.4 历史测试记录
 
-- 对比有/无 IPAdapter 的人脸相似度
-- 验证不同 weight（0.3 / 0.5 / 0.8 / 1.0）的效果变化
-- 验证剪裁人脸 vs 全身照作为参考图的差异
+**2026-06-06**：2560×1440 生成测试通过，但 IPA 效果不可感知
+- 模型：`z-image-turbo-Q6_K.gguf`
+- 参考图：`~/demo.png` (897×950)
+- Prompt: `solo,single woman,half body portrait...`
+- 参数：`--ipadapter-weight 0.8`, `--ipadapter-start 0.0`, `--ipadapter-end 0.5`
+- 结果：生成图与无 IPAdapter 对照组无明显差异
+- 结论：信号太弱，需修复方案 1/2/3
 
 ---
 
