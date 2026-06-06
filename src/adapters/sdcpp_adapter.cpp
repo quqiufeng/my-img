@@ -510,6 +510,19 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
             LOG_WARN("IPAdapter initialization failed: %s", e.what());
         }
     }
+    // Pass IPAdapter tokens to sd_img_gen_params_t (for injection in sd.cpp)
+    if (ipadapter_ && ipadapter_->is_loaded() && !ipadapter_->get_image_tokens().empty()) {
+        gen_params.ipadapter_tokens    = ipadapter_->get_image_tokens().data();
+        gen_params.ipadapter_num_tokens = 1;  // single reference image
+        gen_params.ipadapter_weight    = params.ipadapter_weight;
+        std::cout << "  IPAdapter: passing " << ipadapter_->get_image_tokens().size()
+                  << " floats to sd.cpp for injection" << std::endl;
+    } else {
+        gen_params.ipadapter_tokens    = nullptr;
+        gen_params.ipadapter_num_tokens = 0;
+        gen_params.ipadapter_weight    = 0.0f;
+    }
+
     if (params.t2i_adapter) {
         std::cout << "  T2I-Adapter: enabled (strength: " << params.t2i_adapter_strength << ")" << std::endl;
     }
