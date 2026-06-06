@@ -3,7 +3,7 @@
 > **目标**：在 my-img（纯 C++ ComfyUI）中实现 IPAdapter 图像提示词功能
 > **后端**：stable-diffusion.cpp（GGML/CUDA）
 > **模型**：Z-Image Turbo（SDXL 架构，Flow Matching → **DiT**）
-> **当前状态**：🚧 Phase 3 全部完成（注入 + 步进控制 ✅），Phase 4 HiRes Fix 集成验证通过 ✅。下一步：**IPAdapter Face ID 人脸克隆**
+> **当前状态**：🚧 Phase 3-4 完成（注入 + 步进控制 + HiRes Fix ✅）。**重大发现**：当前 SD1.5 IPAdapter 模型与 Z-Image DiT 不兼容，导致效果几乎为零。已定位 root cause，正在适配 SDXL IPAdapter Plus。
 >
 > **核心理念**：市面上没有 C++ 原生的 IPAdapter 实现。
 > ComfyUI（Python）→ my-img（C++），这次也一样。
@@ -224,34 +224,38 @@ IPAdapter MLP [1, 768]            IPAdapter MLP [1, 768]
 
 ### 3.3 模型文件
 
-#### 基础 IPAdapter（style transfer，当前可用）
+#### 当前可用模型
 
 ```
 /data/models/image/
-├── ipadapter.onnx                (13K)     ← ONNX 头文件（外部数据格式）
-├── ipadapter.onnx.data           (5.4M)    ← ONNX 权重（2 层 MLP: 1024→768→768）
-├── ipadapter_proj.onnx           (0.3K)    ← 线性投影 ONNX 头文件 ✅
-├── ipadapter_proj.onnx.data      (15M)     ← 投影权重（MatMul 768×2560 + Bias，identity init）
-├── clip_vision.onnx              (397K)    ← CLIP Vision ONNX 头文件 ✅
-├── clip_vision.onnx.data         (2.36G)   ← CLIP Vision ONNX 权重 ✅
+├── ipadapter.onnx                (13K)     ← ⚠️ SD1.5 版，与 Z-Image 不兼容
+├── ipadapter.onnx.data           (5.4M)    ← SD1.5 权重（2 层 MLP: 1024→768）
+├── ipadapter_proj.onnx           (0.3K)    ← 线性投影 ONNX（identity init）
+├── ipadapter_proj.onnx.data      (15M)     ← 投影权重
+├── clip_vision.onnx              (397K)    ← CLIP Vision ViT-bigG/14 ✅
+├── clip_vision.onnx.data         (2.36G)   ← CLIP Vision 权重（输出 1024-dim）
+├── ip-adapter-plus_sdxl_vit-h.safetensors (847M) ← 📦 SDXL IPAdapter Plus（待转 ONNX）
 ```
 
-#### IPAdapter Face ID（人脸克隆，待集成）
+**兼容性矩阵**：
+
+| 模型 | 输出维度 | 适配 Z-Image | 状态 |
+|------|----------|-------------|------|
+| `ipadapter.onnx` (SD1.5) | [1, 768] | ❌ 不兼容 | 已废弃 |
+| `ip-adapter-plus_sdxl_vit-h` | [16, 2048] | ⚠️ 需 2048→2560 投影 | 已下载，待转 ONNX |
+| `clip_vision.onnx` | [1, 1024] | ⚠️ 需确认是否匹配 SDXL Plus | 当前使用 |
+
+**InsightFace 模型（人脸检测/识别）**：
 
 ```
 /data/models/image/
-├── inswapper_128.onnx            (529M)    ← Face Swap 模型（已有 ✅）
-├── yunet_320_320.onnx            (5.8M)    ← 人脸检测（已有 ✅）
+├── w600k_r50.onnx                (167M)    ← ArcFace 人脸特征 (512-dim) ✅
+├── det_10g.onnx                  (17M)     ← 人脸检测 ✅
+├── 2d106det.onnx                 (4.8M)    ← 2D 106 关键点 ✅
+├── 1k3d68.onnx                   (137M)    ← 3D 68 关键点 ✅
+├── inswapper_128.onnx            (529M)    ← Face Swap ✅
+├── yunet_320_320.onnx            (5.8M)    ← 人脸检测（OpenCV 版）✅
 ```
-
-**需要补充的模型**（从 `insightface` Python 包提取或转换）：
-
-| 模型 | 来源 | 用途 | 状态 |
-|------|------|------|------|
-| `w600k_r50.onnx` | insightface buffalo_l | ArcFace 人脸特征提取 (512-dim) | 📦 已下载到 `/tmp/insightface_models/` |
-| `det_10g.onnx` | insightface buffalo_l | 人脸检测 | 📦 已下载到 `/tmp/insightface_models/` |
-| `ip-adapter-faceid_sd15.safetensors` | hf.co/h94/IP-Adapter-FaceID | Face ID MLP 权重 | ❌ 待获取 |
-| Face ID → ONNX 转换 | Python 脚本 | Face ID MLP ONNX 推理 | ❌ 待转换 |
 
 **模型详细信息**：
 
@@ -447,6 +451,30 @@ float* out_data = output[0].GetTensorMutableData<float>();
 - [x] 2560×1440 全尺寸生成测试通过（~7.4 min, VRAM 峰值 ~18.4 GB）
 - [x] FreeU + IPAdapter 兼容性验证通过
 
+### Phase 5：模型兼容性修复（进行中 2026-06-07）
+
+**重大发现**：当前 `ipadapter.onnx` 是 **SD1.5 版本**，与 **Z-Image (SDXL DiT)** 完全不兼容。
+
+| 组件 | 当前 (SD1.5) | Z-Image (SDXL DiT) 需要 |
+|------|-------------|------------------------|
+| CLIP Vision 输出 | ViT-L 768-dim | **ViT-H/14 1280-dim** |
+| IPAdapter MLP | 2-layer 1024→768 | **Perceiver Resampler 16×1280→2048** |
+| 最终输出 | [1, 768] | **[16, 2048] → 需投影到 [16, 2560]** |
+| 架构适配 | UNet CrossAttention | DiT JointAttention (context 拼接) |
+
+**测试验证**（2026-06-07）：
+- 极端权重测试（weight=0 vs 1.5）：注入通路正常 ✅
+- CLIP 相似度量化：weight=1.5 比无 IPA **更不像**参考图（0.2973 vs 0.4648）❌
+- 4-token 重复测试：恶化效果（0.1636）❌
+- **结论**：不是注入代码 bug，是**模型完全不匹配**
+
+**修复计划**：
+- [x] 下载 SDXL IPAdapter Plus (`ip-adapter-plus_sdxl_vit-h.safetensors`, 847MB)
+- [ ] 提取 `image_proj` (Perceiver Resampler) 并转 ONNX
+- [ ] 解决 CLIP Vision 维度不匹配（1024 vs 1280）
+- [ ] 添加 2048→2560 投影层适配 Z-Image
+- [ ] 测试验证效果
+
 ### Phase 5：VRAM 优化（RTX 3080 20GB）
 
 - [x] VAE Tiling 128×128（峰值 6.6 GB VRAM）
@@ -583,76 +611,72 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 
 ### 7.1 当前问题：IPAdapter 效果几乎不可感知
 
-**现象**（2026-06-06 测试）：
+**现象**（2026-06-06~07 测试）：
 - 生成图（`--ipadapter-weight 0.8`）与无 IPAdapter 相比，风格/光线/构图几乎无差异
 - 参考图的人脸特征完全未传递到生成结果
 
-**根因诊断**：
+**根因诊断（2026-06-07 重大发现）**：
 
 | 问题 | 严重程度 | 说明 |
 |------|----------|------|
-| **Token 数量不足** | 🔴 高 | 当前 `ipadapter.onnx` 输出 `[1, 768]`，标准 IPAdapter 用 4-16 个 token 才能编码足够图像信息 |
-| **投影权重未训练** | 🔴 高 | 768→2560 投影是 identity init，1792/2560 维为 0，信号被严重稀释 |
-| **Token 数与 PE 兼容性** | 🟡 中 | Z-Image DiT PE 在 graph-build time 生成，增加 token 数需验证 PE 是否仍正确 |
-| **注入代码通路验证** | 🟡 中 | 尚未做 weight=1.5 极端测试，无法 100% 确认注入代码是否真正生效 |
+| **模型架构不匹配** | 🔴🔴 **致命** | 当前 `ipadapter.onnx` 是 **SD1.5 版本**（输出 `[1, 768]`），Z-Image 是 **SDXL DiT**（需要 `[16, 2048]`）。两者架构完全不同 |
+| CLIP Vision 维度 | 🔴 高 | 当前 CLIP 输出 1024-dim，SDXL Plus 期望 1280-dim（ViT-H/14） |
+| 投影权重未训练 | 🟡 中 | identity init 确实稀释信号，但不是 root cause |
+| Token 数量不足 | 🟡 中 | 1 token vs 16 tokens 是差异，但前提是模型版本正确 |
 
-**为什么不是 Face ID 的问题**：
-- 基础 IPAdapter 本应能传递**整体风格/光线/构图**，即使不做 Face ID
-- 当前效果弱到连风格都无法感知，说明是注入信号本身太弱，不是 Face ID 缺失
+**为什么之前诊断错误**：
+- 最初以为是 token 数量/投影权重问题
+- 2026-06-07 极端权重测试（weight=0/0.8/1.5 + 4-token 重复）证明：**注入通路正常，但模型完全不匹配**
+- CLIP 相似度量化：weight=1.5 比无 IPA **更不像**参考图（0.2973 vs 0.4648），说明 SD1.5 token 在 SDXL DiT 中产生了**负效果**
 
-### 7.2 修复方案（优先级排序）
+### 7.2 修复方案（已更新）
 
-**方案 1：换多 token 的 IPAdapter 模型（高优先级）**
-- 目标：找输出 `[N, 768]`（N≥4）的 IPAdapter ONNX 模型替代当前 `[1, 768]`
-- 来源：ComfyUI IPAdapter Plus 模型、Diffusers IPAdapter  checkpoint
-- 验证：token 数增加后，Z-Image PE 断言是否仍通过
+**方案 A：适配 SDXL IPAdapter Plus（进行中）**
+- [x] 下载 `ip-adapter-plus_sdxl_vit-h.safetensors`（847MB）
+- [ ] 提取 `image_proj`（Perceiver Resampler，16 tokens × 1280-dim）
+- [ ] 解决 CLIP Vision 维度：当前 1024-dim → 需要 1280-dim（ViT-H/14）
+- [ ] 添加 2048→2560 投影层适配 Z-Image context
+- [ ] 导出完整 ONNX pipeline
 
-**方案 2：训练投影权重（高优先级）**
-- 目标：让 768→2560 投影真正学会映射，而非 identity init
-- 方法：收集 50-100 张参考图+生成图对，用对比学习或 MSE loss 训练投影矩阵
-- 输入：CLIP Vision 输出 [1024] → IPAdapter MLP → [768] → 投影 → [2560]
-- 输出：与目标图像的 CLIP 特征对齐
-- 替代：直接用 PyTorch 训练，导出 ONNX 替换 `.data` 文件
+**方案 B：换 SDXL 兼容的 CLIP Vision（如有必要）**
+- 如果当前 `clip_vision.onnx`（1024-dim）无法与 SDXL Plus 配合
+- 需要下载 ViT-H/14 CLIP Vision（1280-dim 输出）
 
-**方案 3：极端权重测试（立即可做）**
-- 命令：`--ipadapter-weight 1.5`（超出正常范围）
-- 目的：确认注入代码通路是否真的在生效
-- 如果 1.5 仍无效果 → 注入代码有 bug，需排查
-- 如果 1.5 有明显效果 → 只是信号弱，需方案 1/2
+**方案 C：人脸预处理优化（立即可用）**
+- 已验证：人脸裁切 + 4-token 重复能改善效果（相对于全图参考）
+- 可在代码中集成 `--ipadapter-auto-crop` 自动检测并裁切人脸
 
-### 7.3 测试计划
+### 7.3 测试记录
 
-```bash
-# 方案 3：极端权重验证（5 分钟）
-./myimg-cli \
-  --diffusion-model ... \
-  --ipadapter --ipadapter-weight 1.5 \
-  --ipadapter-image ref.png \
-  -p "a photo" -W 640 -H 384 --steps 5 \
-  -o test_extreme_weight.png
+**2026-06-06**：2560×1440 生成测试
+- 结果：生成成功，但 IPA 效果不可感知
+- 错误假设：以为是 token 数量/投影权重问题
 
-# 对照组：无 IPAdapter
-./myimg-cli \
-  --diffusion-model ... \
-  -p "a photo" -W 640 -H 384 --steps 5 \
-  -o test_no_ipa.png
+**2026-06-07**：极端权重验证（root cause 定位）
+- A组：无 IPAdapter（baseline）
+- B组：`--ipadapter-weight 0.0`（注入但权重为0）
+- C组：`--ipadapter-weight 1.5`（极端权重）
+- D组：4-token 重复（模拟多 token）
+- E组：人脸裁切 + weight=0.8
 
-# 方案 1：找多 token 模型后测试
-# 待补充
+| 测试 | 与参考图 CLIP 相似度 | vs baseline | 结论 |
+|------|---------------------|-------------|------|
+| 无 IPA | **0.4648** | baseline | 基准 |
+| weight=1.5 全图 | **0.2973** | -0.1674 ❌ | 比无IPA更差！ |
+| 4 tokens | **0.1636** | -0.3012 ❌ | 严重恶化 |
+| weight=0.8 人脸裁切 | **0.4099** | -0.0549 ❌ | 仍比无IPA差 |
+| weight=1.0 零填充 | **0.3930** | -0.0717 ❌ | 比无IPA差 |
 
-# 方案 2：训练投影后测试
-# 待补充
-```
+**关键结论**：
+1. 注入代码通路正常（weight=1.5 确实改变了生成结果）
+2. 但改变方向**错误**——SD1.5 token 在 SDXL DiT 中产生了负效果
+3. **必须换 SDXL 版 IPAdapter 模型**
 
-### 7.4 历史测试记录
-
-**2026-06-06**：2560×1440 生成测试通过，但 IPA 效果不可感知
-- 模型：`z-image-turbo-Q6_K.gguf`
-- 参考图：`~/demo.png` (897×950)
-- Prompt: `solo,single woman,half body portrait...`
-- 参数：`--ipadapter-weight 0.8`, `--ipadapter-start 0.0`, `--ipadapter-end 0.5`
-- 结果：生成图与无 IPAdapter 对照组无明显差异
-- 结论：信号太弱，需修复方案 1/2/3
+**2026-06-07**：模型兼容性分析
+- 当前 `ipadapter.onnx` = SD1.5 专用（768-dim 输出）
+- Z-Image = SDXL DiT（需要 2048-dim 输入，经投影到 2560）
+- 已下载 `ip-adapter-plus_sdxl_vit-h.safetensors`（Perceiver Resampler 结构）
+- 待完成：提取 `image_proj` → ONNX + 2048→2560 投影 + CLIP 维度适配
 
 ---
 
@@ -672,13 +696,28 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 |------|----------|------|
 | P1：ONNX Runtime 安装 + 模型转换 | 2026-06-06 | ✅ 已完成 |
 | P2：CLIP Vision + IPAdapter ONNX 推理 | 2026-06-06 | ✅ 已完成 |
-| P3：条件编码注入 + 生成流程集成 | 2026-06-06 | ✅ 已完成（零填充投影 + 无步数控制） |
+| P3：条件编码注入 + 生成流程集成 | 2026-06-06 | ✅ 已完成 |
 | P3.1：线性投影层 768→2560 | 2026-06-06 | ✅ 已完成 |
-| P3.2：步数控制 start_at / end_at | 下一轮 | ⏳ 待开始 |
-| P4：HiRes Fix + 高清测试 | - | ⏳ 待开始 |
-| P5：抠脸 + 参数调优 | - | ⏳ 待开始 |
+| P3.2：步数控制 start_at / end_at | 2026-06-06 | ✅ 已完成 |
+| P4：HiRes Fix + 高清测试 | 2026-06-06 | ✅ 已完成 |
+| **P5：SDXL IPAdapter Plus 适配（当前重点）** | 2026-06-07 | 🚧 **进行中** |
+| P6：抠脸 + 人脸预处理 | - | ⏳ 待开始 |
+| P7：VRAM 优化（RTX 3080 20GB 专属） | - | ⏳ 待开始 |
+
+### 当前阻塞项
+
+1. **CLIP Vision 维度**：当前 1024-dim，SDXL Plus 期望 1280-dim（ViT-H/14）
+2. **Perceiver Resampler ONNX 转换**：`image_proj` 含交叉注意力层，比简单 MLP 复杂
+3. **2048→2560 投影**：SDXL Plus 输出 2048-dim，Z-Image 需要 2560-dim
+
+### 模型下载状态
+
+| 模型 | 来源 | 大小 | 状态 |
+|------|------|------|------|
+| `ip-adapter-plus_sdxl_vit-h.safetensors` | h94/IP-Adapter | 847 MB | ✅ 已下载 |
+| ViT-H/14 CLIP Vision（如需） | openai/clip-vit-large-patch14 或自制 | ~1.5GB | ❌ 待确认是否需要 |
 
 ---
 
-> **最后更新**: 2026-06-06
+> **最后更新**: 2026-06-07
 > **维护者**: my-img Team
