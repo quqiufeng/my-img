@@ -57,6 +57,8 @@ void print_usage(const char* argv0) {
     std::cout << "  --freeu                   Enable FreeU (detail enhancement)\n";
     std::cout << "  --freeu-b1 FLOAT          FreeU backbone skip 1 (default: 1.3)\n";
     std::cout << "  --freeu-b2 FLOAT          FreeU backbone skip 2 (default: 1.4)\n";
+    std::cout << "  --freeu-s1 FLOAT          FreeU backbone scale 1 (default: 0.9)\n";
+    std::cout << "  --freeu-s2 FLOAT          FreeU backbone scale 2 (default: 0.2)\n";
     std::cout << "  --sag                     Enable Self-Attention Guidance\n";
     std::cout << "  --sag-scale FLOAT         SAG scale (default: 1.0)\n";
     std::cout << "\nHiRes Fix Options:\n";
@@ -635,6 +637,12 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--freeu-b2") {
             if (++i >= argc) { LOG_ERROR("Missing value for --freeu-b2"); return false; }
             if (!safe_convert(argv[i], opts.freeu_b2, "--freeu-b2")) return false;
+        } else if (arg == "--freeu-s1") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-s1"); return false; }
+            if (!safe_convert(argv[i], opts.freeu_s1, "--freeu-s1")) return false;
+        } else if (arg == "--freeu-s2") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --freeu-s2"); return false; }
+            if (!safe_convert(argv[i], opts.freeu_s2, "--freeu-s2")) return false;
         } else if (arg == "--sag") {
             opts.sag = true;
         } else if (arg == "--sag-scale") {

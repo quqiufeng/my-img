@@ -595,7 +595,95 @@ bool Image::save_to_file(const std::string& path) const {
 
 ---
 
-## 8. 性能时间线
+## 8. SDXL UNet 路径支持（新增）
+
+> 本节记录 SDXL Base 1.0（UNet 架构）在 `myimg-cli` 中的增强功能支持状态。
+
+### 8.1 模型加载差异
+
+与 Z-Image（DiT）使用 `--diffusion-model` + `--vae` + `--llm` 不同，SDXL Base 是**完整 checkpoint**（包含 UNet + VAE + CLIP-L + CLIP-G）：
+
+```bash
+myimg-cli \
+  --diffusion-model sd_xl_base_1.0.safetensors \
+  --clip-l clip_l.safetensors \
+  --clip-g clip_g.safetensors \
+  -p "..." -o output.png
+```
+
+**关键实现细节**：
+- `sdcpp_adapter.cpp` 会检测 safetensors header 中的 `first_stage_model` / `conditioner.embedders` 关键字
+- 若检测到完整 checkpoint，自动使用 `model_path` 而非 `diffusion_model_path` 加载，避免 VAE/CLIP 权重被跳过
+- `sd_params` 必须零初始化，否则 `vae_decode_only` 等布尔字段为随机值
+
+### 8.2 增强功能支持矩阵
+
+| 功能 | Z-Image (DiT) | SDXL Base (UNet) | 说明 |
+|------|---------------|------------------|------|
+| **FreeU** | ❌ 不适用（无 UNet skip） | ✅ 已集成 | 修改 `UnetModelBlock` 输出块 skip connection |
+| **SAG** | ✅ | ✅ | 采样循环中融合，架构无关 |
+| **HiRes Fix** | ✅ | ✅ | Latent upscale + refine，已验证 1536×1024 |
+| **VAE Tiling** | ✅ | ✅ | 解码峰值显存可控 |
+| **VAE Tile Cap** | ✅ | ✅ | 输出 tile >1024 自动缩放，防止 OOM |
+| **IPAdapter UNet** | ❌ | ✅ | 70 层 `to_k_ip`/`to_v_ip` 注入 |
+
+### 8.3 VAE 显存优化
+
+SDXL UNet 的 VAE decode 同样会面临大分辨率 OOM。实现两层保护：
+
+1. **CLI 层**：`--vae-tiling --vae-tile-size 128x128 --vae-tile-overlap 0.5`
+2. **后端保护**：`vae.hpp:decode()` 中自动 cap 输出 tile size 到 1024
+
+```cpp
+// vae.hpp
+const int max_output_tile = 1024;
+int output_tile_x = tile_size_x * scale_factor;  // latent->pixel
+int output_tile_y = tile_size_y * scale_factor;
+if (output_tile_x > max_output_tile || output_tile_y > max_output_tile) {
+    float scale = (float)max_output_tile / std::max(output_tile_x, output_tile_y);
+    tile_size_x = std::max(4, (int)(tile_size_x * scale));
+    tile_size_y = std::max(4, (int)(tile_size_y * scale));
+}
+```
+
+**实测数据**（RTX 3080 20GB）：
+
+| 测试 | 基础分辨率 | HiRes 目标 | VAE Tile | VAE 峰值 VRAM | 结果 |
+|------|-----------|-----------|----------|--------------|------|
+| SDXL txt2img | 512×512 | 无 | 128×128 | ~1.9GB | ✅ 正常 |
+| SDXL + HiRes | 512×512 | 1024×1024 | 128×128 | ~1.9GB | ✅ 正常 |
+| SDXL + HiRes | 768×512 | 1536×1024 | 128×85 | ~5.1GB | ✅ 正常 |
+
+### 8.4 FreeU 在 UNet 中的实现
+
+FreeU 作用于 UNet 输出块与输入块之间的 skip connection：
+
+```cpp
+// unet.hpp:UnetModelBlock::forward()
+if (freeu_enabled) {
+    float b = (output_block_idx < 3) ? freeu_b1 : freeu_b2;
+    float s = (output_block_idx < 3) ? freeu_s1 : freeu_s2;
+    h      = ggml_scale(ctx->ggml_ctx, h, b);        // 增强 backbone
+    h_skip = ggml_scale(ctx->ggml_ctx, h_skip, s);   // 削弱 skip
+}
+h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
+```
+
+**CLI 参数**（SDXL UNet 已支持）：
+
+```bash
+--freeu                  # 启用 FreeU
+--freeu-b1 1.3           # 默认 1.3
+--freeu-b2 1.4           # 默认 1.4
+--freeu-s1 0.9           # 默认 0.9（新增）
+--freeu-s2 0.2           # 默认 0.2（新增）
+--sag                    # 启用 SAG
+--sag-scale 1.0          # 默认 1.0
+```
+
+---
+
+## 9. 性能时间线
 
 ### 8.1 模型加载阶段
 
@@ -631,7 +719,7 @@ bool Image::save_to_file(const std::string& path) const {
 
 ---
 
-## 9. VRAM 使用分析
+## 10. VRAM 使用分析
 
 ### 9.1 模型常驻内存
 
@@ -662,7 +750,7 @@ VAE Decoding (128x128)   6657.00      18137.00  ← 峰值
 
 ---
 
-## 10. 关键代码文件索引
+## 11. 关键代码文件索引
 
 | 文件 | 作用 |
 |------|------|
@@ -681,7 +769,7 @@ VAE Decoding (128x128)   6657.00      18137.00  ← 峰值
 
 ---
 
-## 11. 与 img1.sh 的对比
+## 12. 与 img1.sh 的对比
 
 | 维度 | img1.sh (RTX 3080 10GB) | img2.sh (RTX 4090D 24GB) |
 |------|------------------------|--------------------------|

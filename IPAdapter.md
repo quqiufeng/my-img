@@ -738,6 +738,11 @@ Layer 1..n_layers-1:
 - ✅ 使用 `ggml_backend_tensor_set()` 进行后端无关的张量写入（修复了 CUDA 下直接 `memcpy` 到 `tensor->data` 的段错误）
 - ✅ 端到端运行无崩溃：`CrossAttention` 每层正确拼接图像 tokens
 - ✅ 不影响现有 DiT 路径：`g_ipadapter_unet_enabled` 仅在 UNet 模式下激活，z_image_turbo 测试通过
+- ✅ **FreeU 支持**：在 `UnetModelBlock` 的输出块 skip connection 中实现 `b1/b2/s1/s2` 缩放
+- ✅ **SAG 支持**：在采样循环中已生效（与架构无关）
+- ✅ **HiRes Fix + VAE Tiling**：SDXL UNet 路径支持完整的 HiRes Fix 和 VAE tiling
+  - 测试 1536×1024（512 基础 + 3x HiRes）成功，VAE 峰值 ~5.1GB
+  - VAE tile cap 自动生效：当输出 tile > 1024 时自动缩小，防止消费级显卡 OOM
 
 **已解决**：
 - ✅ **SDXL Base 模型兼容性问题**：根因不是模型不兼容，而是 **myimg-cli 的模型加载逻辑缺陷**：
@@ -753,6 +758,7 @@ Layer 1..n_layers-1:
 **待验证**：
 - ⏳ 与 DiT 路径进行 CLIP 相似度 head-to-head 对比
 - ⏳ 不同参考图像/提示词的系统性效果评估
+- ⏳ 2560×1440 全尺寸 SDXL UNet 生成（显存安全边界）
 
 ### 6.6 关键修复记录
 
@@ -764,6 +770,9 @@ Layer 1..n_layers-1:
 | SDXL 加载失败 (`first_stage_model.* not found`) | `diffusion_model_path` 只加载 `model.diffusion_model.` 前缀，跳过 VAE/CLIP | 检测完整 checkpoint 特征，自动切换为 `model_path` 加载全部权重 |
 | `sd_params` 未初始化导致 VAE 加载异常 | 栈上 C struct 未清零，布尔字段随机值 | `sd_ctx_params_t sd_params = {};` 零初始化 |
 | DiT 投影 2048→2560 污染 UNet tokens | UNet 期望 2048-dim，但 DiT 投影输出 2560-dim | `sdcpp_adapter.cpp` 在 UNet 模式下切片取前 2048 维 |
+| FreeU 对 SDXL UNet 不生效 | `UnetModelBlock` 未实现 skip connection 缩放 | 在 `output_blocks` 的 `ggml_concat(h, h_skip)` 前添加 `ggml_scale(h, b)` / `ggml_scale(h_skip, s)` |
+| 消费级 GPU VAE decode OOM | 大 tile size 导致单次 compute buffer 超过 10GB+ | 在 `vae.hpp:decode()` 中 cap 输出 tile size 到 1024，自动缩放 latent tile |
+| `--freeu-s1`/`--freeu-s2` CLI 缺失 | CLI parser 只解析了 `b1`/`b2` | 补全 `--freeu-s1` 和 `--freeu-s2` 的 usage + parsing + JSON 序列化 |
 
 ---
 
@@ -1007,8 +1016,9 @@ Layer 1..n_layers-1:
 | P7：抠脸 + 人脸预处理 | - | ⏳ 待开始 |
 | **P5b：UNet IPAdapter 权重注入** | 2026-06-07 | ✅ **端到端运行成功，权重加载 70/70** |
 | P5b.1：为 CrossAttention 注入 `to_k_ip`/`to_v_ip` | 2026-06-07 | ✅ 70 层全部注入并加载 |
-| P5b.2：SDXL Base 端到端验证 | 2026-06-07 | ✅ 运行无崩溃，生成正常彩色图像（修复 adapter 加载逻辑后） |
-| P5b.3：CLIP 相似度对比 (UNet vs DiT) | - | ⏳ 待执行 |
+| P5b.2：SDXL Base 端到端验证 | 2026-06-07 | ✅ 运行无崩溃，生成正常彩色图像 |
+| P5b.3：SDXL UNet 的 FreeU/SAG/HiRes/VAE Tiling | 2026-06-07 | ✅ 已集成并通过 1536×1024 测试 |
+| P5b.4：CLIP 相似度对比 (UNet vs DiT) | - | ⏳ 待执行 |
 | P6：训练投影层 / JointAttention 方案 B | - | ⏳ **当前重点** |
 | P7：抠脸 + 人脸预处理 | - | ⏳ 待开始 |
 | P8：VRAM 优化（RTX 3080 20GB 专属） | - | ⏳ 待开始 |
@@ -1057,7 +1067,7 @@ Layer 1..n_layers-1:
 
 ---
 
-> **最后更新**: 2026-06-07 14:25
+> **最后更新**: 2026-06-07 15:20
 > **维护者**: my-img Team
 > 
 > **今日关键成果**：
@@ -1068,4 +1078,8 @@ Layer 1..n_layers-1:
 > 5. **修复 SDXL Base 加载问题**：根因是 adapter 参数初始化不全 + `diffusion_model_path` 跳过 VAE/CLIP，三项修复后正常出图
 > 6. **UNet IPAdapter 首次成功出图**：使用 `demo_face_0.png` 参考图，16 tokens × 2048-dim，生成图像与 baseline 统计差异明显
 > 7. 修复 DiT→UNet token 维度不匹配：`sdcpp_adapter.cpp` 在 UNet 模式下自动切片取前 2048 维
-> 8. 更新 IPAdapter.md：新增 UNet 路径完整文档、状态、阻塞项、修复记录
+> 8. **SDXL UNet 集成 FreeU**：在 `UnetModelBlock` 的输出块 skip connection 中实现 FreeU 缩放
+> 9. **SDXL UNet 支持完整的 HiRes Fix + VAE Tiling**：1536×1024 测试通过，VAE 峰值 ~5.1GB
+> 10. **VAE 显存保护**：添加输出 tile size cap（1024），防止消费级 GPU OOM
+> 11. 补全 CLI `--freeu-s1`/`--freeu-s2` 参数
+> 12. 更新 IPAdapter.md：新增 UNet 路径完整文档、状态、阻塞项、修复记录
