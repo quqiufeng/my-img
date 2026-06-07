@@ -426,6 +426,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
     add_executable(test_sdcpp_adapter
         tests/test_sdcpp_adapter.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/ipadapter.cpp
         src/utils/prompt_schedule.cpp
         src/utils/regional_prompting.cpp
         src/utils/face_restoration.cpp
@@ -446,6 +447,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
         ${SDCPP_DIR}/include
         ${SDCPP_DIR}/ggml/include
         ${TORCH_INCLUDE_DIRS}
+        ${ONNXRUNTIME_INCLUDE_DIRS}
     )
     target_link_libraries(test_sdcpp_adapter PRIVATE
         ${SDCPP_LINK_START}
@@ -457,6 +459,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdcpp_adapter.cpp")
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
         ${ZLIB_LIBRARY}
+        ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so
     )
     target_compile_definitions(test_sdcpp_adapter PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_sdcpp_adapter PROPERTIES
@@ -472,6 +475,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
     add_executable(test_txt2img
         tests/test_txt2img.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/ipadapter.cpp
         src/utils/prompt_schedule.cpp
         src/utils/regional_prompting.cpp
         src/utils/face_restoration.cpp
@@ -492,6 +496,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
         ${SDCPP_DIR}/include
         ${SDCPP_DIR}/ggml/include
         ${TORCH_INCLUDE_DIRS}
+        ${ONNXRUNTIME_INCLUDE_DIRS}
     )
     target_link_libraries(test_txt2img PRIVATE
         ${SDCPP_LINK_START}
@@ -503,6 +508,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_txt2img.cpp")
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
         ${ZLIB_LIBRARY}
+        ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so
     )
     target_compile_definitions(test_txt2img PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_txt2img PROPERTIES
@@ -518,6 +524,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
     add_executable(test_hires_fix_real
         tests/test_hires_fix_real.cpp
         src/adapters/sdcpp_adapter.cpp
+        src/utils/ipadapter.cpp
         src/utils/prompt_schedule.cpp
         src/utils/regional_prompting.cpp
         src/utils/face_restoration.cpp
@@ -538,6 +545,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         ${SDCPP_DIR}/include
         ${SDCPP_DIR}/ggml/include
         ${TORCH_INCLUDE_DIRS}
+        ${ONNXRUNTIME_INCLUDE_DIRS}
     )
     target_link_libraries(test_hires_fix_real PRIVATE
         ${SDCPP_LINK_START}
@@ -549,6 +557,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hires_fix_real.cpp")
         ${WEBP_LIBRARY}
         ${WEBPMUX_LIBRARY}
         ${ZLIB_LIBRARY}
+        ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so
     )
     target_compile_definitions(test_hires_fix_real PRIVATE MYIMG_ENABLE_LIBTORCH=1)
     set_target_properties(test_hires_fix_real PROPERTIES

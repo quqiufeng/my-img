@@ -38,9 +38,13 @@ public:
     bool load_reference_image(const std::string& image_path);
 
     // 获取计算好的 image tokens（扁平化 float 向量）
-    // 形状: [1, 2560] — 经 IPAdapter MLP + 线性投影层映射到 Z-Image context 空间
+    // SD1.5: [1, 2560] — 单 token
+    // SDXL Plus: [16, 2560] — 16 tokens (flattened as [40960])
     // 可直接拼接到 text context（2560-dim cap_feat_dim）
     const std::vector<float>& get_image_tokens() const { return image_tokens_; }
+
+    // 获取 token 数量（SD1.5=1, SDXL Plus=16）
+    int get_num_tokens() const { return num_tokens_; }
 
     // 是否已加载
     bool is_loaded() const { return model_loaded_; }
@@ -51,8 +55,11 @@ private:
     IPAdapterConfig config_;
     bool model_loaded_ = false;
 
-    // 缓存 image tokens (投影后, [1, 2560])
+    // 缓存 image tokens (投影后)
+    // SD1.5: [1, 2560] = 2560 floats
+    // SDXL Plus: [16, 2560] = 40960 floats (flattened)
     std::vector<float> image_tokens_;
+    int num_tokens_ = 1;  // SD1.5=1, SDXL Plus=16
 
     // ONNX Runtime 实现细节 (PIMPL)
     struct Impl;

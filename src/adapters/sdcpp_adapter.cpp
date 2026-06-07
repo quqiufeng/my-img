@@ -516,10 +516,11 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     gen_params.ipadapter_end_at   = params.ipadapter_end_at;
     if (ipadapter_ && ipadapter_->is_loaded() && !ipadapter_->get_image_tokens().empty()) {
         gen_params.ipadapter_tokens    = ipadapter_->get_image_tokens().data();
-        gen_params.ipadapter_num_tokens = 1;  // single reference image
+        gen_params.ipadapter_num_tokens = ipadapter_->get_num_tokens();  // 1 or 16
         gen_params.ipadapter_weight    = params.ipadapter_weight;
         std::cout << "  IPAdapter: passing " << ipadapter_->get_image_tokens().size()
-                  << " floats to sd.cpp for injection, start_at=" << params.ipadapter_start_at
+                  << " floats (" << ipadapter_->get_num_tokens() << " tokens) to sd.cpp"
+                  << " for injection, start_at=" << params.ipadapter_start_at
                   << " end_at=" << params.ipadapter_end_at << std::endl;
     } else {
         gen_params.ipadapter_tokens    = nullptr;

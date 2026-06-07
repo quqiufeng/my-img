@@ -451,7 +451,9 @@ float* out_data = output[0].GetTensorMutableData<float>();
 - [x] 2560×1440 全尺寸生成测试通过（~7.4 min, VRAM 峰值 ~18.4 GB）
 - [x] FreeU + IPAdapter 兼容性验证通过
 
-### Phase 5：模型兼容性修复（进行中 2026-06-07）
+### Phase 5：SDXL IPAdapter Plus 适配（进行中 2026-06-07）
+
+#### 5.1 重大发现：模型架构完全不匹配（2026-06-07）
 
 **重大发现**：当前 `ipadapter.onnx` 是 **SD1.5 版本**，与 **Z-Image (SDXL DiT)** 完全不兼容。
 
@@ -468,12 +470,137 @@ float* out_data = output[0].GetTensorMutableData<float>();
 - 4-token 重复测试：恶化效果（0.1636）❌
 - **结论**：不是注入代码 bug，是**模型完全不匹配**
 
-**修复计划**：
+#### 5.2 更深层的 Root Cause：CLIP Vision 输出格式错误（2026-06-07 下午）
+
+在尝试适配 SDXL Plus 时，发现**第二个致命错误**：
+
+**IPAdapter Plus 使用的是 `hidden_states[-2]`，不是 `image_embeds`**。
+
+```python
+# IPAdapter Plus (ComfyUI/diffusers 实现)
+clip_image_embeds = image_encoder(
+    clip_image, output_hidden_states=True
+).hidden_states[-2]  # [batch, 257, 1280] ← 257个patch token
+
+# 标准 IPAdapter (base) 才用 image_embeds
+clip_image_embeds = image_encoder(clip_image).image_embeds  # [batch, 1024] ← pooled
+```
+
+| 属性 | `image_embeds` (pooled) | `hidden_states[-2]` (patch tokens) |
+|------|------------------------|-----------------------------------|
+| **维度** | [1, 1024] | **[1, 257, 1280]** |
+| **来源** | 最终 LayerNorm + Projection | 倒数第二层 transformer 输出 |
+| **信息** | 全局聚合特征 | **逐 patch 局部特征** |
+| **IPAdapter 类型** | Base 版 | **Plus 版** |
+| **Perceiver Resampler 输入** | 直接输入 | **需要 proj_in [1280,1280]** |
+
+**关键证据**：
+- 从 `ip-adapter-plus_sdxl_vit-h.safetensors` 提取的权重：`image_proj.proj_in.weight = [1280, 1280]`
+- 这说明 Perceiver Resampler 期望的输入是 **1280-dim**，不是 1024-dim
+- 我们的 `clip_vision.onnx` 只输出 `image_embeds [1, 1024]`，与 Plus 模型不匹配
+- 之前 v1 ONNX 导出时加的 `clip_adapter (1024→1280)` 是**未训练的随机权重**，破坏了语义
+
+**这就是 SDXL Plus 16 tokens 效果仍然很差（CLIP sim 0.0936）的根本原因**：
+1. 输入不是 patch tokens，而是错误的 pooled embedding
+2. 即使加了 clip_adapter，也是随机线性变换，完全破坏了 CLIP 特征
+
+#### 5.3 v2 ONNX 导出（2026-06-07）
+
+**导出环境**：`/data/venv` (torch 2.4.0+cu118, open_clip 3.3.0, ONNX Runtime 1.26.0)
+
+**教训**：导出前确认系统 CUDA 版本（12.6），不要随意重装 venv 中的 torch。本次导出使用现有已安装的工具链，未新增/删除任何包。
+
+**(1) CLIP Vision ViT-H/14 hidden states**：
+
+```python
+# OpenCLIP ViT-H/14 (laion2b_s32b_b79k)
+# 输出倒数第二层 transformer 结果（before ln_post + projection）
+# Shape: [batch, 257, 1280]
+
+class OpenCLIPHidden(nn.Module):
+    def forward(self, pixel_values):
+        x = visual.conv1(pixel_values)       # [B, 1280, 14, 14]
+        x = x.reshape(B, 1280, -1)
+        x = x.permute(0, 2, 1)               # [B, 196, 1280]
+        x = torch.cat([CLS_token, x], dim=1) # [B, 257, 1280]
+        x = x + positional_embedding
+        x = ln_pre(x)
+        x = x.permute(1, 0, 2)               # [257, B, 1280]
+        for block in transformer.resblocks:
+            x = block(x, None)
+        x = x.permute(1, 0, 2)               # [B, 257, 1280]
+        return x  # ← 返回这里，不做 ln_post 和 projection
+```
+
+- **输出文件**：`/data/models/image/clip_vision_vit_h_hidden.onnx`
+- **输出 shape**：`[batch_size, 257, 1280]`
+- **输出范围**：[-6.96, 2.49]（未归一化，直接进 Perceiver Resampler）
+- **大小**：约 2.4GB（与原始 clip_vision.onnx 相近）
+
+**(2) SDXL Plus Perceiver Resampler (v2)**：
+
+```python
+# 直接使用原始权重，无 clip_adapter
+# 输入: [batch, 257, 1280] (来自 hidden states)
+# 输出: [batch, 16, 2048]
+
+Resampler(
+    dim=1280, depth=4, dim_head=64, heads=20,
+    num_queries=16, embedding_dim=1280, output_dim=2048, ff_mult=4
+)
+```
+
+- **权重来源**：`image_proj.*` from `ip-adapter-plus_sdxl_vit-h.safetensors`
+- **proj_in**：`[1280, 1280]`（将 1280-dim patch 特征投影到 resampler dim）
+- **proj_out**：`[2048, 1280]`（输出 2048-dim image tokens）
+- **输出文件**：`/data/models/image/ipadapter_sdxl_plus_v2.onnx`
+- **输出 shape**：`[batch_size, 16, 2048]`
+
+**(3) 投影层 2048→2560 (v2)**：
+
+```python
+# Linear(2048, 2560), bias=False
+# 初始化: identity-like (前 2048 列 eye，后 512 列 zero)
+nn.init.eye_(proj.weight[:, :2048])
+```
+
+- **输出文件**：`/data/models/image/ipadapter_proj_2048_2560_v2.onnx`
+- **输出 shape**：`[batch_size, 16, 2560]`
+- **注意**：此投影层未训练，仅用于维度对齐。后续如有训练数据，可替换权重
+
+#### 5.4 模型文件清单（v2）
+
+```
+/data/models/image/
+├── clip_vision_vit_h_hidden.onnx           (397K)   ← NEW: ViT-H/14 hidden states [257,1280]
+├── clip_vision_vit_h_hidden.onnx.data      (2.36G)  ← 权重（与原始相同，仅输出节点不同）
+├── ipadapter_sdxl_plus_v2.onnx             (待测量)  ← NEW: Perceiver Resampler [257,1280]→[16,2048]
+├── ipadapter_proj_2048_2560_v2.onnx        (待测量)  ← NEW: 2048→2560 投影
+├── ip-adapter-plus_sdxl_vit-h.safetensors  (847M)   ← 源 PyTorch 权重
+├── ipadapter_sdxl_plus.onnx                (旧版)   ← v1: 含未训练 clip_adapter，已废弃
+└── ipadapter_proj_2048_2560.onnx           (旧版)   ← v1: 同上，已废弃
+```
+
+**v1 vs v2 核心差异**：
+
+| 组件 | v1 (废弃) | v2 (当前) |
+|------|----------|----------|
+| CLIP Vision 输入 | `image_embeds [1,1024]` | **`hidden_states [1,257,1280]`** |
+| clip_adapter | 未训练 `Linear(1024→1280)` | **无**（Resampler 直接接收 1280-dim） |
+| 权重正确性 | ❌ 随机初始化 | ✅ 从 safetensors 加载原始权重 |
+| 预期效果 | 无或负效果 | 待验证 |
+
+#### 5.5 修复计划（更新）
+
 - [x] 下载 SDXL IPAdapter Plus (`ip-adapter-plus_sdxl_vit-h.safetensors`, 847MB)
-- [ ] 提取 `image_proj` (Perceiver Resampler) 并转 ONNX
-- [ ] 解决 CLIP Vision 维度不匹配（1024 vs 1280）
-- [ ] 添加 2048→2560 投影层适配 Z-Image
-- [ ] 测试验证效果
+- [x] 分析 root cause：`hidden_states[-2]` vs `image_embeds`
+- [x] 导出 `clip_vision_vit_h_hidden.onnx`（257×1280 patch tokens）
+- [x] 导出 `ipadapter_sdxl_plus_v2.onnx`（Perceiver Resampler，无 clip_adapter）
+- [x] 导出 `ipadapter_proj_2048_2560_v2.onnx`（2048→2560）
+- [ ] 修改 `ipadapter.cpp`：支持新的 hidden states 输入格式
+- [ ] 修改 `sdcpp_adapter.cpp`：传递 v2 模型路径
+- [ ] 修改 `stable-diffusion.cpp`：适配 16 tokens SDXL Plus 注入
+- [ ] 重新构建 + 测试验证效果
 
 ### Phase 5：VRAM 优化（RTX 3080 20GB）
 
@@ -633,14 +760,16 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 
 **方案 A：适配 SDXL IPAdapter Plus（进行中）**
 - [x] 下载 `ip-adapter-plus_sdxl_vit-h.safetensors`（847MB）
-- [ ] 提取 `image_proj`（Perceiver Resampler，16 tokens × 1280-dim）
-- [ ] 解决 CLIP Vision 维度：当前 1024-dim → 需要 1280-dim（ViT-H/14）
-- [ ] 添加 2048→2560 投影层适配 Z-Image context
-- [ ] 导出完整 ONNX pipeline
+- [x] 提取 `image_proj`（Perceiver Resampler，16 tokens × 1280-dim）→ ONNX v2
+- [x] 解决 CLIP Vision 维度：导出 `clip_vision_vit_h_hidden.onnx`（257×1280）
+- [x] 添加 2048→2560 投影层 → ONNX v2
+- [ ] 修改 C++ 代码支持 v2 模型（hidden states 输入，16 tokens 输出）
+- [ ] 测试验证效果
 
-**方案 B：换 SDXL 兼容的 CLIP Vision（如有必要）**
-- 如果当前 `clip_vision.onnx`（1024-dim）无法与 SDXL Plus 配合
-- 需要下载 ViT-H/14 CLIP Vision（1280-dim 输出）
+**方案 B：换 SDXL 兼容的 CLIP Vision（已完成）**
+- 原 `clip_vision.onnx` 输出 `image_embeds [1,1024]`（pooled）
+- 新 `clip_vision_vit_h_hidden.onnx` 输出 `hidden_states [-2] [1,257,1280]`（patch tokens）
+- ✅ 已完成导出
 
 **方案 C：人脸预处理优化（立即可用）**
 - 已验证：人脸裁切 + 4-token 重复能改善效果（相对于全图参考）
@@ -672,11 +801,64 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 2. 但改变方向**错误**——SD1.5 token 在 SDXL DiT 中产生了负效果
 3. **必须换 SDXL 版 IPAdapter 模型**
 
-**2026-06-07**：模型兼容性分析
+**2026-06-07**：模型兼容性分析（第一轮）
 - 当前 `ipadapter.onnx` = SD1.5 专用（768-dim 输出）
 - Z-Image = SDXL DiT（需要 2048-dim 输入，经投影到 2560）
 - 已下载 `ip-adapter-plus_sdxl_vit-h.safetensors`（Perceiver Resampler 结构）
-- 待完成：提取 `image_proj` → ONNX + 2048→2560 投影 + CLIP 维度适配
+- 导出 v1 ONNX：错误地使用了 `image_embeds [1,1024]` + 未训练 `clip_adapter`
+
+**2026-06-07**：SDXL Plus v1 测试（错误输入）
+- 使用 `clip_vision.onnx` (1024-dim) + `ipadapter_sdxl_plus.onnx` (含未训练 clip_adapter)
+- 输出 16 tokens × 2048-dim，经投影到 2560-dim
+- CLIP 相似度：0.0936（比无 IPA 的 0.4648 更差）
+- **原因**：输入是 pooled embedding 而非 patch tokens，clip_adapter 是随机权重
+
+**2026-06-07**：Root Cause 最终定位
+- 检查原始权重：`image_proj.proj_in.weight = [1280, 1280]`
+- 检查 ComfyUI 源码：`IPAdapterPlusXL.get_image_embeds()` 使用 `hidden_states[-2]`
+- 确认：`hidden_states[-2]` shape = `[1, 257, 1280]`（257 = 256 patches + 1 CLS）
+- **结论**：v1 完全错误，必须导出 v2（使用 hidden states，移除 clip_adapter）
+
+**2026-06-07**：v2 ONNX 导出成功
+- `clip_vision_vit_h_hidden.onnx`: [1, 257, 1280] ✅
+- `ipadapter_sdxl_plus_v2.onnx`: [1, 257, 1280] → [1, 16, 2048] ✅
+- `ipadapter_proj_2048_2560_v2.onnx`: [1, 16, 2048] → [1, 16, 2560] ✅
+- **测试结果**：CLIP sim = 0.1878（仍远低于 baseline 0.4648）
+
+**2026-06-07**：v3 ONNX 导出（修复 chunk bug）
+- **问题定位**：v2 的 `chunk(2, dim=-1)` 在 ONNX tracing 下产生错误行为，导致 PyTorch 与 ONNX 输出 max diff = 2.87
+- **修复**：将 `to_kv` 拆分为独立的 `to_k`/`to_v`，手动 split 原始权重
+- **验证**：PyTorch vs ONNX max diff = 0.000041 ✅
+- **测试结果**：
+  - weight=0.5: CLIP sim = 0.3838 (-0.0809 vs baseline)
+  - weight=1.0: CLIP sim = 0.3715 (-0.0933 vs baseline)
+  - weight=1.5: CLIP sim = 0.3820 (-0.0828 vs baseline)
+- **结论**：v3 显著优于 v1/v2，但仍不如无 IPA 的 baseline
+
+**2026-06-07**：核心瓶颈分析
+| 问题 | 影响 | 说明 |
+|------|------|------|
+| **2048→2560 投影未训练** | 🔴🔴 **致命** | 当前是 identity-like（前 2048 维 eye，后 512 维 zero）。这导致 20% 维度无信号，且已有维度未经适配直接映射 |
+| **投影初始化方式** | 🔴 高 | **Xavier (0.3391) >> Identity-like (0.1467)**。初始化策略对未训练投影层的影响巨大 |
+| **Context 拼接 vs Attention K/V 注入** | 🔴 高 | 标准 IPAdapter Plus 将 image tokens 直接作为 attention 的 k/v（通过 `to_k_ip`/`to_v_ip`）。Z-Image DiT 无 cross-attention，只能拼接 context 进 text sequence，经过 `cap_embedder`（为文本设计）处理 |
+| **Face crop 质量** | 🟡 中 | 参考图裁剪可能不够精准 |
+
+**2026-06-07**：投影初始化对比（weight=0.8）
+| 初始化方法 | CLIP Similarity | vs Baseline | 结论 |
+|-----------|----------------|-------------|------|
+| Identity-like (eye) | 0.1467 | -0.3181 ❌ | 最差，20% 维度为零 |
+| Xavier Uniform | 0.3391 | -0.1257 ⚠️ | **最佳**，所有维度有信号 |
+| **Baseline (无 IPA)** | **0.4648** | — | 目标 |
+
+**关键发现**：
+1. **初始化比想象中更重要**：Xavier 使相似度从 0.1467 → 0.3391（提升 131%）
+2. **所有维度必须有信号**：Identity-like 导致 512/2560 = 20% 维度永远为零，严重破坏信息流
+3. **仍未达 baseline**：差距 0.1257，说明仅靠初始化不够，需要训练或架构改进
+
+**下一步方案**（按优先级）：
+1. **训练 2048→2560 投影层**（最优）：收集 image-caption 对，用对比学习训练投影。Xavier 初始化已证明是更好的起点
+2. **修改 JointAttention**（方案 B）：在 Z-Image 的 JointTransformerBlock 中为 image tokens 单独创建 k/v 投影，标准 IPAdapter 方式注入
+3. **多参考图平均**：使用多张参考图提取特征后平均，增强信号稳定性
 
 ---
 
@@ -700,24 +882,52 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 | P3.1：线性投影层 768→2560 | 2026-06-06 | ✅ 已完成 |
 | P3.2：步数控制 start_at / end_at | 2026-06-06 | ✅ 已完成 |
 | P4：HiRes Fix + 高清测试 | 2026-06-06 | ✅ 已完成 |
-| **P5：SDXL IPAdapter Plus 适配（当前重点）** | 2026-06-07 | 🚧 **进行中** |
-| P6：抠脸 + 人脸预处理 | - | ⏳ 待开始 |
-| P7：VRAM 优化（RTX 3080 20GB 专属） | - | ⏳ 待开始 |
+| **P5：SDXL IPAdapter Plus 适配** | 2026-06-07 | 🚧 **核心完成，待训练投影层** |
+| P5.1：正确的 hidden states CLIP Vision | 2026-06-07 | ✅ 已导出 `clip_vision_vit_h_hidden.onnx` |
+| P5.2：Perceiver Resampler ONNX (v3) | 2026-06-07 | ✅ 已修复 chunk bug，权重与 PyTorch diff < 1e-4 |
+| P5.3：2048→2560 投影层 | 2026-06-07 | ⚠️ Xavier 初始化已验证，需训练 |
+| P5.4：C++ 代码适配 | 2026-06-07 | ✅ `ipadapter.cpp` 支持 hidden states + 16 tokens |
+| P6：训练投影层 / JointAttention 方案 B | - | ⏳ **当前重点** |
+| P7：抠脸 + 人脸预处理 | - | ⏳ 待开始 |
+| P8：VRAM 优化（RTX 3080 20GB 专属） | - | ⏳ 待开始 |
 
 ### 当前阻塞项
 
-1. **CLIP Vision 维度**：当前 1024-dim，SDXL Plus 期望 1280-dim（ViT-H/14）
-2. **Perceiver Resampler ONNX 转换**：`image_proj` 含交叉注意力层，比简单 MLP 复杂
-3. **2048→2560 投影**：SDXL Plus 输出 2048-dim，Z-Image 需要 2560-dim
+1. ~~CLIP Vision 维度~~ → ✅ 已解决：导出 `clip_vision_vit_h_hidden.onnx`（257×1280）
+2. ~~Perceiver Resampler ONNX 转换~~ → ✅ 已解决：导出 `ipadapter_sdxl_plus_v3.onnx`（v3 修复 chunk bug）
+3. ~~2048→2560 投影~~ → ✅ 已解决：导出 `ipadapter_proj_2048_2560_xavier.onnx`（Xavier 初始化）
+4. ~~C++ 代码适配~~ → ✅ 已解决：`ipadapter.cpp` 支持 hidden states 输入格式
+5. **投影层训练**：Xavier 初始化比 identity 好 131%，但仍未达 baseline。需要训练或架构改进
+
+### 模型文件清单（最终）
+
+```
+/data/models/image/
+├── clip_vision_vit_h_hidden.onnx              (397K)   ← ViT-H/14 hidden states [257,1280]
+├── clip_vision_vit_h_hidden.onnx.data         (2.36G)  ← 权重
+├── ipadapter_sdxl_plus_v3.onnx                (~15MB)  ← Perceiver Resampler [257,1280]→[16,2048]
+├── ipadapter_proj_2048_2560_xavier.onnx       (~20MB)  ← 2048→2560 投影 (Xavier init)
+├── ip-adapter-plus_sdxl_vit-h.safetensors     (847M)   ← 源 PyTorch 权重
+├── ipadapter_sdxl_plus_v2.onnx                (废弃)   ← v2: chunk bug
+└── ipadapter_proj_2048_2560_v2.onnx           (废弃)   ← v2: identity init
+```
 
 ### 模型下载状态
 
 | 模型 | 来源 | 大小 | 状态 |
 |------|------|------|------|
 | `ip-adapter-plus_sdxl_vit-h.safetensors` | h94/IP-Adapter | 847 MB | ✅ 已下载 |
-| ViT-H/14 CLIP Vision（如需） | openai/clip-vit-large-patch14 或自制 | ~1.5GB | ❌ 待确认是否需要 |
+| `clip_vision_vit_h_hidden.onnx` | 自制 (OpenCLIP ViT-H/14) | 2.4 GB | ✅ 已导出 |
+| `ipadapter_sdxl_plus_v3.onnx` | 自制 (Perceiver Resampler) | ~15 MB | ✅ 已导出 |
+| `ipadapter_proj_2048_2560_xavier.onnx` | 自制 (Linear 2048→2560) | ~20 MB | ✅ 已导出 |
 
 ---
 
-> **最后更新**: 2026-06-07
+> **最后更新**: 2026-06-07 09:25
 > **维护者**: my-img Team
+> 
+> **今日关键成果**：
+> 1. 定位 SDXL Plus 失败 root cause：`hidden_states[-2]` vs `image_embeds`
+> 2. 修复 ONNX `chunk` bug，导出 v3（separate k/v），PyTorch vs ONNX diff < 1e-4
+> 3. 发现投影初始化对效果影响巨大：Xavier (0.3391) >> Identity (0.1467)
+> 4. 完整记录到 IPAdapter.md（含模型文件、测试数据、瓶颈分析）
