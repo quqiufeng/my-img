@@ -163,15 +163,38 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
         log_initialized = true;
     }
     
-    sd_ctx_params_t sd_params;
+    sd_ctx_params_t sd_params = {};
     sd_ctx_params_init(&sd_params);
     
     // 设置模型路径
-    // 注意：Z-Image 模型需要使用 diffusion_model_path 而不是 model_path
+    // 完整 checkpoint（如 SDXL Base safetensors）包含 UNet+VAE+CLIP，需要用 model_path 加载全部权重
+    // diffusion-only 模型（如 Z-Image GGUF）只含 UNet，需要用 diffusion_model_path
+    bool is_full_checkpoint = false;
+    std::string model_file = !params.diffusion_model_path.empty() ? params.diffusion_model_path : params.model_path;
+    if (!model_file.empty()) {
+        // 快速检测 safetensors 文件是否包含 VAE/CLIP 权重
+        std::ifstream fs(model_file, std::ios::binary);
+        if (fs.good()) {
+            uint64_t header_len = 0;
+            fs.read(reinterpret_cast<char*>(&header_len), sizeof(header_len));
+            if (header_len > 0 && header_len < 100 * 1024 * 1024) {  // header < 100MB
+                std::string header(header_len, '\0');
+                fs.read(header.data(), header_len);
+                is_full_checkpoint = (header.find("first_stage_model") != std::string::npos) ||
+                                     (header.find("conditioner.embedders") != std::string::npos) ||
+                                     (header.find("cond_stage_model") != std::string::npos);
+            }
+        }
+    }
+    
     if (!params.diffusion_model_path.empty()) {
-        sd_params.diffusion_model_path = params.diffusion_model_path.c_str();
+        if (is_full_checkpoint) {
+            sd_params.model_path = params.diffusion_model_path.c_str();
+            std::cout << "[SDCPPAdapter] Detected full checkpoint, using model_path (UNet+VAE+CLIP)" << std::endl;
+        } else {
+            sd_params.diffusion_model_path = params.diffusion_model_path.c_str();
+        }
     } else if (!params.model_path.empty()) {
-        // 如果只有 model_path，尝试判断是否为 diffusion-only 模型
         sd_params.model_path = params.model_path.c_str();
     }
     
@@ -183,7 +206,12 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.control_net_path = params.control_net_path.empty() ? nullptr : params.control_net_path.c_str();
     sd_params.audio_vae_path = params.audio_vae_path.empty() ? nullptr : params.audio_vae_path.c_str();
     sd_params.embeddings_connectors_path = params.embeddings_connectors_path.empty() ? nullptr : params.embeddings_connectors_path.c_str();
-    
+
+    // IPAdapter UNet cross-attention injection (must be set at load time to create extra tensors)
+    sd_params.ipadapter_unet_mode = !params.ipadapter_unet_weights_path.empty();
+    sd_params.ipadapter_unet_weights_path = params.ipadapter_unet_weights_path.empty() ? nullptr
+                                                                                       : params.ipadapter_unet_weights_path.c_str();
+
     // 系统设置
     sd_params.n_threads = params.n_threads > 0 ? params.n_threads : sd_get_num_physical_cores();
     sd_params.offload_params_to_cpu = params.offload_params_to_cpu;
@@ -234,7 +262,8 @@ bool SDCPPAdapter::load_model(const GenerationParams& params) {
     sd_params.params_backend = params.params_backend.empty() ? nullptr : params.params_backend.c_str();
 
     // VAE 设置
-    sd_params.vae_decode_only = false;
+    // txt2img 只需要 decoder；img2img / hires 需要 encoder
+    sd_params.vae_decode_only = params.init_image.empty();
     sd_params.keep_vae_on_cpu = auto_vae_cpu;
     sd_params.keep_clip_on_cpu = auto_clip_cpu;
     
@@ -514,14 +543,37 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
     // Pass IPAdapter tokens to sd_img_gen_params_t (for injection in sd.cpp)
     gen_params.ipadapter_start_at = params.ipadapter_start_at;
     gen_params.ipadapter_end_at   = params.ipadapter_end_at;
+    gen_params.ipadapter_unet_mode = !params.ipadapter_unet_weights_path.empty();
+    gen_params.ipadapter_unet_weights_path = params.ipadapter_unet_weights_path.empty() ? nullptr
+                                                                                       : params.ipadapter_unet_weights_path.c_str();
     if (ipadapter_ && ipadapter_->is_loaded() && !ipadapter_->get_image_tokens().empty()) {
-        gen_params.ipadapter_tokens    = ipadapter_->get_image_tokens().data();
-        gen_params.ipadapter_num_tokens = ipadapter_->get_num_tokens();  // 1 or 16
+        const auto& tokens = ipadapter_->get_image_tokens();
+        int n_tokens = ipadapter_->get_num_tokens();
+        // UNet IPAdapter expects 2048-dim tokens; DiT projection may have padded to 2560.
+        // Slice back to 2048 if needed.
+        if (gen_params.ipadapter_unet_mode && tokens.size() == (size_t)n_tokens * 2560) {
+            static thread_local std::vector<float> unet_tokens;
+            unet_tokens.resize((size_t)n_tokens * 2048);
+            for (int i = 0; i < n_tokens; ++i) {
+                std::copy(tokens.begin() + i * 2560,
+                          tokens.begin() + i * 2560 + 2048,
+                          unet_tokens.begin() + i * 2048);
+            }
+            gen_params.ipadapter_tokens    = unet_tokens.data();
+            gen_params.ipadapter_num_tokens = n_tokens;
+            std::cout << "  IPAdapter: passing " << unet_tokens.size()
+                      << " floats (" << n_tokens << " tokens x 2048-dim) to sd.cpp UNet"
+                      << std::endl;
+        } else {
+            gen_params.ipadapter_tokens    = tokens.data();
+            gen_params.ipadapter_num_tokens = n_tokens;
+            std::cout << "  IPAdapter: passing " << tokens.size()
+                      << " floats (" << n_tokens << " tokens) to sd.cpp"
+                      << " for injection, start_at=" << params.ipadapter_start_at
+                      << " end_at=" << params.ipadapter_end_at
+                      << " unet_mode=" << gen_params.ipadapter_unet_mode << std::endl;
+        }
         gen_params.ipadapter_weight    = params.ipadapter_weight;
-        std::cout << "  IPAdapter: passing " << ipadapter_->get_image_tokens().size()
-                  << " floats (" << ipadapter_->get_num_tokens() << " tokens) to sd.cpp"
-                  << " for injection, start_at=" << params.ipadapter_start_at
-                  << " end_at=" << params.ipadapter_end_at << std::endl;
     } else {
         gen_params.ipadapter_tokens    = nullptr;
         gen_params.ipadapter_num_tokens = 0;

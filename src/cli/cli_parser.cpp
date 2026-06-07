@@ -22,6 +22,8 @@ void print_usage(const char* argv0) {
     std::cout << "  -m, --model PATH          Full model path (ckpt/safetensors)\n";
     std::cout << "  --diffusion-model PATH    Diffusion model path (GGUF)\n";
     std::cout << "  --vae PATH                VAE model path\n";
+    std::cout << "  --clip-l PATH             CLIP-L text encoder path (SDXL)\n";
+    std::cout << "  --clip-g PATH             CLIP-G text encoder path (SDXL)\n";
     std::cout << "  --llm PATH                LLM / text encoder path\n";
     std::cout << "  --upscale-model PATH      ESRGAN upscale model path\n";
     std::cout << "\nGeneration Options:\n";
@@ -129,7 +131,8 @@ void print_usage(const char* argv0) {
     std::cout << "  --ipadapter               Enable IPAdapter\n";
     std::cout << "  --ipadapter-model PATH       IPAdapter model path\n";
     std::cout << "  --ipadapter-clip-vision PATH  CLIP Vision model path\n";
-    std::cout << "  --ipadapter-projection PATH   768->2560 linear projection (optional)\n";
+    std::cout << "  --ipadapter-projection PATH   768->2560 linear projection (optional, DiT mode)\n";
+    std::cout << "  --ipadapter-unet-weights PATH IPAdapter UNet weights for SDXL cross-attention injection\n";
     std::cout << "  --ipadapter-image PATH        Reference image path\n";
     std::cout << "  --ipadapter-weight FLOAT      Weight 0.0-1.0 (default: 1.0)\n";
     std::cout << "  --ipadapter-start FLOAT       Start step ratio 0.0-1.0 (default: 0.0)\n";
@@ -517,6 +520,12 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--vae") {
             if (++i >= argc) { LOG_ERROR("Missing value for --vae"); return false; }
             opts.vae = argv[i];
+        } else if (arg == "--clip-l") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --clip-l"); return false; }
+            opts.clip_l = argv[i];
+        } else if (arg == "--clip-g") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --clip-g"); return false; }
+            opts.clip_g = argv[i];
         } else if (arg == "--llm") {
             if (++i >= argc) { LOG_ERROR("Missing value for --llm"); return false; }
             opts.llm = argv[i];
@@ -932,6 +941,9 @@ bool parse_args(int argc, char** argv, CliOptions& opts) {
         } else if (arg == "--ipadapter-projection") {
             if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-projection"); return false; }
             opts.ipadapter_projection = argv[i];
+        } else if (arg == "--ipadapter-unet-weights") {
+            if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-unet-weights"); return false; }
+            opts.ipadapter_unet_weights = argv[i];
         } else if (arg == "--ipadapter-image") {
             if (++i >= argc) { LOG_ERROR("Missing value for --ipadapter-image"); return false; }
             opts.ipadapter_image = argv[i];
@@ -1063,6 +1075,8 @@ bool load_config_file(CliOptions& opts) {
         if (config.contains("model")) opts.model = config["model"].get<std::string>();
         if (config.contains("diffusion_model")) opts.diffusion_model = config["diffusion_model"].get<std::string>();
         if (config.contains("vae")) opts.vae = config["vae"].get<std::string>();
+        if (config.contains("clip_l")) opts.clip_l = config["clip_l"].get<std::string>();
+        if (config.contains("clip_g")) opts.clip_g = config["clip_g"].get<std::string>();
         if (config.contains("llm")) opts.llm = config["llm"].get<std::string>();
         if (config.contains("upscale_model")) opts.upscale_model = config["upscale_model"].get<std::string>();
         
@@ -1128,6 +1142,8 @@ bool save_config_file(const CliOptions& opts, const std::string& path) {
     if (!opts.model.empty()) config["model"] = opts.model;
     if (!opts.diffusion_model.empty()) config["diffusion_model"] = opts.diffusion_model;
     if (!opts.vae.empty()) config["vae"] = opts.vae;
+    if (!opts.clip_l.empty()) config["clip_l"] = opts.clip_l;
+    if (!opts.clip_g.empty()) config["clip_g"] = opts.clip_g;
     if (!opts.llm.empty()) config["llm"] = opts.llm;
     if (!opts.upscale_model.empty()) config["upscale_model"] = opts.upscale_model;
     

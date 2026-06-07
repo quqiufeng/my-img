@@ -225,14 +225,11 @@ int main(int argc, char** argv) {
         LOG_ERROR("Error: --model or --diffusion-model is required");
         return 1;
     }
-    // 如果使用 diffusion-model 模式，需要 vae 和 llm (skip for batch mode)
+    // 如果使用 diffusion-model 模式，需要文本编码器 (skip for batch mode)
+    // VAE 是可选的：SDXL 等完整 checkpoint 内置 VAE；Z-Image 等需要外部 VAE
     if (!batch_mode && !opts.diffusion_model.empty()) {
-        if (opts.vae.empty()) {
-            LOG_ERROR("Error: --vae is required when using --diffusion-model");
-            return 1;
-        }
-        if (opts.llm.empty()) {
-            LOG_ERROR("Error: --llm is required when using --diffusion-model");
+        if (opts.llm.empty() && (opts.clip_l.empty() || opts.clip_g.empty())) {
+            LOG_ERROR("Error: --llm is required when using --diffusion-model (or provide --clip-l and --clip-g for SDXL)");
             return 1;
         }
     }
@@ -263,6 +260,8 @@ int main(int argc, char** argv) {
     }
     params.diffusion_model_path = opts.diffusion_model;
     params.vae_path = opts.vae;
+    params.clip_l_path = opts.clip_l;
+    params.clip_g_path = opts.clip_g;
     params.llm_path = opts.llm;
     params.prompt = processed_prompt;
     params.negative_prompt = processed_neg_prompt;
@@ -450,6 +449,7 @@ int main(int argc, char** argv) {
     params.ipadapter_model = opts.ipadapter_model;
     params.ipadapter_clip_vision = opts.ipadapter_clip_vision;
     params.ipadapter_projection = opts.ipadapter_projection;
+    params.ipadapter_unet_weights_path = opts.ipadapter_unet_weights;
     params.ipadapter_image = opts.ipadapter_image;
     params.ipadapter_weight = opts.ipadapter_weight;
     params.ipadapter_start_at = opts.ipadapter_start_at;

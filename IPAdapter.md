@@ -2,8 +2,14 @@
 
 > **目标**：在 my-img（纯 C++ ComfyUI）中实现 IPAdapter 图像提示词功能
 > **后端**：stable-diffusion.cpp（GGML/CUDA）
-> **模型**：Z-Image Turbo（SDXL 架构，Flow Matching → **DiT**）
-> **当前状态**：🚧 Phase 3-4 完成（注入 + 步进控制 + HiRes Fix ✅）。**重大发现**：当前 SD1.5 IPAdapter 模型与 Z-Image DiT 不兼容，导致效果几乎为零。已定位 root cause，正在适配 SDXL IPAdapter Plus。
+> **模型**：
+> - **DiT 路径**：Z-Image Turbo（SDXL 架构，Flow Matching → **DiT**）
+> - **UNet 路径**：SDXL Base 1.0（标准 **UNet** cross-attention）
+> **当前状态**：
+> - 🚧 Phase 3-4 完成（注入 + 步进控制 + HiRes Fix ✅）
+> - ✅ **UNet IPAdapter 权重注入实现完成**：70/70 cross-attention 层权重加载成功，端到端运行无崩溃
+> - ⚠️ **SDXL Base 模型兼容性问题**：当前 `sd_xl_base_1.0.safetensors` 与 sd.cpp 产生纯白输出（与 IPAdapter 代码无关），阻塞 UNet 路径效果验证
+> - **重大发现**：当前 SD1.5 IPAdapter 模型与 Z-Image DiT 不兼容，导致效果几乎为零。已定位 root cause，正在适配 SDXL IPAdapter Plus。
 >
 > **核心理念**：市面上没有 C++ 原生的 IPAdapter 实现。
 > ComfyUI（Python）→ my-img（C++），这次也一样。
@@ -651,7 +657,117 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 
 ---
 
-## 6. 关键决策记录
+## 6. UNet IPAdapter 路径（SDXL Base 1.0）
+
+### 6.1 背景
+
+除了 Z-Image DiT 路径，my-img 还需要支持**标准 SDXL UNet** 的 IPAdapter。标准 IPAdapter 论文中的注入点就是 UNet cross-attention 的 `to_k` / `to_v`：为参考图像单独学习一组 `to_k_ip` 和 `to_v_ip` 投影，将图像 tokens 投影后拼接到文本 k/v 上。
+
+### 6.2 实现方案
+
+**核心思路**：在 sd.cpp 的 `CrossAttention`（`common_block.hpp`）中为每个 cross-attention 层动态注入 `to_k_ip_layer_<id>` / `to_v_ip_layer_<id>` 两个 `Linear` 块。在生成时，通过全局图像嵌入张量 `g_ipadapter_image_embeds` 计算图像 k/v 并拼接到文本 k/v 上。
+
+```
+UNet CrossAttention 数据流（启用 IPAdapter UNet 时）:
+
+text context: [N, n_context, context_dim]
+                    ↓
+            to_k / to_v (原始文本投影)
+                    ↓
+    k_text, v_text: [N, n_context, inner_dim]
+
+image_embeds: [1, N_ip, context_dim]  ← 来自 IPAdapter MLP
+                    ↓
+    to_k_ip / to_v_ip (每层独立的 Linear)
+                    ↓
+    k_ip, v_ip: [1, N_ip, inner_dim]
+                    ↓
+    k = concat(k_text, k_ip, dim=1)  # 沿 token 维度拼接
+    v = concat(v_text, v_ip, dim=1)
+                    ↓
+        ggml_ext_attention_ext(q, k, v, ...)
+```
+
+### 6.3 代码改动
+
+| 文件 | 改动 |
+|------|------|
+| `include/stable-diffusion.h` | 新增 `ipadapter_unet_mode` / `ipadapter_unet_weights_path` 到 `sd_ctx_params_t` 和 `sd_img_gen_params_t` |
+| `src/common_block.hpp` | `CrossAttention` 构造时按层注入 `to_k_ip_layer_<id>` / `to_v_ip_layer_<id>`；forward 时拼接图像 k/v |
+| `src/unet.hpp` | `UNetModelRunner` 构造时在 `params_ctx` 中预留 `ipadapter_image_embeds` 张量 |
+| `src/stable-diffusion.cpp` | 新增 `load_ipadapter_unet_weights()` / `assign_ipadapter_unet_weights()`；在采样前设置图像嵌入 |
+| `src/ggml_extend.hpp` | `get_param_tensors()` 跳过 `to_k_ip_layer_*` / `to_v_ip_layer_*`，避免主加载流程报错 |
+| `src/cli/cli_options.h` / `cli_parser.cpp` / `main.cpp` | 新增 `--ipadapter-unet-weights PATH` CLI 参数 |
+| `src/adapters/sdcpp_adapter.cpp` | 将 UNet IPAdapter 模式传递给 sd.cpp |
+
+### 6.4 权重文件格式
+
+**文件**：`/data/models/image/ipadapter_unet_weights.bin`
+
+**格式**：
+```
+Header:
+  uint32 n_layers = 70
+  uint32 version  = 1
+
+Layer 0 (无显式 layer_id，兼容早期导出):
+  uint32 out_features
+  uint32 in_features
+  float  to_k_ip[out_features * in_features]
+  float  to_v_ip[out_features * in_features]
+
+Layer 1..n_layers-1:
+  uint32 layer_id       # 文件中的注意力层索引 (1,3,5,...,139)
+  uint32 out_features   # 640 或 1280 (SDXL attn 输出维度)
+  uint32 in_features    # 2048 (SDXL cross-attention context_dim)
+  float  to_k_ip[...]
+  float  to_v_ip[...]
+```
+
+**特性**：
+- 文件末尾有约 20MB 额外数据（超出 header 声明的 70 层），解析器只读取 70 层并忽略尾部
+- `layer_id` 是 flattened attention 索引（1,3,5,...,139），对应模型中所有 `CrossAttention` 实例（包括 self 和 cross）
+- 权重分配采用**按形状分组 + 组内排序匹配**，解决文件 layer_id 顺序与模型遍历顺序不一致的问题
+
+### 6.5 运行状态
+
+**已验证**：
+- ✅ `load_ipadapter_unet_weights()` 成功解析 70 层
+- ✅ 模型总参数量从 ~4.9GB 增加到 ~6.2GB（新增 70 组 `to_k_ip`/`to_v_ip` 权重）
+- ✅ `assign_ipadapter_unet_weights()` 成功将 70/70 层权重写入对应张量
+- ✅ 使用 `ggml_backend_tensor_set()` 进行后端无关的张量写入（修复了 CUDA 下直接 `memcpy` 到 `tensor->data` 的段错误）
+- ✅ 端到端运行无崩溃：`CrossAttention` 每层正确拼接图像 tokens
+- ✅ 不影响现有 DiT 路径：`g_ipadapter_unet_enabled` 仅在 UNet 模式下激活，z_image_turbo 测试通过
+
+**已解决**：
+- ✅ **SDXL Base 模型兼容性问题**：根因不是模型不兼容，而是 **myimg-cli 的模型加载逻辑缺陷**：
+  1. `sd_params` 未零初始化，导致 `vae_decode_only` 等字段为随机值 → 修复：`sd_ctx_params_t sd_params = {};`
+  2. `vae_decode_only` 固定为 `false`，要求加载 VAE encoder 权重，但完整 checkpoint 中缺少 encoder → 修复：根据 `params.init_image.empty()` 动态设置
+  3. `--diffusion-model` 强制使用 `diffusion_model_path`（只加载 `model.diffusion_model.` 前缀），导致 VAE/CLIP 权重被跳过 → 修复：检测 safetensors header 中是否包含 `first_stage_model`/`conditioner.embedders`，若是则使用 `model_path` 加载全部权重
+- ✅ **UNet IPAdapter 端到端验证通过**：
+  - Baseline (无 IPAdapter): mean=140.48, unique=109387
+  - UNet IPAdapter (weight=0.8, 16 tokens): mean=150.12, unique=43642
+  - 图像统计明显不同，IPAdapter 确实在影响生成
+  - 下一步：CLIP 相似度量化对比
+
+**待验证**：
+- ⏳ 与 DiT 路径进行 CLIP 相似度 head-to-head 对比
+- ⏳ 不同参考图像/提示词的系统性效果评估
+
+### 6.6 关键修复记录
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| 段错误 (`SIGSEGV`) | 直接 `memcpy(dst->data, ...)` 在 CUDA 后端会写到 GPU 指针，CPU 侧不可直接访问 | 改用 `ggml_backend_tensor_set(k_w, ...)` / `ggml_backend_tensor_set(v_w, ...)` |
+| 权重层数不匹配 | 文件 layer_id (1,3,5,...) 与模型遍历顺序不一致 | 按 `(out_features, in_features)` 形状分组，组内按排序后的 layer_id 匹配 |
+| `to_k_ip`/`to_v_ip` 出现在主 `tensors` 但无文件权重 | 这些是新注入的参数，没有对应 safetensors 键 | 在 `get_param_tensors()` lambda 中跳过 `attn2.to_k_ip_layer_*` / `attn2.to_v_ip_layer_*` |
+| SDXL 加载失败 (`first_stage_model.* not found`) | `diffusion_model_path` 只加载 `model.diffusion_model.` 前缀，跳过 VAE/CLIP | 检测完整 checkpoint 特征，自动切换为 `model_path` 加载全部权重 |
+| `sd_params` 未初始化导致 VAE 加载异常 | 栈上 C struct 未清零，布尔字段随机值 | `sd_ctx_params_t sd_params = {};` 零初始化 |
+| DiT 投影 2048→2560 污染 UNet tokens | UNet 期望 2048-dim，但 DiT 投影输出 2560-dim | `sdcpp_adapter.cpp` 在 UNet 模式下切片取前 2048 维 |
+
+---
+
+## 7. 关键决策记录
 
 ### 2026-06-06 (1)：项目启动
 
@@ -734,7 +850,7 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 | 模型格式 | ONNX | 跨平台，推理效率高 |
 | 线性投影 | 简单 Linear 层 | 768→2560，可以用 ONNX 或用简单的 C++ 矩阵乘 |
 
-## 7. 已知问题与修复计划
+## 8. 已知问题与修复计划
 
 ### 7.1 当前问题：IPAdapter 效果几乎不可感知
 
@@ -862,7 +978,7 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 
 ---
 
-## 8. 参考资源
+## 9. 参考资源
 
 - [IP-Adapter 论文](https://arxiv.org/abs/2308.06721)
 - [IPAdapter GitHub (huggingface)](https://github.com/tencent-ailab/IP-Adapter)
@@ -872,7 +988,7 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 
 ---
 
-## 9. 里程碑
+## 10. 里程碑
 
 | 阶段 | 预计完成 | 状态 |
 |------|----------|------|
@@ -889,15 +1005,30 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 | P5.4：C++ 代码适配 | 2026-06-07 | ✅ `ipadapter.cpp` 支持 hidden states + 16 tokens |
 | P6：训练投影层 / JointAttention 方案 B | - | ⏳ **当前重点** |
 | P7：抠脸 + 人脸预处理 | - | ⏳ 待开始 |
+| **P5b：UNet IPAdapter 权重注入** | 2026-06-07 | ✅ **端到端运行成功，权重加载 70/70** |
+| P5b.1：为 CrossAttention 注入 `to_k_ip`/`to_v_ip` | 2026-06-07 | ✅ 70 层全部注入并加载 |
+| P5b.2：SDXL Base 端到端验证 | 2026-06-07 | ✅ 运行无崩溃，生成正常彩色图像（修复 adapter 加载逻辑后） |
+| P5b.3：CLIP 相似度对比 (UNet vs DiT) | - | ⏳ 待执行 |
+| P6：训练投影层 / JointAttention 方案 B | - | ⏳ **当前重点** |
+| P7：抠脸 + 人脸预处理 | - | ⏳ 待开始 |
 | P8：VRAM 优化（RTX 3080 20GB 专属） | - | ⏳ 待开始 |
 
-### 当前阻塞项
+### 当前阻塞项（DiT 路径）
 
 1. ~~CLIP Vision 维度~~ → ✅ 已解决：导出 `clip_vision_vit_h_hidden.onnx`（257×1280）
 2. ~~Perceiver Resampler ONNX 转换~~ → ✅ 已解决：导出 `ipadapter_sdxl_plus_v3.onnx`（v3 修复 chunk bug）
 3. ~~2048→2560 投影~~ → ✅ 已解决：导出 `ipadapter_proj_2048_2560_xavier.onnx`（Xavier 初始化）
 4. ~~C++ 代码适配~~ → ✅ 已解决：`ipadapter.cpp` 支持 hidden states 输入格式
 5. **投影层训练**：Xavier 初始化比 identity 好 131%，但仍未达 baseline。需要训练或架构改进
+
+### 当前阻塞项（UNet 路径）
+
+1. ✅ **已解决**：`sd_xl_base_1.0.safetensors` 在 sd.cpp 中可正常出图（修复 adapter 加载逻辑后）。
+   - 问题根因：myimg-cli 使用 `diffusion_model_path` 导致只加载 UNet 权重，VAE/CLIP 缺失
+   - 修复：检测完整 checkpoint，自动切换为 `model_path`
+   - 运行验证通过：生成正常彩色图像
+2. **CLIP 相似度量化**：需编写对比脚本，客观评估 UNet IPAdapter 效果
+3. **外部 VAE 兼容性**：`sdxl_vae.safetensors`（320MB）与 sd.cpp 配合仍产生纯白输出，待分析根因
 
 ### 模型文件清单（最终）
 
@@ -908,6 +1039,7 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 ├── ipadapter_sdxl_plus_v3.onnx                (~15MB)  ← Perceiver Resampler [257,1280]→[16,2048]
 ├── ipadapter_proj_2048_2560_xavier.onnx       (~20MB)  ← 2048→2560 投影 (Xavier init)
 ├── ip-adapter-plus_sdxl_vit-h.safetensors     (847M)   ← 源 PyTorch 权重
+├── ipadapter_unet_weights.bin                 (~1.3G)  ← UNet 路径: 70层 to_k_ip/to_v_ip 权重
 ├── ipadapter_sdxl_plus_v2.onnx                (废弃)   ← v2: chunk bug
 └── ipadapter_proj_2048_2560_v2.onnx           (废弃)   ← v2: identity init
 ```
@@ -917,17 +1049,23 @@ wget https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid
 | 模型 | 来源 | 大小 | 状态 |
 |------|------|------|------|
 | `ip-adapter-plus_sdxl_vit-h.safetensors` | h94/IP-Adapter | 847 MB | ✅ 已下载 |
+| `ipadapter_unet_weights.bin` | 自制 (从 PyTorch 提取) | ~1.3 GB | ✅ 已生成 |
+| `sd_xl_base_1.0.safetensors` | stabilityai/stable-diffusion-xl-base-1.0 | 6.5 GB | ⚠️ 已下载但与 sd.cpp 不兼容（纯白输出） |
 | `clip_vision_vit_h_hidden.onnx` | 自制 (OpenCLIP ViT-H/14) | 2.4 GB | ✅ 已导出 |
 | `ipadapter_sdxl_plus_v3.onnx` | 自制 (Perceiver Resampler) | ~15 MB | ✅ 已导出 |
 | `ipadapter_proj_2048_2560_xavier.onnx` | 自制 (Linear 2048→2560) | ~20 MB | ✅ 已导出 |
 
 ---
 
-> **最后更新**: 2026-06-07 09:25
+> **最后更新**: 2026-06-07 14:25
 > **维护者**: my-img Team
 > 
 > **今日关键成果**：
-> 1. 定位 SDXL Plus 失败 root cause：`hidden_states[-2]` vs `image_embeds`
-> 2. 修复 ONNX `chunk` bug，导出 v3（separate k/v），PyTorch vs ONNX diff < 1e-4
-> 3. 发现投影初始化对效果影响巨大：Xavier (0.3391) >> Identity (0.1467)
-> 4. 完整记录到 IPAdapter.md（含模型文件、测试数据、瓶颈分析）
+> 1. 完成 UNet IPAdapter 权重注入实现：70/70 cross-attention 层 `to_k_ip`/`to_v_ip` 注入并加载
+> 2. 修复 CUDA 后端张量写入段错误：用 `ggml_backend_tensor_set()` 替代 `memcpy(tensor->data, ...)`
+> 3. 实现按形状分层的权重匹配策略，解决文件 layer_id 与模型遍历顺序不一致
+> 4. 验证 UNet IPAdapter 端到端运行无崩溃，且不影响现有 DiT 路径（z_image_turbo 测试通过）
+> 5. **修复 SDXL Base 加载问题**：根因是 adapter 参数初始化不全 + `diffusion_model_path` 跳过 VAE/CLIP，三项修复后正常出图
+> 6. **UNet IPAdapter 首次成功出图**：使用 `demo_face_0.png` 参考图，16 tokens × 2048-dim，生成图像与 baseline 统计差异明显
+> 7. 修复 DiT→UNet token 维度不匹配：`sdcpp_adapter.cpp` 在 UNet 模式下自动切片取前 2048 维
+> 8. 更新 IPAdapter.md：新增 UNet 路径完整文档、状态、阻塞项、修复记录

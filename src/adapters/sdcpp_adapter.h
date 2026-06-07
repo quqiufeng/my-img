@@ -221,6 +221,7 @@ struct GenerationParams {
     std::string ipadapter_model;
     std::string ipadapter_clip_vision;
     std::string ipadapter_projection;
+    std::string ipadapter_unet_weights_path;
     std::string ipadapter_image;
     float ipadapter_weight = 1.0f;
     float ipadapter_start_at = 0.0f;

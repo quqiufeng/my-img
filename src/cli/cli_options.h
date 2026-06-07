@@ -10,6 +10,8 @@ struct CliOptions {
     std::string model;                    // 完整模型 (ckpt/safetensors)
     std::string diffusion_model;          // 独立扩散模型 (GGUF)
     std::string vae;
+    std::string clip_l;                   // CLIP-L text encoder (SDXL)
+    std::string clip_g;                   // CLIP-G text encoder (SDXL)
     std::string llm;
     std::string upscale_model;
     
@@ -209,6 +211,7 @@ struct CliOptions {
     std::string ipadapter_model;
     std::string ipadapter_clip_vision;
     std::string ipadapter_projection;
+    std::string ipadapter_unet_weights;
     std::string ipadapter_image;
     float ipadapter_weight = 1.0f;
     float ipadapter_start_at = 0.0f;
