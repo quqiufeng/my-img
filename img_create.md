@@ -1,8 +1,8 @@
-# img2.sh 出图逻辑与代码调用路径
+# img2.sh / img3.sh 出图逻辑与代码调用路径
 
 > **本文档记录 RTX 4090D 24G 专用出图脚本的完整执行流程和代码调用路径。**
 >
-> **文件位置**: `/opt/my-img/img2.sh`  
+> **文件位置**: `/opt/my-img/img2.sh`（Z-Image DiT）、`/opt/my-img/img3.sh`（SDXL Base UNet）  
 > **目标设备**: NVIDIA GeForce RTX 4090 D (24GB VRAM)  
 > **目标分辨率**: 2560×1440 / 3840×2160
 
@@ -597,7 +597,8 @@ bool Image::save_to_file(const std::string& path) const {
 
 ## 8. SDXL UNet 路径支持（新增）
 
-> 本节记录 SDXL Base 1.0（UNet 架构）在 `myimg-cli` 中的增强功能支持状态。
+> 本节记录 SDXL Base 1.0（UNet 架构）在 `myimg-cli` 中的增强功能支持状态。  
+> 完整使用示例请参考 `/opt/my-img/img3.sh`。
 
 ### 8.1 模型加载差异
 
