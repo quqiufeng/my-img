@@ -25,7 +25,7 @@
 # CFG:      7.0 | Sampler: euler | Scheduler: discrete
 # FreeU:    b1=1.05, b2=1.1, s1=0.95, s2=0.8 (SDXL 保守值，安全增强)
 # SAG:      开启 (scale=1.0)
-# 增强:     clarity 0.4, sharpen 0.8, smart-sharpen 0.5, edge-sharpen 1.5
+# 后处理:   clarity 0.4, sharpen 0.8, smart-sharpen 0.5, edge-sharpen 1.5 (OpenCV)
 # VAE tiling: 128x128, overlap 0.5 (20GB 安全)
 # 出图时间: ~5-8 分钟 (RTX 3080 20GB)
 #

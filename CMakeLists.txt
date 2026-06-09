@@ -215,6 +215,7 @@ set(MYIMG_SOURCES
     src/utils/face_swap.cpp
     src/utils/photo_maker.cpp
     src/utils/style_transfer.cpp
+    src/utils/image_postproc.cpp
 )
 
 if(OpenCV_FOUND)

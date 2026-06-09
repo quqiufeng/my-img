@@ -309,6 +309,17 @@ int main(int argc, char** argv) {
         params.control_strength = opts.control_strength;
     }
     
+    // 图像后处理 (clarity / sharpen / smart-sharpen / edge-sharpen)
+    params.postproc_clarity = opts.clarity;
+    params.postproc_sharpen_amount = opts.sharpen_amount;
+    params.postproc_sharpen_radius = opts.sharpen_radius;
+    params.postproc_sharpen_threshold = opts.sharpen_threshold;
+    params.postproc_smart_sharpen_strength = opts.smart_sharpen_strength;
+    params.postproc_smart_sharpen_radius = opts.smart_sharpen_radius;
+    params.postproc_edge_sharpen_amount = opts.edge_sharpen_amount;
+    params.postproc_edge_sharpen_radius = opts.edge_sharpen_radius;
+    params.postproc_edge_sharpen_threshold = opts.edge_sharpen_threshold;
+
     // HiRes Fix
     params.enable_hires = opts.hires;
     if (opts.hires) {

@@ -6,6 +6,7 @@
 #include "utils/face_swap.h"
 #include "utils/latent_ops.h"
 #include "utils/ipadapter.h"
+#include "utils/image_postproc.h"
 #include <stable-diffusion.h>
 
 #include <iostream>
@@ -656,6 +657,31 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
             }
         } catch (const std::exception& e) {
             LOG_WARN("Regional prompting failed: %s", e.what());
+        }
+    }
+    
+    // 图像后处理 (clarity / sharpen / smart-sharpen / edge-sharpen)
+    {
+        PostProcessParams pp;
+        pp.clarity = params.postproc_clarity;
+        pp.sharpen_amount = params.postproc_sharpen_amount;
+        pp.sharpen_radius = params.postproc_sharpen_radius;
+        pp.sharpen_threshold = params.postproc_sharpen_threshold;
+        pp.smart_sharpen_strength = params.postproc_smart_sharpen_strength;
+        pp.smart_sharpen_radius = params.postproc_smart_sharpen_radius;
+        pp.edge_sharpen_amount = params.postproc_edge_sharpen_amount;
+        pp.edge_sharpen_radius = params.postproc_edge_sharpen_radius;
+        pp.edge_sharpen_threshold = params.postproc_edge_sharpen_threshold;
+
+        bool has_work = (pp.clarity > 0.0f ||
+                         pp.sharpen_amount > 0.0f ||
+                         pp.smart_sharpen_strength > 0.0f ||
+                         pp.edge_sharpen_amount > 0.0f);
+        if (has_work) {
+            LOG_INFO("Applying image post-processing to %zu images...", images.size());
+            for (auto& img : images) {
+                apply_image_postprocessing(img, pp);
+            }
         }
     }
     

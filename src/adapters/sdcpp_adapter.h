@@ -249,6 +249,17 @@ struct GenerationParams {
     float style_transfer_strength = 1.0f;
     int style_transfer_block = 1;
     bool style_transfer_preserve_content = true;
+
+    // 图像后处理（clarity / sharpen / smart-sharpen / edge-sharpen）
+    float postproc_clarity = 0.0f;              // 0.0 ~ 1.0
+    float postproc_sharpen_amount = 0.0f;       // 0.0 ~ 3.0
+    int postproc_sharpen_radius = 1;            // 1-5
+    float postproc_sharpen_threshold = 0.0f;    // 0-255
+    float postproc_smart_sharpen_strength = 0.0f; // 0.0 ~ 3.0
+    int postproc_smart_sharpen_radius = 2;      // 1-5
+    float postproc_edge_sharpen_amount = 0.0f;  // 0.0 ~ 3.0
+    int postproc_edge_sharpen_radius = 2;       // 1-5
+    float postproc_edge_sharpen_threshold = 0.3f; // 0.0 ~ 1.0
 };
 
 // sd_image_t 的 RAII 封装（避免裸 malloc/free）
