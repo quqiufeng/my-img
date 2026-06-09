@@ -15,23 +15,42 @@ namespace myimg {
  * @brief 将 RGBA uint8 Image 转为 cv::Mat BGR
  */
 static cv::Mat image_to_mat_bgr(const Image& img) {
-    if (img.empty() || img.channels != 4) {
-        LOG_WARN("Image to Mat: expected RGBA, got channels=%d", img.channels);
+    if (img.empty()) {
+        LOG_WARN("Image to Mat: empty image");
         return cv::Mat();
     }
-    cv::Mat rgba(img.height, img.width, CV_8UC4, const_cast<uint8_t*>(img.data.data()));
-    cv::Mat bgr;
-    cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
-    return bgr;
+    const int ch = img.channels;
+    if (ch == 4) {
+        // RGBA → BGR
+        cv::Mat rgba(img.height, img.width, CV_8UC4, const_cast<uint8_t*>(img.data.data()));
+        cv::Mat bgr;
+        cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
+        return bgr;
+    } else if (ch == 3) {
+        // RGB → BGR
+        cv::Mat rgb(img.height, img.width, CV_8UC3, const_cast<uint8_t*>(img.data.data()));
+        cv::Mat bgr;
+        cv::cvtColor(rgb, bgr, cv::COLOR_RGB2BGR);
+        return bgr;
+    } else {
+        LOG_WARN("Image to Mat: unsupported channels=%d (expected 3 or 4)", ch);
+        return cv::Mat();
+    }
 }
 
 /**
  * @brief 将 cv::Mat BGR 写回 RGBA Image
  */
 static void mat_bgr_to_image(const cv::Mat& bgr, Image& out) {
-    cv::Mat rgba;
-    cv::cvtColor(bgr, rgba, cv::COLOR_BGR2RGBA);
-    out.data.assign(rgba.data, rgba.data + rgba.total() * rgba.channels());
+    if (out.channels == 4) {
+        cv::Mat rgba;
+        cv::cvtColor(bgr, rgba, cv::COLOR_BGR2RGBA);
+        out.data.assign(rgba.data, rgba.data + rgba.total() * rgba.channels());
+    } else {
+        cv::Mat rgb;
+        cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+        out.data.assign(rgb.data, rgb.data + rgb.total() * rgb.channels());
+    }
 }
 
 // ============================================================

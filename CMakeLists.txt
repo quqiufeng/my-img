@@ -702,3 +702,24 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oom_handler.cpp")
     )
     add_test(NAME test_oom_handler COMMAND test_oom_handler)
 endif()
+
+# ============================================================
+# 图像后处理测试
+# ============================================================
+if(OpenCV_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_image_postproc.cpp")
+    add_executable(test_image_postproc
+        tests/test_image_postproc.cpp
+        src/utils/image_postproc.cpp
+        src/utils/log.cpp
+    )
+    target_include_directories(test_image_postproc PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/adapters
+        ${SDCPP_DIR}/include
+    )
+    target_link_libraries(test_image_postproc PRIVATE
+        ${OpenCV_LIBS}
+    )
+    add_test(NAME test_image_postproc COMMAND test_image_postproc)
+endif()
