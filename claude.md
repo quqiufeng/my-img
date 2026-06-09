@@ -716,6 +716,30 @@ LOG_ERROR("错误信息（总是显示）");
 | Catch2 | 测试框架 | v3.x |
 | lcov | 覆盖率 | ≥ 1.14 |
 
+### 10.3 Python 虚拟环境
+
+项目提供了一个完整的 Python 虚拟环境（用于模型导出、测试等）：
+
+```bash
+# 位置
+/data/venv/
+
+# 使用方式
+/data/venv/bin/python3 script.py
+
+# 预装包
+- torch 2.4.0+cu118（CUDA 支持）
+- onnx 1.21.0
+- onnxruntime 1.26.0
+- safetensors 0.7.0
+- numpy 2.4.4
+```
+
+**重要规则**：
+- ONNX 模型生成/转换脚本必须使用 `/data/venv/bin/python3` 运行
+- 不要用 pip 系统级安装包（PEP 668 限制）
+- 该环境由开发者管理，不要随意修改
+
 ### 10.3 CI/CD 检查清单
 
 ```yaml

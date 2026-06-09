@@ -448,12 +448,9 @@ int main(int argc, char** argv) {
     params.ipadapter = opts.ipadapter;
     params.ipadapter_model = opts.ipadapter_model;
     params.ipadapter_clip_vision = opts.ipadapter_clip_vision;
-    params.ipadapter_projection = opts.ipadapter_projection;
     params.ipadapter_unet_weights_path = opts.ipadapter_unet_weights;
     params.ipadapter_image = opts.ipadapter_image;
     params.ipadapter_weight = opts.ipadapter_weight;
-    params.ipadapter_start_at = opts.ipadapter_start_at;
-    params.ipadapter_end_at = opts.ipadapter_end_at;
     
     // T2I-Adapter
     params.t2i_adapter = opts.t2i_adapter;

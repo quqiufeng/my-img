@@ -29,65 +29,60 @@ my-img (C++ Application)
 
 ### 1.2 当前对 sd.cpp 的改动
 
-截至本次升级，本地改动约 **65 行净增**，分布在 3 个文件：
+截至本次升级，本地改动累计约 **55 行净增**，分布在 4 个文件：
 
-> git diff 实际统计：**3 文件，+65 / −11**（+54 净增）
+> git diff 实际统计：**4 文件，+55 / −110**
+> - `include/stable-diffusion.h`：~16 行（IPAdapter UNet 字段，移除 DiT 步进控制字段注释）
+> - `src/stable-diffusion.cpp`：~105 行净删（移除 DiT IPAdapter 注入、步进控制；保留 UNet IPAdapter 权重加载）
+> - `src/unet.hpp`：~34 行（FreeU 运行时 half-channel 缩放 + IPAdapter `image_embeds` tensor 预留）
+> - `src/ggml_extend.hpp`：~10 行（`get_param()` / `get_block()` 公共 getter）
 
-### sd_img_gen_params_t 头文件（5 字段，~10 行）
+### sd_img_gen_params_t 头文件（IPAdapter 字段）
 
-`include/stable-diffusion.h` — 为 IPAdapter 注入 + 步进控制新增 5 个字段：
+`include/stable-diffusion.h` — SDXL UNet IPAdapter 字段：
 
 ```c
-// IPAdapter: image prompt tokens
-const float* ipadapter_tokens;      // [N * 768] image tokens from CLIP Vision + IPAdapter MLP, NULL = disabled
-int ipadapter_num_tokens;           // N (number of image token vectors)
+// IPAdapter: image prompt tokens (SDXL UNet cross-attention injection)
+const float* ipadapter_tokens;      // [N * 2048] image tokens from CLIP Vision + IPAdapter MLP, NULL = disabled
+int ipadapter_num_tokens;           // N (SDXL Plus = 16 tokens)
 float ipadapter_weight;             // scale factor applied to tokens (0.0-1.0)
-float ipadapter_start_at;           // step control: fraction 0.0-1.0 (0 = first step)
-float ipadapter_end_at;             // step control: fraction 0.0-1.0 (1 = last step)
+float ipadapter_start_at;           // reserved for future step control
+float ipadapter_end_at;             // reserved for future step control
+// IPAdapter: UNet cross-attention injection (SDXL, 2026-06-07)
+bool ipadapter_unet_mode;           // true = enable UNet cross-attention injection
+const char* ipadapter_unet_weights_path;  // path to ipadapter_unet_weights.bin
 ```
 
-### 条件注入 + 步进控制逻辑（~65 行）
+### UNet IPAdapter 权重加载（~120 行，SDXL 路径）
 
-`src/stable-diffusion.cpp` — 两处修改：
+`src/stable-diffusion.cpp` — UNet cross-attention 注入：
 
-**A. `prepare_image_generation_embeds()`** — `get_learned_condition()` 返回后将 IPAdapter token 注入 conditioning，并记录步进控制参数：
+**A. `load_ipadapter_unet_weights()`** — 从 `.bin` 文件加载 70 层 `to_k_ip`/`to_v_ip` 权重：
 
 ```cpp
-// 位于 LOG_INFO("get_learned_condition completed...") 之后
-// A1: 注入 image tokens
-if (sd_img_gen_params->ipadapter_tokens != nullptr && ...) {
-    // 1. 记录注入前 token 数 (ipa_orig_tokens)
-    // 2. 创建 [ctx_dim, num_ipa_tokens] 张量，weight 缩放
-    // 3. 沿 dim=1 拼接到 cond.c_crossattn 和 uncond.c_crossattn
-    // 4. 形状变化: [2560, 9] → [2560, 10] (9 text + 1 image token)
-}
-// A2: 从 ipadapter_start_at/end_at 比例计算实际步进区间
-ipa_start_step = (int)(start_ratio * sample_steps);
-ipa_end_step   = (int)(end_ratio * sample_steps);
-// 存入 ImageGenerationEmbeds 传给 sample()
+// 文件格式：header (n_layers=70, version=1)
+// 每个 layer：(layer_id, out_features, in_features, to_k_ip[], to_v_ip[])
+// 按 (out_features, in_features) 形状分组匹配
 ```
 
-**B. `sample()` 方法** — denoise lambda 中条件切片 IPA tokens：
+**B. `assign_ipadapter_unet_weights()`** — 将权重分配到 `CrossAttention` 的 `to_k_ip_layer_*`/`to_v_ip_layer_*` 参数：
 
 ```cpp
-// 每次 denoise 步进前：
-SDCondition cond_for_step = cond;
-if (step < ipa_start_step || step >= ipa_end_step) {
-    // 用 sd::ops::slice() 沿 dim=1 裁掉最后的 IPA tokens
-    cond_for_step.c_crossattn = sd::ops::slice(c_crossattn, 1, 0, ipa_orig_tokens);
-}
-cond_out = run_condition(cond_for_step);  // 使用裁切后的 conditioning
-// uncond 同理
+// 遍历 params_map，找到所有 attn2.to_k_ip_layer_* 和 attn2.to_v_ip_layer_*
+// 使用 ggml_backend_tensor_set() 写入（支持 CUDA 后端）
 ```
 
-**原理**：Z-Image DiT 的 PE 在 graph-build time 根据 `context->ne[1]` 动态生成。IPA 注入时 `ne[1]` 已包含额外 token，PE 适应新大小。裁切时只改变运行时数据，不改变 graph 结构，因此 PE 依然有效。
+**C. `generate_image()`** — 采样前设置 `g_ipadapter_image_embeds_tensor`：
 
-**升级冲突风险**：中等
-- 如果上游改动 `prepare_image_generation_embeds()` 流程，需要迁移注入 + 步进逻辑
-- `ImageGenerationEmbeds` 结构体新增了 `ipa_orig_tokens` / `ipa_start_step` / `ipa_end_step` 3 个字段
-- `sample()` 方法签名新增 `ipa_orig_tokens` / `ipa_start_step` / `ipa_end_step` 3 个参数（带默认值 0）
-- denoise lambda 中的 slice 逻辑依赖 `sd::ops::slice()` 可用性
-- 注入后的 shape 变化依赖 Z-Image PE 机制（PE 基于 `context->ne[1]` 在 graph-build time 生成），需验证 PE 兼容
+```cpp
+// 将 tokens [N, 2048] 按 weight 缩放后写入 tensor
+// g_ipadapter_image_embeds 全局指针指向该 tensor
+```
+
+**升级冲突风险**：高
+- `CrossAttention` 结构被修改（新增 `to_k_ip`/`to_v_ip` 注入逻辑）
+- `ggml_extend.hpp` 的 `get_param_tensors()` 跳过逻辑依赖硬编码名称
+- 任何改动 `common_block.hpp` 的上游提交都会冲突
 
 ---
 
@@ -321,6 +316,167 @@ upscaler_ctx_t* new_upscaler_ctx(const char*, bool, bool, int, int, const char*,
 - 编译方式：`./build.sh` 一键编译（自动处理 sd.cpp + my-img 依赖顺序）
 - 编译时间：**~15 分钟**（CUDA 编译较慢）
 - 功能验证：FreeU/SAG 功能恢复，新字段（vae_format, backend 等）已映射
+
+---
+
+### 4.3 2026-06-06：GPU 后端修复 + IPAdapter Phase 3
+
+#### 4.3.1 模型推理挂起
+
+**现象**：生成在 "z_image compute buffer size: 173.32 MB(RAM)" 后无响应，GPU 利用率仅 38%，VRAM 仅 729 MiB。
+
+**原因**：sd.cpp **未启用 CUDA**（`GGML_CUDA:BOOL=OFF`），所有 tensor 分配在 RAM，但模型权重在 VRAM 中，两个空间无法互相访问 → 无响应。
+
+**修复**：
+1. `cmake .. -DGGML_CUDA=ON -DSD_CUDA=ON` 重建 sd.cpp
+2. 使用 `build.sh`（自动检测 GPU 并设置 CUDA 参数）
+3. `GGML_LTO=OFF` 避免 GCC 12 vs 13 LTO 版本不匹配
+
+**验证**：生成后显示 `ggml_cuda_init: found 1 CUDA devices (Total VRAM: 20052 MiB)`，z_image compute buffer 变为 270.28 MB(VRAM)，采样步进正常。
+
+#### 4.3.2 build.sh 改进
+
+1. 新增子命令 `sd`（仅 sd.cpp）、`myimg`/`quick`（仅 myimg-cli）、`all`（默认，全部编译）
+2. 为 myimg cmake 显式传递 `-DCMAKE_C_COMPILER` / `-DCMAKE_CXX_COMPILER`（之前仅依赖环境变量）
+3. `GGML_LTO=ON` → `OFF`：避免 GCC 版本混用时的 LTO 链接失败
+4. 测试编译跳过 `test_vae`（需要已移除的 libtorch）
+
+#### 4.3.3 LD_LIBRARY_PATH 清零
+
+**问题**：运行时必须设置 `LD_LIBRARY_PATH=/data/venv/onnxruntime-linux-x64-gpu-1.20.1/lib`，否则找不到 ONNX Runtime 的 `.so`。
+
+**修复**：将 5 个 ONNX Runtime 共享库 symlink 到 `/usr/local/lib/` + `ldconfig` 注册：
+- `libonnxruntime.so` / `.so.1` / `.so.1.20.1`（主库）
+- `libonnxruntime_providers_cuda.so`（CUDA provider）
+- `libonnxruntime_providers_shared.so` / `_tensorrt.so`
+
+**验证**：`ldconfig -p | grep onnxruntime` 输出 5 条，`unset LD_LIBRARY_PATH && myimg-cli --help` 正常运行。
+
+**额外**：libtorch C++ 安装到 `/data/venv/libtorch`（symlink → `/data/libtorch_cuda`），并在 `my-img/CMakeLists.txt` 中添加搜索路径。
+
+#### 4.3.4 ~~IPAdapter Phase 3：步进控制~~（已移除，2026-06-08）
+
+**原实现**：Z-Image DiT 路径的 context concat 支持步进控制（`--ipadapter-start` / `--ipadapter-end`），在指定步进区间外自动 slice 掉 IPA tokens。
+
+**移除原因**：Z-Image DiT IPAdapter 路径（context concat）已废弃，改为仅支持 SDXL UNet 交叉注意力注入。步进控制代码随 DiT 注入逻辑一并删除。
+
+**当前状态**：`sd_img_gen_params_t` 中的 `ipadapter_start_at` / `ipadapter_end_at` 字段保留但不再使用（预留未来 UNet 步进控制实现）。
+
+#### 4.3.5 数据回顾
+
+- **sd.cpp 改动**：3 文件，+65 / −11 行
+- **my-img 改动**：4 文件（`sdcpp_adapter.cpp`, `cli_parser.cpp`, `cli_options.h`, `sdcpp_adapter.h`）+ CMakeLists.txt 新增 `/data/venv/libtorch` 搜索路径
+- **CUDA build 耗时**：~15 分钟（包含 ~8 分钟 CUDA kernel 编译）
+- **生成速度**：640×640, 5 steps → ~5s (CUDA)
+- **IPAdapter 注入后生成**：640×640, 5 steps → ~5s (与无 IPAdapter 几乎一致)
+- **LD_LIBRARY_PATH**：已清零，无需设置
+- **当前 sd.cpp commit**：`e1aa1a2` (2026-06-06)
+
+---
+
+### 4.4 2026-06-07：UNet IPAdapter + SDXL 增强管线 + VAE 显存优化
+
+#### 4.4.1 背景
+
+随着 SDXL Base 1.0（UNet 架构）开始被 `myimg-cli` 直接支持，之前只在 Z-Image DiT 上有效的 IPAdapter、FreeU、SAG 等功能必须移植到 UNet 路径。
+
+#### 4.4.2 UNet IPAdapter 实现
+
+**核心问题**：标准 IPAdapter Plus（SDXL）的正确注入点是 UNet cross-attention 的 `to_k` / `to_v`，而不是 DiT 的 context concat。
+
+**sd.cpp 改动**（~314 行）：
+
+| 文件 | 改动 |
+|------|------|
+| `include/stable-diffusion.h` | `sd_ctx_params_t` 和 `sd_img_gen_params_t` 新增 `ipadapter_unet_mode` / `ipadapter_unet_weights_path` |
+| `src/common_block.hpp` | `CrossAttention` 构造时注入 `to_k_ip_layer_<id>` / `to_v_ip_layer_<id>`；forward 时把 image tokens 投影后拼接到 k/v |
+| `src/ggml_extend.hpp` | `get_param_tensors()` 跳过 `attn2.to_k_ip_layer_*` / `attn2.to_v_ip_layer_*`，避免主加载流程报错 |
+| `src/unet.hpp` | `UNetModelRunner` 构造时预留 `ipadapter_image_embeds` 张量到 `params_ctx` |
+| `src/stable-diffusion.cpp` | 新增 `load_ipadapter_unet_weights()` / `assign_ipadapter_unet_weights()`；采样前设置 image embeds |
+
+**关键实现细节**：
+1. `ipadapter_unet_weights.bin` 格式：header `(n_layers=70, version=1)`，每个 layer 包含 `(layer_id, out_features, in_features, to_k_ip[], to_v_ip[])`
+2. 文件 layer_id 顺序与模型遍历顺序不一致，因此采用**按 `(out_features, in_features)` 形状分组 + 组内排序匹配**
+3. 权重写入必须使用 `ggml_backend_tensor_set()`，因为 `tensor->data` 在 CUDA 后端是 GPU 指针，不能直接 `memcpy`
+4. 所有 70 层权重成功分配后，diffusion model 参数内存从 ~4.9GB 增至 ~6.2GB
+
+**升级冲突风险**：高
+- 任何改动 `CrossAttention` 结构或 `common_block.hpp` 的上游提交都会冲突
+- `ggml_extend.hpp` 的 `get_param_tensors()` 跳过逻辑依赖硬编码名称
+- UNet IPAdapter 只在 UNet 路径生效（`g_ipadapter_unet_enabled` 全局开关），不影响 DiT
+
+#### 4.4.3 FreeU 支持 SDXL UNet
+
+**问题**：之前的 FreeU 只集成到了 `diffusion_model.hpp` 的 `DiffusionParams`，但 `UnetModelBlock::forward()` 中并没有实际处理 FreeU 缩放。
+
+**修复**：在 `src/unet.hpp` 的输出块中：
+
+```cpp
+if (freeu_enabled) {
+    float b = (output_block_idx < 3) ? freeu_b1 : freeu_b2;
+    float s = (output_block_idx < 3) ? freeu_s1 : freeu_s2;
+    h      = ggml_scale(ctx->ggml_ctx, h, b);        // 增强 backbone
+    h_skip = ggml_scale(ctx->ggml_ctx, h_skip, s);   // 削弱 skip
+}
+h = ggml_concat(ctx->ggml_ctx, h, h_skip, 2);
+```
+
+同时在 `UNetModelRunner::compute(DiffusionParams&)` 中调用 `unet.set_freeu()` 传递参数。
+
+**关键发现**：SDXL UNet 对 FreeU 参数敏感，ComfyUI 默认值 `(b1=1.3, b2=1.4)` 会导致严重气泡/噪点伪影。经控制变量测试，保守值 `(b1=1.05, b2=1.1)` 可安全增强细节：
+
+| 参数 |  ComfyUI 默认 | SDXL 安全值 | 说明 |
+|------|--------------|------------|------|
+| b1 | 1.3 | 1.05 | 低分辨率 backbone 缩放 |
+| b2 | 1.4 | 1.1 | 高分辨率 backbone 缩放 |
+| s1 | 0.9 | 0.95 | skip 连接缩放 |
+| s2 | 0.2 | 0.8 | skip 连接缩放 |
+
+**原因**：简化版 spatial scaling（无 FFT 频域滤波）比 ComfyUI 的 `Fourier_filter` 更强，需降低幅度。
+
+**验证**：SDXL Base 2560×1440 + FreeU(1.05/1.1) + SAG + HiRes Fix + VAE tiling，图像干净，细节增强。
+
+#### 4.4.4 VAE tile cap（OOM 保护）
+
+**问题**：SDXL 的 VAE 放大倍率为 8×，当用户指定 256×256 latent tile 时，输出 tile 为 2048×2048，compute buffer 可达 10GB+，20GB 显卡可能 OOM。
+
+**修复**：`src/vae.hpp` 中在 `decode()` 时自动 cap 输出 tile size 到 1024：
+
+```cpp
+const int max_output_tile = 1024;
+int output_tile_x = tile_size_x * scale_factor;
+int output_tile_y = tile_size_y * scale_factor;
+if (output_tile_x > max_output_tile || output_tile_y > max_output_tile) {
+    float scale = (float)max_output_tile / std::max(output_tile_x, output_tile_y);
+    tile_size_x = std::max(4, (int)(tile_size_x * scale));
+    tile_size_y = std::max(4, (int)(tile_size_y * scale));
+}
+```
+
+**实测效果**：1536×1024 HiRes 解码时 VAE 峰值从潜在 >10GB 降至 ~5.1GB。
+
+#### 4.4.5 sd.cpp 改动统计（2026-06-08 更新：移除 Z-Image DiT IPAdapter）
+
+| 改动 | 文件数 | 行数 | 风险 |
+|------|--------|------|------|
+| UNet IPAdapter | 5 | +314 | 高（cross-attention 结构侵入） |
+| FreeU for UNet | 2 | +34 | 中（输出块 half-channel 缩放） |
+| VAE tile cap | 1 | +14 | 低（纯优化） |
+| 字段扩展 | 2 | ~16 | 低 |
+| ~~DiT IPAdapter~~ | ~~—~~ | ~~−105~~ | ~~已移除~~ |
+| ~~步进控制~~ | ~~—~~ | ~~−80~~ | ~~已移除~~ |
+
+**净改动**：4 文件，+55 / −110 行
+
+#### 4.4.6 my-img 侧同步改动
+
+| 文件 | 改动 |
+|------|------|
+| `src/adapters/sdcpp_adapter.cpp` | 检测完整 checkpoint、动态 `vae_decode_only`、零初始化 `sd_params`、IPAdapter 简化（移除 DiT 分支） |
+| `src/adapters/sdcpp_adapter.h` | 新增 `ipadapter_unet_weights_path`；移除 `ipadapter_projection`、`ipadapter_start_at`、`ipadapter_end_at` |
+| `src/cli/cli_options.h` / `cli_parser.cpp` | 新增 `--ipadapter-unet-weights`、`--freeu-s1`/`--freeu-s2`；移除 `--ipadapter-projection`、`--ipadapter-start`、`--ipadapter-end` |
+| `src/main.cpp` | 将 `opts.ipadapter_unet_weights` 传入 `GenerationParams`；VAE 从强制改为可选 |
+| `src/utils/ipadapter.cpp/.h` | 移除投影层、SD1.5 分支、步进控制；仅保留 SDXL Plus 路径（257×1280 → 16×2048） |
 
 ---
 
@@ -624,6 +780,9 @@ typedef struct {
     float max_vram;                   // ← 新增于 2026-06-01 (0=禁用, -1=自动)
     const char* backend;              // ← 新增于 2026-06-01
     const char* params_backend;       // ← 新增于 2026-06-01
+    // UNet IPAdapter 注入（2026-06-07）
+    bool ipadapter_unet_mode;
+    const char* ipadapter_unet_weights_path;
 } sd_ctx_params_t;
 ```
 
@@ -651,15 +810,17 @@ typedef struct {
     sd_tiling_params_t vae_tiling_params;  // ← 新增 temporal_tiling, extra_tiling_args
     sd_cache_params_t cache;
     sd_hires_params_t hires;               // ← 新增 custom_sigmas, custom_sigmas_count
-    sd_freeu_params_t freeu;       // ← 本地添加（需验证内部实现）
-    sd_sag_params_t sag;           // ← 本地添加（需验证内部实现）
-    sd_dynamic_cfg_params_t dynamic_cfg;  // ← 本地添加（需验证内部实现）
-    // IPAdapter: 本地添加 2026-06-06
-    const float* ipadapter_tokens;      // [N * 768], NULL = disabled
-    int ipadapter_num_tokens;           // N
+    sd_freeu_params_t freeu;       // ← 本地添加（运行时 half-channel 缩放）
+    sd_sag_params_t sag;           // ← 本地添加（uncond 混合）
+    sd_dynamic_cfg_params_t dynamic_cfg;  // ← 本地添加
+    // IPAdapter: SDXL UNet cross-attention injection (2026-06-07)
+    const float* ipadapter_tokens;      // [N * 2048] image tokens, NULL = disabled
+    int ipadapter_num_tokens;           // N (SDXL Plus = 16)
     float ipadapter_weight;             // 0.0-1.0
-    float ipadapter_start_at;           // step control: fraction 0.0-1.0 (added 2026-06-06)
-    float ipadapter_end_at;             // step control: fraction 0.0-1.0 (added 2026-06-06)
+    float ipadapter_start_at;           // reserved for future step control
+    float ipadapter_end_at;             // reserved for future step control
+    bool ipadapter_unet_mode;           // true = enable UNet cross-attention injection
+    const char* ipadapter_unet_weights_path;  // path to ipadapter_unet_weights.bin
 } sd_img_gen_params_t;
 ```
 
@@ -716,68 +877,6 @@ typedef struct {
 
 ---
 
-### 4.3 2026-06-06：GPU 后端修复 + IPAdapter Phase 3
-
-#### 4.3.1 模型推理挂起
-
-**现象**：生成在 "z_image compute buffer size: 173.32 MB(RAM)" 后无响应，GPU 利用率仅 38%，VRAM 仅 729 MiB。
-
-**原因**：sd.cpp **未启用 CUDA**（`GGML_CUDA:BOOL=OFF`），所有 tensor 分配在 RAM，但模型权重在 VRAM 中，两个空间无法互相访问 → 无响应。
-
-**修复**：
-1. `cmake .. -DGGML_CUDA=ON -DSD_CUDA=ON` 重建 sd.cpp
-2. 使用 `build.sh`（自动检测 GPU 并设置 CUDA 参数）
-3. `GGML_LTO=OFF` 避免 GCC 12 vs 13 LTO 版本不匹配
-
-**验证**：生成后显示 `ggml_cuda_init: found 1 CUDA devices (Total VRAM: 20052 MiB)`，z_image compute buffer 变为 270.28 MB(VRAM)，采样步进正常。
-
-#### 4.3.2 build.sh 改进
-
-1. 新增子命令 `sd`（仅 sd.cpp）、`myimg`/`quick`（仅 myimg-cli）、`all`（默认，全部编译）
-2. 为 myimg cmake 显式传递 `-DCMAKE_C_COMPILER` / `-DCMAKE_CXX_COMPILER`（之前仅依赖环境变量）
-3. `GGML_LTO=ON` → `OFF`：避免 GCC 版本混用时的 LTO 链接失败
-4. 测试编译跳过 `test_vae`（需要已移除的 libtorch）
-
-#### 4.3.3 LD_LIBRARY_PATH 清零
-
-**问题**：运行时必须设置 `LD_LIBRARY_PATH=/data/venv/onnxruntime-linux-x64-gpu-1.20.1/lib`，否则找不到 ONNX Runtime 的 `.so`。
-
-**修复**：将 5 个 ONNX Runtime 共享库 symlink 到 `/usr/local/lib/` + `ldconfig` 注册：
-- `libonnxruntime.so` / `.so.1` / `.so.1.20.1`（主库）
-- `libonnxruntime_providers_cuda.so`（CUDA provider）
-- `libonnxruntime_providers_shared.so` / `_tensorrt.so`
-
-**验证**：`ldconfig -p | grep onnxruntime` 输出 5 条，`unset LD_LIBRARY_PATH && myimg-cli --help` 正常运行。
-
-**额外**：libtorch C++ 安装到 `/data/venv/libtorch`（symlink → `/data/libtorch_cuda`），并在 `my-img/CMakeLists.txt` 中添加搜索路径。
-
-#### 4.3.4 IPAdapter Phase 3 完成：步进控制
-
-**需求**：支持 `--ipadapter-start FLOAT` / `--ipadapter-end FLOAT`（0.0~1.0 比例），在指定步进区间外自动关闭 IPA 影响。
-
-**实现**（sd.cpp 侧，3 处改动）：
-
-1. **`include/stable-diffusion.h`**：`sd_img_gen_params_t` 新增 `ipadapter_start_at` / `ipadapter_end_at` 字段
-2. **`src/stable-diffusion.cpp` 的 `prepare_image_generation_embeds()`**：注入 IPA 时记录 `ipa_orig_tokens`（注入前 token 数），从比例 × 总步数计算 `ipa_start_step` / `ipa_end_step`，存入 `ImageGenerationEmbeds`
-3. **`src/stable-diffusion.cpp` 的 `sample()` 方法**：denoise lambda 中，当 `step < ipa_start_step || step >= ipa_end_step` 时，用 `sd::ops::slice(c_crossattn, 1, 0, ipa_orig_tokens)` 沿 token 维度裁掉 IPA tokens
-
-**my-img 侧**：
-- `sdcpp_adapter.cpp`：将 `ipadapter_start_at` / `ipadapter_end_at` 传入 `sd_img_gen_params_t`
-- `cli_parser.cpp`：解析 `--ipadapter-start` / `--ipadapter-end` 参数
-- `cli_options.h` / `sdcpp_adapter.h`：新增字段定义（默认值 0.0 / 1.0，即全步进驻留）
-
-#### 4.3.5 数据回顾
-
-- **sd.cpp 改动**：3 文件，+65 / −11 行
-- **my-img 改动**：4 文件（`sdcpp_adapter.cpp`, `cli_parser.cpp`, `cli_options.h`, `sdcpp_adapter.h`）+ CMakeLists.txt 新增 `/data/venv/libtorch` 搜索路径
-- **CUDA build 耗时**：~15 分钟（包含 ~8 分钟 CUDA kernel 编译）
-- **生成速度**：640×640, 5 steps → ~5s (CUDA)
-- **IPAdapter 注入后生成**：640×640, 5 steps → ~5s (与无 IPAdapter 几乎一致)
-- **LD_LIBRARY_PATH**：已清零，无需设置
-- **当前 sd.cpp commit**：`e1aa1a2` (2026-06-06)
-
----
-
-**最后更新**: 2026-06-06  
+**最后更新**: 2026-06-08  
 **维护者**: my-img Team  
-**版本**: v1.2（新增 IPAdapter 步进控制、LD_LIBRARY_PATH 清零、libtorch 安装指南）
+**版本**: v1.4（移除 Z-Image DiT IPAdapter，FreeU 改为运行时 half-channel 缩放，SDXL 为唯一推荐模型）

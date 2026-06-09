@@ -511,11 +511,8 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
             IPAdapterConfig ipa_config;
             ipa_config.model_path = params.ipadapter_model;
             ipa_config.clip_vision_path = params.ipadapter_clip_vision;
-            ipa_config.projection_path = params.ipadapter_projection;
             ipa_config.image_path = params.ipadapter_image;
             ipa_config.weight = params.ipadapter_weight;
-            ipa_config.start_at = params.ipadapter_start_at;
-            ipa_config.end_at = params.ipadapter_end_at;
 
             ipadapter_ = std::make_unique<IPAdapter>(ipa_config);
 
@@ -540,39 +537,18 @@ std::vector<Image> SDCPPAdapter::generate(const GenerationParams& params) {
             LOG_WARN("IPAdapter initialization failed: %s", e.what());
         }
     }
-    // Pass IPAdapter tokens to sd_img_gen_params_t (for injection in sd.cpp)
-    gen_params.ipadapter_start_at = params.ipadapter_start_at;
-    gen_params.ipadapter_end_at   = params.ipadapter_end_at;
+    // Pass IPAdapter tokens to sd_img_gen_params_t (for UNet cross-attention injection)
     gen_params.ipadapter_unet_mode = !params.ipadapter_unet_weights_path.empty();
     gen_params.ipadapter_unet_weights_path = params.ipadapter_unet_weights_path.empty() ? nullptr
                                                                                        : params.ipadapter_unet_weights_path.c_str();
     if (ipadapter_ && ipadapter_->is_loaded() && !ipadapter_->get_image_tokens().empty()) {
         const auto& tokens = ipadapter_->get_image_tokens();
         int n_tokens = ipadapter_->get_num_tokens();
-        // UNet IPAdapter expects 2048-dim tokens; DiT projection may have padded to 2560.
-        // Slice back to 2048 if needed.
-        if (gen_params.ipadapter_unet_mode && tokens.size() == (size_t)n_tokens * 2560) {
-            static thread_local std::vector<float> unet_tokens;
-            unet_tokens.resize((size_t)n_tokens * 2048);
-            for (int i = 0; i < n_tokens; ++i) {
-                std::copy(tokens.begin() + i * 2560,
-                          tokens.begin() + i * 2560 + 2048,
-                          unet_tokens.begin() + i * 2048);
-            }
-            gen_params.ipadapter_tokens    = unet_tokens.data();
-            gen_params.ipadapter_num_tokens = n_tokens;
-            std::cout << "  IPAdapter: passing " << unet_tokens.size()
-                      << " floats (" << n_tokens << " tokens x 2048-dim) to sd.cpp UNet"
-                      << std::endl;
-        } else {
-            gen_params.ipadapter_tokens    = tokens.data();
-            gen_params.ipadapter_num_tokens = n_tokens;
-            std::cout << "  IPAdapter: passing " << tokens.size()
-                      << " floats (" << n_tokens << " tokens) to sd.cpp"
-                      << " for injection, start_at=" << params.ipadapter_start_at
-                      << " end_at=" << params.ipadapter_end_at
-                      << " unet_mode=" << gen_params.ipadapter_unet_mode << std::endl;
-        }
+        gen_params.ipadapter_tokens     = tokens.data();
+        gen_params.ipadapter_num_tokens = n_tokens;
+        std::cout << "  IPAdapter: passing " << tokens.size()
+                  << " floats (" << n_tokens << " tokens x 2048-dim) to sd.cpp UNet"
+                  << std::endl;
         gen_params.ipadapter_weight    = params.ipadapter_weight;
     } else {
         gen_params.ipadapter_tokens    = nullptr;

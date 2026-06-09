@@ -140,21 +140,23 @@
 
 ### Phase 9: IPAdapter & 图像条件
 
-#### Task 9.1: IPAdapter（图像提示词）⏳
-- [x] CLI 参数占位
+#### Task 9.1: IPAdapter（图像提示词）✅
+- [x] CLI 参数完整支持（--ipadapter, --ipadapter-model, --ipadapter-clip-vision, --ipadapter-unet-weights, --ipadapter-image, --ipadapter-weight）
 - [x] ONNX Runtime GPU 安装（/data/venv/）
-- [x] CLIP Vision ONNX 转换（clip_vision.onnx + .data）
-- [x] Python 端到端推理验证（demo.png → CLIP Vision → IPAdapter MLP ✅）
-- [x] ipadapter.cpp 重写：ONNX Runtime (Ort::Session) 替代 OpenCV DNN + libtorch
-- [x] CLIP Vision ONNX Runtime C++ 推理 ✅（2.4GB → [1, 1024], ~1s）
-- [x] IPAdapter MLP ONNX Runtime C++ 推理 ✅（5.4MB → [1, 768], instant）
+- [x] CLIP Vision ONNX 转换（hidden states: clip_vision_vit_h_hidden.onnx [1,257,1280]）
+- [x] Python 端到端推理验证 ✅
+- [x] ipadapter.cpp 重写：ONNX Runtime (Ort::Session) + PIMPL 模式
+- [x] CLIP Vision ONNX Runtime C++ 推理 ✅（2.4GB → [1,257,1280], ~1s）
+- [x] SDXL Plus Perceiver Resampler ONNX Runtime C++ 推理 ✅（257×1280→16×2048）
 - [x] 接入 sdcpp_adapter.cpp 生成流程（--ipadapter 触发的完整推理管线）
-- [ ] Linear 投影层 768→2560 (cap_feat_dim) — 将 IPAdapter tokens 投影到 Z-Image context 空间
-- [ ] 条件编码注入（修改 sd.cpp 的 generate_image 或将 image tokens 拼接到 SDCondition.c_crossattn）
-- [ ] 生成流程集成（在 generate_image() 调用前注入修改后的 context）
+- [x] UNet cross-attention 注入：70 层 to_k_ip/to_v_ip 权重分配 ✅
+- [x] sd.cpp 集成：load_ipadapter_unet_weights() + assign_ipadapter_unet_weights() ✅
+- [x] 端到端验证通过：生成统计差异明显，运行无崩溃 ✅
+- [x] img3.sh 集成：一行命令 `--ipadapter` 启用
+- **路径**: SDXL UNet cross-attention k/v 注入（Z-Image DiT 路径已废弃）
 - **优先级**: P2
 - **难度**: 高
-- **状态**: ⏳ Phase 1-2 完成，Phase 3 待开始（条件编码注入）（2026-06-06）
+- **状态**: ✅ 已完成（SDXL UNet 路径，2026-06-07）
 
 #### Task 8.2: IPAdapter FaceID
 - [ ] 人脸识别特征提取
@@ -770,7 +772,7 @@
 | | VAELoader | ✅ (--vae) | - |
 | | CLIPLoader | ✅ (--llm) | - |
 | | ControlNetLoader | ⏳ | 7.1 |
-| | IPAdapterLoader | ⏳ | 8.1 |
+| | IPAdapterLoader | ✅ | 9.1 |
 | | UpscaleModelLoader | ✅ | - |
 | | LoraLoader | ⏳ | 6.2 |
 | **条件编码** | CLIPTextEncode | ✅ | - |
@@ -793,7 +795,7 @@
 | | ImageComposite | ✅ | 10.2 |
 | **控制** | ControlNetApply | ✅ | 7.1 |
 | | ControlNetApplyAdvanced | ⏳ | 7.1 |
-| | IPAdapterApply | ⏳ | 8.1 |
+| | IPAdapterApply | ✅ | 9.1 |
 | | T2IAdapterApply | ⏳ | 7.2 |
 | **增强** | HiResFix | ✅ | - |
 | | FreeU | ✅ | 9.3 |

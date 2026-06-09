@@ -11,11 +11,8 @@ namespace myimg {
 struct IPAdapterConfig {
     std::string model_path;          // IPAdapter 模型路径 (.onnx)
     std::string clip_vision_path;    // CLIP Vision 模型路径 (.onnx)
-    std::string projection_path;     // 线性投影层 768→2560 (.onnx), 可选
     std::string image_path;          // 参考图像路径
     float weight = 1.0f;             // 注入权重 (0.0-1.0)
-    float start_at = 0.0f;           // 开始注入的步数比例 (0.0-1.0)
-    float end_at = 1.0f;             // 结束注入的步数比例 (0.0-1.0)
 };
 
 class IPAdapter {

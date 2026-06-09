@@ -6,7 +6,9 @@
 >
 > **理念**：将 ComfyUI 的 Python 逻辑直接翻译为 C++，保持行为一致。
 >
-> **第一阶段目标**：优先支持 **Z-Image** 模型（GGUF 格式），其他模型后续扩展。
+> **当前支持**：**SDXL Base 1.0**（safetensors，完整 checkpoint） + **Z-Image** 模型（GGUF 格式）。
+> 
+> **IPAdapter**：已实现 SDXL UNet 交叉注意力注入（cross-attention k/v），Z-Image DiT context concat 路径已废弃。
 
 ---
 
@@ -51,8 +53,8 @@
    - **libtorch**：负责图像处理、张量操作、高级功能扩展（IPAdapter、ControlNet 等）
 3. **适配层隔离**：通过 `SDCPPAdapter` 封装 sd.cpp 的 C API，升级时只需修改适配层
 4. **精准复刻**：直接翻译 ComfyUI Python 逻辑到 C++
-5. **支持 GGUF**：通过 sd.cpp 原生支持 GGUF 格式（第一阶段：Z-Image）
-6. **格式可扩展**：后续支持 Safetensors/CKPT（第二阶段+）
+5. **支持多格式**：SDXL（safetensors，完整 checkpoint）、Z-Image（GGUF）
+6. **格式可扩展**：后续支持更多 Safetensors/CKPT 模型
 
 ---
 
@@ -276,6 +278,7 @@ public:
 - 翻译 `transformers.CLIPTextModel`
 - 支持 CLIP Skip（返回中间层）
 - 支持 SDXL 双 CLIP（CLIP-L + CLIP-G）
+- **SDXL 支持**：支持 CLIP-L + CLIP-G 双文本编码器（SDXL Base 使用）
 - **Z-Image 支持**：支持 Qwen 文本编码器（Z-Image 使用 Qwen 而非 CLIP）
 
 ### 4.6 采样器基类
@@ -517,31 +520,47 @@ private:
 
 ## 7. 模型格式支持
 
-### 7.1 Phase 1：GGUF 格式（Z-Image）
+### 7.1 已支持模型
 
-**为什么先支持 GGUF？**
-- Z-Image 模型已有 GGUF 版本（`z_image_turbo-Q5_K_M.gguf`）
-- 经过验证，该模型在 RTX 3080 10GB 上运行良好
+**SDXL Base 1.0（safetensors，推荐）**
+- 完整 checkpoint（内置 VAE）
+- 需要 CLIP-L + CLIP-G 双文本编码器
+- 支持 FreeU、SAG、HiRes Fix、VAE Tiling
+- 支持 IPAdapter UNet 交叉注意力注入
+- 2560×1440 生成稳定（RTX 3080 20GB）
+
+**Z-Image（GGUF，维护中）**
+- `z_image_turbo-Q5_K_M.gguf`
 - 量化格式减少显存占用
+- 支持基础 txt2img 和 HiRes Fix
+- ⚠️ IPAdapter DiT context concat 路径已废弃
 
-**GGUF 加载流程**：
+### 7.2 模型加载流程
+
+**SDXL Base（safetensors）**：
 ```cpp
-// 1. 读取 GGUF 文件（使用 GGML 库解析文件格式）
-auto gguf_data = GGUFLoder::load("z_image_turbo-Q5_K_M.gguf");
+// sd.cpp 原生支持 safetensors
+sd_ctx_params_t params;
+params.diffusion_model_path = "sd_xl_base_1.0.safetensors";
+params.clip_l_path = "clip_l.safetensors";
+params.clip_g_path = "clip_g.safetensors";
+// VAE 可选：使用 checkpoint 内置 VAE
+sd_ctx_t* ctx = new_sd_ctx(params);
+```
 
-// 2. 反量化权重
+**Z-Image（GGUF）**：
+```cpp
+auto gguf_data = GGUFLoder::load("z_image_turbo-Q5_K_M.gguf");
 for (auto& [name, tensor] : gguf_data) {
     if (tensor.is_quantized()) {
         tensor = tensor.dequantize();  // Q4_K/Q5_K -> FP16
     }
 }
-
-// 3. 加载到 libtorch 模块
 auto model = std::make_shared<UNetModel>();
 model->load_from_state_dict(gguf_data);
 ```
 
-### 7.2 Phase 2+：Safetensors / CKPT
+### 7.3 未来扩展：更多 Safetensors / CKPT
 
 **后续支持**：
 - Safetensors：ComfyUI 原生格式
@@ -604,103 +623,117 @@ public:
 
 ## 9. 实现路线图
 
-### Phase 1：Z-Image 基础出图（Week 1-3）
+### Phase 1：基础出图 ✅
 
-**目标**：命令行生成一张 Z-Image 图片
+**SDXL Base 1.0（已完成）**
+- ✅ CMake + ONNX Runtime 配置
+- ✅ Safetensors 完整 checkpoint 加载
+- ✅ CLIP-L + CLIP-G 双文本编码器
+- ✅ SDXL UNet 前向传播
+- ✅ 内置 VAE 编解码
+- ✅ Euler / DPM++ 采样器
+- ✅ 图像保存
+- ✅ **里程碑**：`./myimg-cli --diffusion-model sd_xl_base_1.0.safetensors --clip-l clip_l.safetensors --clip-g clip_g.safetensors -p "a cat" -o cat.png`
 
-- [ ] CMake + libtorch 配置
-- [ ] GGUF 加载器（读取 Z-Image 权重）
-- [ ] 反量化为 libtorch 张量
-- [ ] Qwen 文本编码器（Z-Image 使用 Qwen 而非 CLIP）
-- [ ] Flux UNet 前向传播
-- [ ] AE VAE 编解码
-- [ ] Euler 采样器
-- [ ] 图像保存
-- [ ] **里程碑**：`./sd-workflow --model z_image.gguf --prompt "a cat" --output cat.png`
+**Z-Image（已完成，维护中）**
+- ✅ GGUF 加载器
+- ✅ Qwen 文本编码器
+- ✅ Flux UNet 前向传播
+- ✅ AE VAE 编解码
 
-### Phase 2：HiRes Fix（Week 4-5）
+### Phase 2：增强管线 ✅
 
-- [ ] Latent 空间放大
-- [ ] 二阶段重采样
-- [ ] 2560x1440 生成（和当前 img1.sh 效果一致）
+- ✅ HiRes Fix（Latent 空间放大 + 二阶段重采样）
+- ✅ 2560×1440 生成
+- ✅ FreeU（UNet 跳跃连接频域滤波）
+- ✅ SAG（Self-Attention Guidance）
+- ✅ VAE Tiling（大分辨率安全解码）
 
-### Phase 3：高级功能（Week 6-8）
+### Phase 3：IPAdapter ✅
+
+- ✅ CLIP Vision 模型加载（ONNX Runtime）
+- ✅ 图像编码（CLIP Vision ViT-H hidden states）
+- ✅ SDXL Plus MLP（257×1280 → 16×2048）
+- ✅ UNet 交叉注意力 k/v 注入（70 层权重分配）
+- ✅ **里程碑**：`--ipadapter --ipadapter-model ipadapter_sdxl_plus_v3.onnx --ipadapter-clip-vision clip_vision_vit_h_hidden.onnx --ipadapter-unet-weights ipadapter_unet_weights.bin --ipadapter-image ref.png`
+- ❌ ~~Z-Image DiT context concat 路径~~（已废弃，效果不佳）
+
+### Phase 4：高级功能（开发中）
 
 - [ ] img2img（带 denoise strength）
-- [ ] 额外采样器（DPM++）
 - [ ] LoRA 加载
+- [ ] ControlNet（模型加载 + 预处理器）
+- [ ] Regional Prompting
+- [ ] T2I-Adapter
 
-### Phase 4：IPAdapter（Week 9-10）⭐ 优先级
+### Phase 5：多模型扩展（未来）
 
-- [ ] CLIP Vision 模型加载
-- [ ] 图像编码（CLIP Vision）
-- [ ] 图像投影层
-- [ ] UNet 注意力注入
-- [ ] IPAdapterApply 节点
-- [ ] **里程碑**：参考图人脸一致性
-
-### Phase 5：ControlNet（Week 11-12）
-
-- [ ] ControlNet 模型加载
-- [ ] 预处理器（Canny、Depth）
-- [ ] ControlNetApply 节点
-
-### Phase 6：多模型支持（Week 13-16）
-
-- [ ] Safetensors 加载器
-- [ ] SDXL 支持
 - [ ] SD3 支持
-- [ ] 其他 Flux 变体
+- [ ] 更多 Flux 变体
+- [ ] 其他 SDXL 微调模型
 
 ---
 
 ## 10. 命令行界面
 
 ```bash
-# 基础 Z-Image 出图
-./sd-workflow \
-  --model z_image_turbo-Q5_K_M.gguf \
-  --prompt "portrait of a woman" \
-  --negative-prompt "bad quality" \
-  --width 1024 --height 1024 \
-  --steps 20 --cfg 1.0 \
-  --output portrait.png
+# 基础 SDXL 出图
+./myimg-cli \
+  --diffusion-model sd_xl_base_1.0.safetensors \
+  --clip-l clip_l.safetensors \
+  --clip-g clip_g.safetensors \
+  -p "portrait of a woman" \
+  -n "bad quality" \
+  -W 1280 -H 720 \
+  --steps 25 --cfg-scale 7.0 \
+  -o portrait.png
 
-# 带 IPAdapter（参考图）
-./sd-workflow \
-  --model z_image_turbo-Q5_K_M.gguf \
-  --prompt "portrait" \
-  --ipadapter-model ipadapter_flux.gguf \
+# 带 IPAdapter（SDXL UNet 交叉注意力注入）
+./myimg-cli \
+  --diffusion-model sd_xl_base_1.0.safetensors \
+  --clip-l clip_l.safetensors \
+  --clip-g clip_g.safetensors \
+  -p "portrait" \
+  --ipadapter \
+  --ipadapter-model ipadapter_sdxl_plus_v3.onnx \
+  --ipadapter-clip-vision clip_vision_vit_h_hidden.onnx \
+  --ipadapter-unet-weights ipadapter_unet_weights.bin \
   --ipadapter-image reference_face.png \
   --ipadapter-weight 0.8 \
-  --output portrait_with_face.png
+  -o portrait_with_face.png
+
+# 带 HiRes Fix + FreeU + SAG
+./myimg-cli \
+  --diffusion-model sd_xl_base_1.0.safetensors \
+  --clip-l clip_l.safetensors \
+  --clip-g clip_g.safetensors \
+  -p "landscape" \
+  -W 1280 -H 720 \
+  --hires --hires-width 2560 --hires-height 1440 \
+  --freeu --freeu-b1 1.05 --freeu-b2 1.1 \
+  --sag \
+  -o landscape_2k.png
 
 # JSON 工作流
-./sd-workflow --workflow workflow.json
-
-# 带 HiRes Fix
-./sd-workflow \
-  --model z_image_turbo-Q5_K_M.gguf \
-  --prompt "landscape" \
-  --width 1280 --height 720 \
-  --hires --hires-width 2560 --hires-height 1440 \
-  --output landscape_2k.png
+./myimg-cli --workflow workflow.json
 ```
 
 ---
 
 ## 11. 与现有项目对比
 
-| 特性 | ComfyUI (Python) | stable-diffusion.cpp (GGML) | my-img (libtorch) |
+| 特性 | ComfyUI (Python) | stable-diffusion.cpp (GGML) | my-img (C++) |
 |---------|-----------------|----------------------------|-------------------|
 | **Python 依赖** | ✅ 需要 | ❌ 不需要 | ❌ 不需要 |
-| **模型格式** | Safetensors | GGUF | **GGUF + Safetensors** |
-| **张量框架** | PyTorch | GGML | **libtorch** |
-| **IPAdapter** | ✅ 可用 | ❌ 不支持 | 🚧 开发中 |
+| **模型格式** | Safetensors | GGUF | **Safetensors + GGUF** |
+| **张量框架** | PyTorch | GGML | **GGML（sd.cpp）** |
+| **SDXL Base** | ✅ 可用 | ✅ 可用 | ✅ **已支持** |
+| **IPAdapter** | ✅ 可用 | ❌ 不支持 | ✅ **SDXL UNet 已支持** |
+| **FreeU + SAG** | ✅ 可用 | ⚠️ 基础 | ✅ **已支持** |
+| **HiRes Fix** | ✅ 可用 | ✅ 可用 | ✅ **已支持** |
 | **ControlNet** | ✅ 完整 | ⚠️ 基础 | 🚧 开发中 |
 | **部署** | Docker 10GB+ | 单文件 ~50MB | 单文件 ~100MB |
-| **Z-Image 支持** | ✅ 可用 | ✅ 可用 | **Phase 1 目标** |
-| **HiRes Fix** | ✅ 可用 | ✅ 可用 | **Phase 2 目标** |
+| **Z-Image** | ✅ 可用 | ✅ 可用 | ✅ 已支持（维护中） |
 
 ---
 
@@ -718,9 +751,10 @@ public:
 - **libtorch 优势**：完整 PyTorch 生态，用于图像处理、张量操作、高级功能
 
 **最终方案**：
-- **sd.cpp**：模型加载、文本编码、采样、基础推理（成熟稳定）
-- **libtorch**：图像处理、张量操作、IPAdapter、ControlNet 等扩展功能
-- **适配层**：隔离 sd.cpp API，升级时只需修改适配层
+- **sd.cpp（GGML）**：模型加载、文本编码、采样、VAE 编解码、基础推理（成熟稳定）
+- **ONNX Runtime**：CLIP Vision 图像编码、IPAdapter MLP 推理
+- **OpenCV**：图像预处理和后处理
+- **适配层**：隔离 sd.cpp C API，升级时只需修改适配层
 
 ### 12.2 为什么保留 GGUF 格式？
 
@@ -803,7 +837,7 @@ public:
 | **Regional Prompting** | 分区提示词，不同区域不同 prompt | P2 | 修改 cross-attention mask，按区域注入 conditioning |
 | **T2I-Adapter** | 轻量级条件控制（比 ControlNet 更省显存） | P2 | 独立 Adapter 分支，注入到 UNet |
 | **Style Transfer** | 神经风格迁移（快速风格化） | P2 | 接入 AdaIN/WCT 或专用风格模型 |
-| **IPAdapter** | 图像提示词，风格/内容迁移 | P2 | 需要 CLIP Vision + IPAdapter 模型 |
+| **IPAdapter** | 图像提示词，风格/内容迁移 | ✅ **已完成** | SDXL UNet 交叉注意力注入（CLIP Vision + IPAdapter MLP + 权重分配） |
 | **InstantID** | 人脸 ID 保持，无需训练 | P3 | 需要 InsightFace + ID 嵌入 |
 | **PhotoMaker** | 个性化生成，多张参考图 | P3 | 需要 PhotoMaker 模型 + ID 编码 |
 
@@ -1176,17 +1210,19 @@ const std::vector<QARule> kEcommerceRules = {
 
 ## 20. 总结
 
-**my-img** 是纯 C++ 版 ComfyUI，使用 sd.cpp + libtorch 混合架构：
+**my-img** 是纯 C++ 版 ComfyUI，使用 sd.cpp（GGML）作为核心推理后端：
 
 - **零 Python 依赖**
-- **支持 GGUF 格式**（Phase 1：Z-Image）
-- **sd.cpp（GGML）负责核心推理**，libtorch 负责扩展功能与图像处理
-- **直接翻译 ComfyUI 逻辑**
+- **支持 SDXL Base 1.0**（safetensors，完整 checkpoint，推荐）
+- **支持 Z-Image**（GGUF，维护中）
+- **sd.cpp（GGML）负责全部推理**：模型加载、文本编码、采样、VAE 编解码
+- **ONNX Runtime 负责图像编码**：CLIP Vision + IPAdapter MLP
+- **完整增强管线**：FreeU、SAG、HiRes Fix、VAE Tiling
+- **IPAdapter**：SDXL UNet 交叉注意力注入（70 层 k/v 权重分配）
 - **电商/摄影专用工具**（背景移除、智能裁剪、批量水印、自动质检）
-- **后续扩展 Safetensors/CKPT + Workflow JSON**
 
 **核心价值**：保留 ComfyUI 的生成能力 + 摄影后期的专业工具，去除 Python 的痛苦。
 
-**第一个里程碑**：命令行生成一张 Z-Image 512x512 图片，与 stable-diffusion.cpp 输出一致。
+**当前里程碑**：SDXL Base 1.0 生成 2560×1440 图像，集成 FreeU + SAG + HiRes Fix + IPAdapter，~2.5 分钟（RTX 3080 20GB）。
 
 **终极目标**：AI 图像生成与自动化后期处理的一站式工具，摄影师和电商设计师的生产力利器。

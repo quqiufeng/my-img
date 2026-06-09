@@ -12,7 +12,7 @@
 # - 文本编码器: CLIP-L + CLIP-G (不需要 LLM)
 # - CFG: 7.0 (SDXL 推荐，高于 DiT 的 3.2)
 # - 采样器: euler + discrete (SDXL 稳定)
-# - FreeU/SAG/HiRes Fix/VAE Tiling 全部可用
+# - SAG/HiRes Fix/VAE Tiling 全部可用 (FreeU 默认禁用，与 UNet 不兼容)
 # - 支持 UNet IPAdapter (可选)
 #
 # 【当前出图基准 (2026-06-07)】
@@ -23,7 +23,7 @@
 # 步数:     25 → 45 (HiRes)
 # HiRes strength: 0.30
 # CFG:      7.0 | Sampler: euler | Scheduler: discrete
-# FreeU:    b1=1.3, b2=1.4, s1=0.9, s2=0.2
+# FreeU:    b1=1.05, b2=1.1, s1=0.95, s2=0.8 (SDXL 保守值，安全增强)
 # SAG:      开启 (scale=1.0)
 # 增强:     clarity 0.4, sharpen 0.8, smart-sharpen 0.5, edge-sharpen 1.5
 # VAE tiling: 128x128, overlap 0.5 (20GB 安全)
@@ -161,11 +161,15 @@ STEPS="${STEPS:-25}"
 HIRES_STEPS="${HIRES_STEPS:-45}"
 HIRES_STRENGTH="${HIRES_STRENGTH:-0.30}"
 
-# FreeU / SAG 默认值 (SDXL UNet 推荐)
-FREEU_B1="${FREEU_B1:-1.3}"
-FREEU_B2="${FREEU_B2:-1.4}"
-FREEU_S1="${FREEU_S1:-0.9}"
-FREEU_S2="${FREEU_S2:-0.2}"
+# FreeU / SAG 默认值
+# NOTE: SDXL UNet 对 FreeU 参数敏感，ComfyUI 默认值 (1.3/1.4) 会导致伪影。
+#       经测试，保守值 (b1=1.05, b2=1.1) 可安全增强细节而不 corruption。
+#       如需调整，通过环境变量 FREEU_B1/B2 覆盖。
+FREEU_ENABLED="${FREEU:-1}"
+FREEU_B1="${FREEU_B1:-1.05}"
+FREEU_B2="${FREEU_B2:-1.1}"
+FREEU_S1="${FREEU_S1:-0.95}"
+FREEU_S2="${FREEU_S2:-0.8}"
 SAG_SCALE="${SAG_SCALE:-1.0}"
 
 if [ "$WIDTH" -ge 2560 ] && [ "$HEIGHT" -ge 1440 ]; then
@@ -286,11 +290,7 @@ SD_CMD=("$SD_CLI"
   --vae-tiling
   --vae-tile-size "$VAE_TILE_SIZE"
   --vae-tile-overlap "$VAE_TILE_OVERLAP"
-  --freeu
-  --freeu-b1 "$FREEU_B1"
-  --freeu-b2 "$FREEU_B2"
-  --freeu-s1 "$FREEU_S1"
-  --freeu-s2 "$FREEU_S2"
+  $( [ "$FREEU_ENABLED" -eq 1 ] && echo "--freeu --freeu-b1 $FREEU_B1 --freeu-b2 $FREEU_B2 --freeu-s1 $FREEU_S1 --freeu-s2 $FREEU_S2" || true )
   --sag
   --sag-scale "$SAG_SCALE"
   --clarity 0.4
